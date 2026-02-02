@@ -1,0 +1,90 @@
+# Default configuration for Habitat Pipeline
+
+# Logging configuration
+logging:
+  level: INFO
+  file: habitat_pipeline.log
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# Data ingestion settings
+ingestion:
+  supported_formats:
+    - nwb
+    - open_ephys
+    - intan
+    - binary
+  default_sampling_rate: 30000.0
+  default_num_channels: 64
+
+# Preprocessing settings
+preprocessing:
+  filters:
+    bandpass:
+      enabled: true
+      lowcut: 300
+      highcut: 6000
+      order: 4
+    notch:
+      enabled: true
+      freq: 60  # Line noise frequency (50 or 60 Hz)
+      quality: 30
+  artifacts:
+    threshold_std: 5.0
+    window_size: 1.0
+    removal_method: interpolate
+  referencing:
+    method: car  # car, median, or local
+    exclude_channels: []
+
+# Quality control settings
+quality_control:
+  metrics:
+    snr_threshold: 3.0
+    noise_threshold: 100.0
+    drift_threshold: 50.0
+    correlation_threshold: 0.95
+  report_format: both  # json, text, or both
+
+# Spike sorting settings
+spike_sorting:
+  detection:
+    threshold_method: mad  # mad, std, or absolute
+    threshold_factor: 4.0
+    peak_sign: negative  # negative, positive, or both
+    min_isi_ms: 1.0
+  features:
+    method: pca  # pca, peak, or combined
+    n_components: 3
+  clustering:
+    method: kmeans  # kmeans or gmm
+    n_clusters: null  # null for auto-detection
+  waveform:
+    window_before_ms: 1.0
+    window_after_ms: 2.0
+
+# Synchronization settings
+synchronization:
+  reference_stream: ephys
+  max_drift_ms: 1.0
+  max_jitter_ms: 0.5
+  interpolation_method: linear  # linear, cubic, or nearest
+
+# Multi-animal settings
+multi_animal:
+  n_jobs: -1  # Number of parallel jobs (-1 for all cores)
+  backend: loky  # loky, multiprocessing, or threading
+
+# Visualization settings
+visualization:
+  style: whitegrid
+  figure_size:
+    width: 12
+    height: 6
+  dpi: 300
+  output_format: png  # png, pdf, or svg
+
+# Output settings
+output:
+  base_dir: ./output
+  save_intermediate: true
+  compression: gzip

@@ -1,7 +1,7 @@
 """Spike sorting and clustering."""
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from sklearn.decomposition import PCA
@@ -59,13 +59,16 @@ class SpikeSorter:
         if len(waveforms) == 0:
             return np.array([]).reshape(0, self.n_features)
         
+        # Adjust n_features if needed
+        n_components = min(self.n_features, waveforms.shape[0], waveforms.shape[1])
+        
         # Initialize PCA
-        self.pca = PCA(n_components=self.n_features)
+        self.pca = PCA(n_components=n_components)
         
         # Extract features
         features = self.pca.fit_transform(waveforms)
         
-        logger.info(f"Extracted {self.n_features} PCA features from {len(waveforms)} waveforms")
+        logger.info(f"Extracted {n_components} PCA features from {len(waveforms)} waveforms")
         
         return features
     
@@ -92,6 +95,10 @@ class SpikeSorter:
             # Simple heuristic: sqrt(n_spikes/2)
             n_clusters = max(2, int(np.sqrt(len(features) / 2)))
             n_clusters = min(n_clusters, 10)  # Cap at 10
+        
+        # Cannot cluster if n_samples < n_clusters
+        if len(features) < n_clusters:
+            n_clusters = max(1, len(features))
         
         logger.info(f"Clustering {len(features)} spikes into {n_clusters} clusters using {self.method}")
         

@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # Main pipeline service
+  habitat_pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: habitat_pipeline:latest
+    container_name: habitat_pipeline
+    volumes:
+      - ./data:/data
+      - ./output:/output
+      - ./config:/app/config
+    environment:
+      - HABITAT_PIPELINE_CONFIG=/app/config/default_config.yaml
+      - PYTHONUNBUFFERED=1
+    command: python examples/basic_pipeline.py
+    networks:
+      - habitat_network
+
+  # Jupyter notebook service for interactive analysis
+  jupyter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: habitat_pipeline:latest
+    container_name: habitat_jupyter
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./data:/data
+      - ./output:/output
+      - ./config:/app/config
+      - ./examples:/app/examples
+      - ./notebooks:/app/notebooks
+    environment:
+      - HABITAT_PIPELINE_CONFIG=/app/config/default_config.yaml
+      - JUPYTER_ENABLE_LAB=yes
+    command: >
+      bash -c "pip install jupyter jupyterlab &&
+               jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root
+               --NotebookApp.token='' --NotebookApp.password=''"
+    networks:
+      - habitat_network
+
+networks:
+  habitat_network:
+    driver: bridge
+
+volumes:
+  data:
+  output:

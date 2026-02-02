@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "habitat-pipeline"
+version = "0.1.0"
+description = "Integrated Multi-Animal Electrophysiology and Behavior Analysis Pipeline"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Habitat Pipeline Contributors"}
+]
+keywords = ["neuroscience", "electrophysiology", "multi-animal", "spike-sorting", "behavior"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+dependencies = [
+    "numpy>=1.20.0",
+    "scipy>=1.7.0",
+    "pandas>=1.3.0",
+    "h5py>=3.0.0",
+    "pyyaml>=5.4.0",
+    "tqdm>=4.60.0",
+    "joblib>=1.0.0",
+    "scikit-learn>=1.0.0",
+    "matplotlib>=3.4.0",
+    "seaborn>=0.11.0",
+]
+
+[project.optional-dependencies]
+nwb = [
+    "pynwb>=2.0.0",
+    "hdmf>=3.0.0",
+]
+spike_sorting = [
+    "spikeinterface>=0.97.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=3.0.0",
+    "black>=22.0.0",
+    "flake8>=4.0.0",
+    "mypy>=0.950",
+]
+all = [
+    "habitat-pipeline[nwb,spike_sorting,dev]",
+]
+
+[project.urls]
+Homepage = "https://github.com/M-Proskurin/habitat_pipeline"
+Repository = "https://github.com/M-Proskurin/habitat_pipeline"
+Documentation = "https://github.com/M-Proskurin/habitat_pipeline#readme"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["habitat_pipeline*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --cov=habitat_pipeline --cov-report=html --cov-report=term"
+
+[tool.black]
+line-length = 100
+target-version = ["py38", "py39", "py310", "py311"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true

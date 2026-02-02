@@ -71,7 +71,6 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --cov=habitat_pipeline --cov-report=html --cov-report=term"
 
 [tool.black]
 line-length = 100

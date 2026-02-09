@@ -102,7 +102,7 @@ class KilosortData:
         # Optional files with their default handling
         optional_files = {
             #'amplitudes.npy': 'amplitudes',
-            #'templates.npy': 'templates',
+            'templates.npy': 'templates',
             'channel_map.npy': 'channel_map',
             'channel_positions.npy': 'channel_positions',
             #'pc_features.npy': 'pc_features',
@@ -210,7 +210,7 @@ class KilosortData:
         Calculate and cache firing rates for all clusters.
         
         Returns:
-            Series with cluster_id as index and firing rate (Hz) as values
+            Series with cluster_id as index and firing rate (Hz) as values, sorted by cluster_id
         """
         if self._firing_rates is None:
             if self.spike_times is None or self.spike_clusters is None:
@@ -220,6 +220,8 @@ class KilosortData:
             cluster_counts = pd.Series(self.spike_clusters).value_counts()
             self._firing_rates = cluster_counts / duration
             self._firing_rates.name = 'firing_rate_hz'
+            # Sort by cluster ID
+            self._firing_rates = self._firing_rates.sort_index()
         
         return self._firing_rates
     

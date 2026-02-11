@@ -37,7 +37,6 @@ def get_kilosort_path(animal_id: str, session_id: str, config_path: Optional[str
     Example:
         >>> path = get_kilosort_path("613", "20251210")
         >>> print(path)
-        \\nearline\karpova\TervoLab\data\Electrophysiology\Raw\rat_city\cohort7\20251210_110059.rec\rat613\20251210_110059_merged.kilosort\kilosort4
     """
     # Determine config file path
     if config_path is None:
@@ -87,7 +86,6 @@ def get_kilosort_path(animal_id: str, session_id: str, config_path: Optional[str
     
     return kilosort_path
 
-
 def get_dio_path(animal_id: str, session_id: str, dio_channel: int = 1, config_path: Optional[str] = None) -> Path:
     """
     Construct the path to a DIO file based on animal_id, session_id, and DIO channel.
@@ -113,7 +111,6 @@ def get_dio_path(animal_id: str, session_id: str, dio_channel: int = 1, config_p
     Example:
         >>> path = get_dio_path("613", "20251210", 1)
         >>> print(path)
-        \\nearline\karpova\TervoLab\data\Electrophysiology\Raw\rat_city\cohort7\20251210_110059.rec\rat613\20251210_110059_merged.DIO\20251210_110059_merged.dio_Controller_Din1.dat
     """
     # Determine config file path
     if config_path is None:
@@ -162,6 +159,57 @@ def get_dio_path(animal_id: str, session_id: str, dio_channel: int = 1, config_p
     dio_path = animal_dir / f"{full_session_id}_merged.DIO" / f"{full_session_id}_merged.dio_{dio_channel_str}.dat"
     
     return dio_path
+
+
+def get_pulse_log_path(config_path: Optional[str] = None) -> Path:
+    """
+    Get the path to the pulse log file.
+    
+    The function reads the video base path from the configuration file and constructs
+    the path to the pulse_log.txt file.
+    
+    Args:
+        config_path: Optional path to config file. If None, uses default location.
+        
+    Returns:
+        Path: Complete path to the pulse_log.txt file
+        
+    Raises:
+        FileNotFoundError: If the config file is not found
+        KeyError: If 'video' key is not found in the config file
+        
+    Example:
+        >>> path = get_pulse_log_path()
+        >>> print(path)
+        \\nearline\karpova\TervoLab\data\Videos\RatCityVideos\cohort7\pulse_log.txt
+    """
+    # Determine config file path
+    if config_path is None:
+        # Assume this file is in ingestion/ and config/ is a sibling directory
+        current_dir = Path(__file__).parent
+        config_path = current_dir.parent / "config" / "default_paths.json"
+    else:
+        config_path = Path(config_path)
+    
+    # Read the configuration file
+    try:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in configuration file: {e}")
+    
+    # Get the video base path
+    if 'video' not in config:
+        raise KeyError("'video' key not found in configuration file")
+    
+    video_base = Path(config['video'])
+    
+    # Construct the pulse log path
+    pulse_log_path = video_base / "pulse_log.txt"
+    
+    return pulse_log_path
 
 
 def get_animals_and_sessions(config_path: Optional[str] = None) -> pd.DataFrame:

@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from typing import Optional, List
 import glob
+import pandas as pd
 
 
 def get_kilosort_path(animal_id: str, session_id: str, config_path: Optional[str] = None) -> Path:
@@ -85,6 +86,166 @@ def get_kilosort_path(animal_id: str, session_id: str, config_path: Optional[str
     kilosort_path = animal_dir / f"{full_session_id}_merged.kilosort" / "kilosort4"
     
     return kilosort_path
+
+
+def get_dio_path(animal_id: str, session_id: str, dio_channel: int = 1, config_path: Optional[str] = None) -> Path:
+    """
+    Construct the path to a DIO file based on animal_id, session_id, and DIO channel.
+    
+    The function reads the ephys base path from the configuration file and constructs
+    the full path following the expected directory structure. Supports partial matching
+    for both animal_id and session_id (e.g., "613" will match "rat613").
+    
+    Args:
+        animal_id: Full or partial identifier for the animal (e.g., "613" or "rat613")
+        session_id: Full or partial identifier for the recording session (e.g., "20251210" or "20251210_110059")
+        dio_channel: DIO channel number (e.g., 1 for Controller_Din1, 2 for Controller_Din2, etc.)
+        config_path: Optional path to config file. If None, uses default location.
+        
+    Returns:
+        Path: Complete path to the DIO file
+        
+    Raises:
+        FileNotFoundError: If the config file is not found or no matching directories found
+        KeyError: If 'ephys' key is not found in the config file
+        ValueError: If multiple matches are found for the same partial string
+        
+    Example:
+        >>> path = get_dio_path("613", "20251210", 1)
+        >>> print(path)
+        \\nearline\karpova\TervoLab\data\Electrophysiology\Raw\rat_city\cohort7\20251210_110059.rec\rat613\20251210_110059_merged.DIO\20251210_110059_merged.dio_Controller_Din1.dat
+    """
+    # Determine config file path
+    if config_path is None:
+        # Assume this file is in ingestion/ and config/ is a sibling directory
+        current_dir = Path(__file__).parent
+        config_path = current_dir.parent / "config" / "default_paths.json"
+    else:
+        config_path = Path(config_path)
+    
+    # Read the configuration file
+    try:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in configuration file: {e}")
+    
+    # Get the ephys base path
+    if 'ephys' not in config:
+        raise KeyError("'ephys' key not found in configuration file")
+    
+    ephys_base = Path(config['ephys'])
+    
+    # Find matching session directory (session_id.rec format)
+    session_matches = _find_matching_directories(ephys_base, session_id, ".rec")
+    if not session_matches:
+        raise FileNotFoundError(f"No session directory found matching '{session_id}' in {ephys_base}")
+    if len(session_matches) > 1:
+        raise ValueError(f"Multiple session directories found matching '{session_id}': {session_matches}")
+    
+    session_dir = session_matches[0]
+    full_session_id = session_dir.name.replace('.rec', '')
+    
+    # Find matching animal directory within the session directory
+    animal_matches = _find_matching_directories(session_dir, animal_id)
+    if not animal_matches:
+        raise FileNotFoundError(f"No animal directory found matching '{animal_id}' in {session_dir}")
+    if len(animal_matches) > 1:
+        raise ValueError(f"Multiple animal directories found matching '{animal_id}': {animal_matches}")
+    
+    animal_dir = animal_matches[0]
+    
+    # Construct the DIO path with channel number
+    dio_channel_str = f"Controller_Din{dio_channel}"
+    dio_path = animal_dir / f"{full_session_id}_merged.DIO" / f"{full_session_id}_merged.dio_{dio_channel_str}.dat"
+    
+    return dio_path
+
+
+def get_animals_and_sessions(config_path: Optional[str] = None) -> pd.DataFrame:
+    """
+    Get a DataFrame of all animals and sessions from the ephys folder.
+    
+    This function scans the ephys directory specified in the config file and returns
+    a DataFrame containing all available animal-session combinations with their kilosort paths.
+    
+    Args:
+        config_path: Optional path to config file. If None, uses default location.
+        
+    Returns:
+        pd.DataFrame: DataFrame with columns:
+            - session: Session ID
+            - animal: Animal ID  
+            - kilosort_path: Path to the kilosort4 directory
+        
+    Raises:
+        FileNotFoundError: If the config file or ephys directory is not found
+        KeyError: If 'ephys' key is not found in the config file
+        
+    Example:
+        >>> df = get_animals_and_sessions()
+        >>> print(f"Found {len(df)} animal-session combinations")
+        >>> print(df.head())
+    """
+    # Determine config file path
+    if config_path is None:
+        current_dir = Path(__file__).parent
+        config_path = current_dir.parent / "config" / "default_paths.json"
+    else:
+        config_path = Path(config_path)
+    
+    # Read the configuration file
+    try:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in configuration file: {e}")
+    
+    # Get the ephys base path
+    if 'ephys' not in config:
+        raise KeyError("'ephys' key not found in configuration file")
+    
+    ephys_base = Path(config['ephys'])
+    
+    if not ephys_base.exists():
+        raise FileNotFoundError(f"Ephys directory not found: {ephys_base}")
+    
+    data_rows = []
+    
+    try:
+        # Iterate through all session directories (*.rec)
+        for session_dir in ephys_base.iterdir():
+            if session_dir.is_dir() and session_dir.name.endswith('.rec'):
+                session_id = session_dir.name.replace('.rec', '')
+                
+                # Look for animal directories within this session
+                for animal_dir in session_dir.iterdir():
+                    if animal_dir.is_dir() and animal_dir.name.startswith('rat'):
+                        animal_id = animal_dir.name
+                        
+                        # Construct kilosort path
+                        kilosort_path = animal_dir / f"{session_id}_merged.kilosort" / "kilosort4"
+                        
+                        # Add row to data
+                        data_rows.append({
+                            'session': session_id,
+                            'animal': animal_id,
+                            'kilosort_path': kilosort_path
+                        })
+    
+    except (PermissionError, OSError) as e:
+        raise RuntimeError(f"Error accessing ephys directory {ephys_base}: {e}")
+    
+    # Create DataFrame and sort by session and animal
+    df = pd.DataFrame(data_rows)
+    if not df.empty:
+        df = df.sort_values(['session', 'animal']).reset_index(drop=True)
+    
+    return df
 
 
 def _find_matching_directories(base_path: Path, partial_name: str, suffix: str = "") -> List[Path]:

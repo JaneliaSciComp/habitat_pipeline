@@ -17,7 +17,6 @@ class KilosortData:
         self.select_clusters()
         self.extract_cluster_properties()
     #    self.get_cluster_spikes_fast()
-    #    self.find_buggy_periods()
         self.metadata = {
             'data_path': str(self.KSfolder),
             'animal_id': self.animal_id,
@@ -247,111 +246,6 @@ class KilosortData:
         allSpikeSI_fast = [grouped.get(int(c), np.array([], dtype=spike_SI.dtype)) for c in ks_ids]
         self.allSpikeSI = allSpikeSI_fast
         return allSpikeSI_fast
-
-    def find_buggy_periods(self):
-        """Identify and return periods of buggy performance."""
-        def cluster_fr(c):
-            if len(c) < 2:
-                return np.nan
-            denom = c[-1] - c[0]
-            return (len(c) / denom * SAMPLE_RATE) if denom > 0 else np.nan
-
-        # Ensure we have per-cluster spike lists
-        allSpikeSI = getattr(self, 'allSpikeSI', None)
-        if allSpikeSI is None:
-            allSpikeSI = self.get_cluster_spikes_fast()
-            self.allSpikeSI = allSpikeSI
-
-        results = {}
-        # Compute firing rates (fr) if missing
-        fr = getattr(self, 'fr', None)
-        if fr is None or (hasattr(fr, '__len__') and len(fr) == 0):
-            fr = np.array([cluster_fr(c) for c in allSpikeSI], dtype=float)
-            self.fr = fr
-
-        # detect dropped packets in SampleIndices (diff > 1)
-        SampleIndices = self.read_timestamps()
-        i_drop_start = np.where(np.diff(SampleIndices) > 1)[0]
-        if i_drop_start.size > 0:
-            dropped_SI = np.vstack((SampleIndices[i_drop_start], SampleIndices[i_drop_start + 1])).T
-        else:
-            dropped_SI = np.empty((0, 2), dtype=SampleIndices.dtype)
-        results['dropped_SI'] = dropped_SI
-
-        # select units for stripe detection: ks_ids where fr < 50
-        # units with fr below 50Hz are selected. The ones that go above are prone to be artifacts
-        ks_ids = getattr(self, 'ks_ids', [])
-        fr_arr = np.asarray(fr)
-        ks_ids_array = np.asarray(ks_ids)
-        if ks_ids_array.size and fr_arr.size == ks_ids_array.size:
-            ks_ids_stripe_detection = ks_ids_array[fr_arr < 50].tolist()
-        else:
-            # fallback: try length-based mapping
-            ks_ids_stripe_detection = ks_ids_array[fr_arr < 50].tolist() if ks_ids_array.size else []
-        results['ks_ids_stripe_detection'] = ks_ids_stripe_detection
-
-        # decide the shortest stripe duration in ms based on sum of low-FR rates
-        sum_low_fr = float(fr_arr[fr_arr < 50].sum()) if fr_arr.size else 0.0
-        if sum_low_fr > 2000:
-            th = 10
-        elif sum_low_fr > 1000:
-            th = 30
-        else:
-            th = 50
-        results['th'] = th
-
-        # collect spike sample indices for detection of stripes
-        spike_SI = SampleIndices[self.spike_times]
-        # if len(ks_ids_stripe_detection) > 0:
-        #     mask = np.isin(self.spike_clusters, ks_ids_stripe_detection)
-        #     spikes_for_detection = spike_SI[mask]
-        # else:
-        #     spikes_for_detection = np.array([], dtype=spike_SI.dtype)
-        spikes_for_detection = spike_SI
-
-        # find recording stripes (large gaps) in spikes_for_detection
-        #  using the decided threshold th
-        diffs = np.diff(spikes_for_detection) / (SAMPLE_RATE / 1000.0)
-        i_stripes = np.where(diffs > th)[0]
-        stripe_SI = np.vstack((spikes_for_detection[i_stripes], spikes_for_detection[i_stripes + 1])).T
-        results['stripe_SI'] = stripe_SI
-
-        # merge stripe_SI and dropped_SI into non-overlapping intervals
-        # both arrays have shape (N,2) with [start, end]
-        combined = None
-        if dropped_SI.size and stripe_SI.size:
-            combined = np.vstack((dropped_SI, stripe_SI))
-        elif dropped_SI.size:
-            combined = dropped_SI.copy()
-        elif stripe_SI.size:
-            combined = stripe_SI.copy()
-        else:
-            combined = np.empty((0, 2), dtype=SampleIndices.dtype)
-
-        if combined.size == 0:
-            buggy_SI = combined
-        else:
-            # sort by start time
-            order = np.argsort(combined[:, 0])
-            rows = combined[order]
-            merged = []
-            cur_start, cur_end = int(rows[0, 0]), int(rows[0, 1])
-            for s, e in rows[1:]:
-                s, e = int(s), int(e)
-                if s <= cur_end:  # overlap or contiguous
-                    cur_end = max(cur_end, e)
-                else:
-                    merged.append((cur_start, cur_end))
-                    cur_start, cur_end = s, e
-            merged.append((cur_start, cur_end))
-            buggy_SI = np.array(merged, dtype=SampleIndices.dtype)
-
-        results['buggy_SI'] = buggy_SI
-        buggy_samples = np.diff(buggy_SI).sum()
-
-        print(f"Found {len(buggy_SI)} buggy periods with total duration {buggy_samples / SAMPLE_RATE:.2f} s")
-        self.buggy_periods = results
-        return results
 
     def get_spike_data(self):
         """Return spike times and cluster assignments."""

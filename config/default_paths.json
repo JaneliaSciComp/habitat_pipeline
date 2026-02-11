@@ -1,5 +1,5 @@
 {
-  "video": "//nearline/karpova/Data/Videos/RatCityVideos/cohort7",
+  "video": "//nearline/karpova/TervoLab/data/Videos/RatCityVideos/cohort7",
   "ephys": "//nearline/karpova/TervoLab/data/Electrophysiology/Raw/rat_city/cohort7",
   "tracking": "//nearline/karpova/TervoLab/analysis/Tracking/manual_tracking/cohort7"
 }

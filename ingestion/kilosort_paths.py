@@ -13,6 +13,40 @@ import glob
 import pandas as pd
 
 
+def _load_config(config_path: Optional[str] = None) -> dict:
+    """
+    Load configuration from JSON file.
+    
+    Args:
+        config_path: Optional path to config file. If None, uses default location.
+        
+    Returns:
+        dict: Configuration dictionary
+        
+    Raises:
+        FileNotFoundError: If the config file is not found
+        ValueError: If the JSON is invalid
+    """
+    # Determine config file path
+    if config_path is None:
+        # Assume this file is in ingestion/ and config/ is a sibling directory
+        current_dir = Path(__file__).parent
+        config_path = current_dir.parent / "config" / "default_paths.json"
+    else:
+        config_path = Path(config_path)
+    
+    # Read the configuration file
+    try:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in configuration file: {e}")
+    
+    return config
+
+
 def get_kilosort_path(animal_id: str, session_id: str, config_path: Optional[str] = None) -> Path:
     """
     Construct the path to a Kilosort folder based on animal_id and session_id.
@@ -38,22 +72,8 @@ def get_kilosort_path(animal_id: str, session_id: str, config_path: Optional[str
         >>> path = get_kilosort_path("613", "20251210")
         >>> print(path)
     """
-    # Determine config file path
-    if config_path is None:
-        # Assume this file is in ingestion/ and config/ is a sibling directory
-        current_dir = Path(__file__).parent
-        config_path = current_dir.parent / "config" / "default_paths.json"
-    else:
-        config_path = Path(config_path)
-    
-    # Read the configuration file
-    try:
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in configuration file: {e}")
+    # Load configuration
+    config = _load_config(config_path)
     
     # Get the ephys base path
     if 'ephys' not in config:
@@ -112,22 +132,8 @@ def get_dio_path(animal_id: str, session_id: str, dio_channel: int = 1, config_p
         >>> path = get_dio_path("613", "20251210", 1)
         >>> print(path)
     """
-    # Determine config file path
-    if config_path is None:
-        # Assume this file is in ingestion/ and config/ is a sibling directory
-        current_dir = Path(__file__).parent
-        config_path = current_dir.parent / "config" / "default_paths.json"
-    else:
-        config_path = Path(config_path)
-    
-    # Read the configuration file
-    try:
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in configuration file: {e}")
+    # Load configuration
+    config = _load_config(config_path)
     
     # Get the ephys base path
     if 'ephys' not in config:
@@ -182,22 +188,8 @@ def get_pulse_log_path(config_path: Optional[str] = None) -> Path:
         >>> print(path)
         \\nearline\karpova\TervoLab\data\Videos\RatCityVideos\cohort7\pulse_log.txt
     """
-    # Determine config file path
-    if config_path is None:
-        # Assume this file is in ingestion/ and config/ is a sibling directory
-        current_dir = Path(__file__).parent
-        config_path = current_dir.parent / "config" / "default_paths.json"
-    else:
-        config_path = Path(config_path)
-    
-    # Read the configuration file
-    try:
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in configuration file: {e}")
+    # Load configuration
+    config = _load_config(config_path)
     
     # Get the video base path
     if 'video' not in config:
@@ -244,21 +236,8 @@ def get_video_files_by_date(session_id: str, config_path: Optional[str] = None,
     if video_extensions is None:
         video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v']
     
-    # Determine config file path
-    if config_path is None:
-        current_dir = Path(__file__).parent
-        config_path = current_dir.parent / "config" / "default_paths.json"
-    else:
-        config_path = Path(config_path)
-    
-    # Read the configuration file
-    try:
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in configuration file: {e}")
+    # Load configuration
+    config = _load_config(config_path)
     
     # Get the video base path
     if 'video' not in config:
@@ -339,21 +318,8 @@ def get_animals_and_sessions(config_path: Optional[str] = None) -> pd.DataFrame:
         >>> print(f"Found {len(df)} animal-session combinations")
         >>> print(df.head())
     """
-    # Determine config file path
-    if config_path is None:
-        current_dir = Path(__file__).parent
-        config_path = current_dir.parent / "config" / "default_paths.json"
-    else:
-        config_path = Path(config_path)
-    
-    # Read the configuration file
-    try:
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in configuration file: {e}")
+    # Load configuration
+    config = _load_config(config_path)
     
     # Get the ephys base path
     if 'ephys' not in config:

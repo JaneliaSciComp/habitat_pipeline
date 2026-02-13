@@ -160,7 +160,6 @@ def get_dio_path(animal_id: str, session_id: str, dio_channel: int = 1, config_p
     
     return dio_path
 
-
 def get_pulse_log_path(config_path: Optional[str] = None) -> Path:
     """
     Get the path to the pulse log file.
@@ -210,6 +209,109 @@ def get_pulse_log_path(config_path: Optional[str] = None) -> Path:
     pulse_log_path = video_base / "pulse_log.txt"
     
     return pulse_log_path
+
+
+def get_video_files_by_date(session_id: str, config_path: Optional[str] = None, 
+                           video_extensions: List[str] = None, subfolder: Optional[str] = None) -> List[Path]:
+    """
+    Find video files in the video directory that match the date from the session_id.
+    
+    The function extracts the date portion from session_id (e.g., "20251210" from "20251210_110059")
+    and searches for video files containing this date in their filename.
+    
+    Args:
+        session_id: Session identifier containing date (e.g., "20251210" or "20251210_110059")
+        config_path: Optional path to config file. If None, uses default location.
+        video_extensions: List of video file extensions to search for. If None, uses common video formats.
+        subfolder: Optional subfolder name within video directory to search in. If None, searches entire video directory.
+        
+    Returns:
+        List[Path]: List of video file paths that match the session date
+        
+    Raises:
+        FileNotFoundError: If the config file, video directory, or specified subfolder is not found
+        KeyError: If 'video' key is not found in the config file
+        
+    Example:
+        >>> video_files = get_video_files_by_date("20251210_110059")
+        >>> print(f"Found {len(video_files)} video files for session date")
+        >>> 
+        >>> # Search in specific subfolder
+        >>> video_files = get_video_files_by_date("20251210_110059", subfolder="raw_videos")
+        >>> for vf in video_files:
+        >>>     print(vf.name)
+    """
+    if video_extensions is None:
+        video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v']
+    
+    # Determine config file path
+    if config_path is None:
+        current_dir = Path(__file__).parent
+        config_path = current_dir.parent / "config" / "default_paths.json"
+    else:
+        config_path = Path(config_path)
+    
+    # Read the configuration file
+    try:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in configuration file: {e}")
+    
+    # Get the video base path
+    if 'video' not in config:
+        raise KeyError("'video' key not found in configuration file")
+    
+    video_base = Path(config['video'])
+    
+    if not video_base.exists():
+        raise FileNotFoundError(f"Video directory not found: {video_base}")
+    
+    # Set search directory based on subfolder parameter
+    if subfolder is not None:
+        search_directory = video_base / subfolder
+        if not search_directory.exists():
+            raise FileNotFoundError(f"Subfolder not found: {search_directory}")
+    else:
+        search_directory = video_base
+    
+    # Extract date from session_id (first 8 characters, assuming YYYYMMDD format)
+    # Handle both "20251210" and "20251210_110059" formats
+    if len(session_id) >= 8:
+        session_date = session_id[:8]
+        
+        # Validate that it looks like a date (8 digits)
+        if not session_date.isdigit():
+            raise ValueError(f"Could not extract valid date from session_id: {session_id}")
+    else:
+        raise ValueError(f"Session ID too short to extract date: {session_id}")
+    
+    matching_videos = []
+    
+    try:
+    # Search through all files in the search directory and subdirectories
+    #     for video_file in search_directory.rglob('*'):
+    #         if video_file.is_file():
+    #             # Check if file has a video extension
+    #             if video_file.suffix.lower() in [ext.lower() for ext in video_extensions]:
+    #                 # Check if the session date appears in the filename
+    #                 if session_date in video_file.name:
+    #                     matching_videos.append(video_file)
+        search_pattern = "*"+session_date+"*"+video_extensions[0]
+        # print(search_pattern)
+        matching_videos = list(search_directory.glob(search_pattern))
+
+    
+    
+    except (PermissionError, OSError) as e:
+        raise RuntimeError(f"Error accessing directory {search_directory}: {e}")
+    
+    # Sort videos by filename for consistent ordering
+    matching_videos.sort(key=lambda x: x.name)
+    
+    return matching_videos
 
 
 def get_animals_and_sessions(config_path: Optional[str] = None) -> pd.DataFrame:

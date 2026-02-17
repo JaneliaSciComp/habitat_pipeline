@@ -34,7 +34,7 @@ def _load_config(config_path: Optional[str] = None) -> dict:
         config_path = current_dir.parent / "config" / "default_paths.json"
     else:
         config_path = Path(config_path)
-    
+        
     # Read the configuration file
     try:
         with open(config_path, 'r') as f:

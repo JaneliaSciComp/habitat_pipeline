@@ -13,11 +13,6 @@ from typing import Optional, List, Dict, Tuple, Union, Any
 import json
 import warnings
 
-# Import path utilities from ingestion module
-import sys
-sys.path.append(str(Path(__file__).parent.parent))
-from ingestion.kilosort_paths import get_tracking_files_by_date
-
 
 def load_tracking_data(file_path: Union[str, Path]) -> pd.DataFrame:
     """
@@ -81,6 +76,60 @@ def load_tracking_data(file_path: Union[str, Path]) -> pd.DataFrame:
         
     except Exception as e:
         raise ValueError(f"Failed to load tracking data from {file_path}: {str(e)}")
+
+
+def load_timestamps(tracking_file_path: Union[str, Path]) -> np.ndarray:
+    """
+    Load timestamps from an .npy file in the same folder as the tracking file.
+    
+    This function looks for a timestamp file with a similar name pattern,
+    typically replacing patterns like '_mask_metrics.csv' with '_ts.npy'.
+    
+    Args:
+        tracking_file_path: Path to the tracking data file
+        
+    Returns:
+        numpy.ndarray: Array of timestamps
+        
+    Raises:
+        FileNotFoundError: If no matching timestamp file is found
+        ValueError: If the timestamp file cannot be loaded or is empty
+        
+    Example:
+        For tracking file: RatCity_20251210_1359_40Hz_mask_metrics.csv
+        Looks for timestamp file: RatCity_20251210_1359_40Hz_ts.npy
+    """
+    # Convert to Path object
+    tracking_file_path = Path(tracking_file_path)
+    
+    if not tracking_file_path.exists():
+        raise FileNotFoundError(f"Tracking file not found: {tracking_file_path}")
+    
+    # Get the directory and base name
+    directory = tracking_file_path.parent
+    base_name = tracking_file_path.stem  # filename without extension
+    
+    # Try different patterns to find the timestamp file
+    # Pattern 1: Replace '_mask_metrics' with '_ts'
+    if '_mask_metrics' in base_name:
+        ts_base_name = base_name.replace('_mask_metrics', '_ts')
+        ts_file_path = directory / f"{ts_base_name}.npy"
+        
+        if ts_file_path.exists():
+            try:
+                timestamps = np.load(ts_file_path)
+                print(f"Loaded timestamps from: {ts_file_path}")
+                print(f"Timestamp array shape: {timestamps.shape}")
+                return timestamps
+            except Exception as e:
+                raise ValueError(f"Failed to load timestamps from {ts_file_path}: {str(e)}")
+    
+    
+    # If no timestamp file found
+    raise FileNotFoundError(
+        f"No matching timestamp file found for {tracking_file_path}. "
+        f"Looked for patterns like '*_ts.npy' in {directory}"
+    )
 
 
 def parse_tracking(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
@@ -175,7 +224,7 @@ if __name__ == "__main__":
     
     # Parse by object name
     print("\nParsing by object name:")
-    objects = parse_tracking_by_object_name(df)
+    objects = parse_tracking(df)
     
     print(f"\nFound {len(objects)} objects: {list(objects.keys())}")
     

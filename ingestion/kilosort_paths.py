@@ -178,15 +178,6 @@ def get_pulse_log_path(config_path: Optional[str] = None) -> Path:
         
     Returns:
         Path: Complete path to the pulse_log.txt file
-        
-    Raises:
-        FileNotFoundError: If the config file is not found
-        KeyError: If 'video' key is not found in the config file
-        
-    Example:
-        >>> path = get_pulse_log_path()
-        >>> print(path)
-        \\nearline\karpova\TervoLab\data\Videos\RatCityVideos\cohort7\pulse_log.txt
     """
     # Load configuration
     config = _load_config(config_path)
@@ -291,6 +282,78 @@ def get_video_files_by_date(session_id: str, config_path: Optional[str] = None,
     matching_videos.sort(key=lambda x: x.name)
     
     return matching_videos
+
+
+def get_tracking_files_by_date(session_id: str, config_path: Optional[str] = None, 
+                              tracking_extensions: List[str] = None, subfolder: Optional[str] = None) -> List[Path]:
+    """
+    Find tracking files in the tracking directory that match the date from the session_id.
+    
+    The function extracts the date portion from session_id (e.g., "20251210" from "20251210_110059")
+    and searches for tracking files containing this date in their filename.
+    
+    Args:
+        session_id: Session identifier containing date (e.g., "20251210" or "20251210_110059")
+        config_path: Optional path to config file. If None, uses default location.
+        tracking_extensions: List of tracking file extensions to search for. If None, uses common tracking formats.
+        subfolder: Optional subfolder name within tracking directory to search in. If None, searches entire tracking directory.
+        
+    Returns:
+        List[Path]: List of tracking file paths that match the session date
+    """
+    if tracking_extensions is None:
+        tracking_extensions = ['.csv', '.h5', '.hdf5', '.mat', '.pkl', '.npz', '.json', '.txt']
+    
+    # Load configuration
+    config = _load_config(config_path)
+    
+    # Get the tracking base path
+    if 'tracking' not in config:
+        raise KeyError("'tracking' key not found in configuration file")
+    
+    tracking_base = Path(config['tracking'])
+    
+    if not tracking_base.exists():
+        raise FileNotFoundError(f"Tracking directory not found: {tracking_base}")
+    
+    # Set search directory based on subfolder parameter
+    if subfolder is not None:
+        search_directory = tracking_base / subfolder
+        if not search_directory.exists():
+            raise FileNotFoundError(f"Subfolder not found: {search_directory}")
+    else:
+        search_directory = tracking_base
+    
+    # Extract date from session_id (first 8 characters, assuming YYYYMMDD format)
+    # Handle both "20251210" and "20251210_110059" formats
+    if len(session_id) >= 8:
+        session_date = session_id[:8]
+        
+        # Validate that it looks like a date (8 digits)
+        if not session_date.isdigit():
+            raise ValueError(f"Could not extract valid date from session_id: {session_id}")
+    else:
+        raise ValueError(f"Session ID too short to extract date: {session_id}")
+    
+    matching_tracking_files = []
+    
+    try:
+        # Search through all files in the search directory and subdirectories
+        for tracking_file in search_directory.rglob('*'):
+            if tracking_file.is_file():
+                # Check if file has a tracking extension
+                if tracking_file.suffix.lower() in [ext.lower() for ext in tracking_extensions]:
+                    # Check if the session date appears in the filename
+                    if session_date in tracking_file.name:
+                        matching_tracking_files.append(tracking_file)
+    
+    except (PermissionError, OSError) as e:
+        raise RuntimeError(f"Error accessing directory {search_directory}: {e}")
+    
+    # Sort tracking files by filename for consistent ordering
+    matching_tracking_files.sort(key=lambda x: x.name)
+    
+    return matching_tracking_files
 
 
 def get_animals_and_sessions(config_path: Optional[str] = None) -> pd.DataFrame:

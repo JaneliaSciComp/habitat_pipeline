@@ -16,7 +16,7 @@ class KilosortData:
         self.load_spike_data()
         self.select_clusters()
         self.extract_cluster_properties()
-    #    self.get_cluster_spikes_fast()
+        self.get_cluster_spikes_fast()
         self.metadata = {
             'data_path': str(self.KSfolder),
             'animal_id': self.animal_id,

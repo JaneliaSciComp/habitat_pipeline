@@ -1,7 +1,7 @@
 import numpy as np
 from scipy import stats
 
-from ingestion.kilosort_paths import get_dio_path, get_pulse_log_path
+from ingestion.data_paths import get_dio_path, get_pulse_log_path
 
 SAMPLE_RATE = 30000.0  # Hz
 

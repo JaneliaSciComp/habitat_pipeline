@@ -11,6 +11,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.animation import FuncAnimation
+from matplotlib.colors import LogNorm
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Any
 import seaborn as sns
@@ -218,15 +219,19 @@ def plot_path_heatmap(df: pd.DataFrame, animal_name: str,
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
     
+    # Set black background
+    ax.set_facecolor('black')
+    # fig.patch.set_facecolor('black')
+    
     x_coords = df_clean['center_x'].values
     y_coords = df_clean['center_y'].values
     
-    # Create 2D histogram
-    counts, xedges, yedges, im = ax.hist2d(x_coords, y_coords, bins=bins, cmap=cmap)
+    # Create 2D histogram with log scale
+    counts, xedges, yedges, im = ax.hist2d(x_coords, y_coords, bins=bins, cmap=cmap, norm=LogNorm())
     
     # Add colorbar
     cbar = plt.colorbar(im, ax=ax)
-    cbar.set_label('Time Spent (frames)')
+    cbar.set_label('Time Spent (frames) - Log Scale')
     
     # Formatting
     ax.set_xlabel('X Coordinate (pixels)')

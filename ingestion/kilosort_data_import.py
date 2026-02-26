@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import pickle
 
 import numpy as np
 import pandas as pd
@@ -246,6 +247,29 @@ class KilosortData:
         allSpikeSI_fast = [grouped.get(int(c), np.array([], dtype=spike_SI.dtype)) for c in ks_ids]
         self.allSpikeSI = allSpikeSI_fast
         return allSpikeSI_fast
+    
+    def get_firing_rates(self, bin_size_sec=1.0):
+        """Calculate firing rates for all clusters"""
+        rates = {}
+        duration = self.duration_seconds
+        for i, cluster_id in enumerate(self.ks_ids):
+            spike_times = self.allSpikeSI[i] / SAMPLE_RATE
+            rates[cluster_id] = len(spike_times) / duration
+        return rates
+
+    def get_isi_statistics(self):
+        """Calculate inter-spike interval statistics"""
+        isi_stats = {}
+        for i, cluster_id in enumerate(self.ks_ids):
+            spike_times = self.allSpikeSI[i] / SAMPLE_RATE
+            if len(spike_times) > 1:
+                isis = np.diff(spike_times)
+                isi_stats[cluster_id] = {
+                    'mean_isi': np.mean(isis),
+                    'median_isi': np.median(isis),
+                    'cv_isi': np.std(isis) / np.mean(isis)
+                }
+        return isi_stats
 
     def get_spike_data(self):
         """Return spike times and cluster assignments."""
@@ -253,6 +277,17 @@ class KilosortData:
             raise ValueError("Spike data not loaded. Call load_spike_data() first.")
         
         return self.spike_times, self.spike_clusters, self.cluster_info
+    
+    def save_processed_data(self, cache_dir=None):
+        """Save processed data for faster subsequent loading"""
+        cache_path = cache_dir or self.KSfolder / 'processed_cache.pkl'
+        cache_data = {
+            'allSpikeSI': self.allSpikeSI,
+            'ks_ids': self.ks_ids,
+            'metadata': self.metadata
+        }
+        with open(cache_path, 'wb') as f:
+            pickle.dump(cache_data, f)
     
     def __repr__(self) -> str:
         """String representation of the KilosortData object."""

@@ -17,6 +17,8 @@ from scipy.spatial import Voronoi, voronoi_plot_2d
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Any
 import seaborn as sns
+import networkx as nx
+from itertools import combinations
 
 
 def plot_animal_path(df: pd.DataFrame, animal_name: str, 
@@ -739,6 +741,307 @@ def plot_voronoi_territories(tracking_dict: Dict[str, pd.DataFrame],
             total_occupancy = np.sum(occupancy_maps[animal_name])
             high_occ_bins = np.sum(occupancy_maps[animal_name] >= min_occupancy)
             print(f"  {animal_name}: {n_animal_seeds} seed points, {high_occ_bins} high-occupancy bins, {total_occupancy:.0f} total frames")
+    
+    return fig
+
+
+def plot_proximity_network(tracking_dict: Dict[str, pd.DataFrame],
+                         proximity_threshold: float = 100,
+                         min_interaction_time: int = 30,
+                         figsize: Tuple[int, int] = (10, 8),
+                         node_size_factor: float = 1000,
+                         title: Optional[str] = None,
+                         colors: Optional[List[str]] = None,
+                         layout_type: str = 'spring',
+                         animals: Optional[List[str]] = None) -> plt.Figure:
+    """
+    Create a network graph showing social connections between animals based on proximity.
+    
+    Analyzes tracking data to identify when animals are in close proximity and creates
+    a network visualization where nodes represent animals and edges represent the strength
+    of their social interactions (time spent in proximity).
+    
+    Args:
+        tracking_dict: Dictionary where keys are animal names and values are DataFrames
+        proximity_threshold: Distance threshold (pixels) for considering animals "close"
+        min_interaction_time: Minimum frames of proximity to create an edge
+        figsize: Figure size as (width, height)
+        node_size_factor: Scaling factor for node sizes
+        title: Custom title for the plot
+        colors: List of colors for each animal. If None, uses default palette
+        layout_type: Network layout algorithm ('spring', 'circular', 'kamada_kawai')
+        animals: Optional list of animal names to include. If None, uses all animals
+        
+    Returns:
+        matplotlib.Figure: The created network visualization
+    """
+    # Filter tracking_dict to include only specified animals
+    if animals is not None:
+        # Validate that all specified animals exist in tracking_dict
+        missing_animals = [animal for animal in animals if animal not in tracking_dict]
+        if missing_animals:
+            raise ValueError(f"Animals not found in tracking data: {missing_animals}")
+        
+        # Filter the tracking dictionary
+        tracking_dict = {animal: tracking_dict[animal] for animal in animals}
+    
+    if len(tracking_dict) < 2:
+        raise ValueError("Need at least 2 animals for proximity analysis")
+    
+    animal_names = list(tracking_dict.keys())
+    n_animals = len(animal_names)
+    
+    # Set up colors
+    if colors is None:
+        colors = sns.color_palette("Set2", n_animals)
+    elif len(colors) < n_animals:
+        colors = (colors * ((n_animals // len(colors)) + 1))[:n_animals]
+    
+    # Clean tracking data and ensure temporal alignment
+    cleaned_data = {}
+    max_frames = 0
+    
+    for animal_name, df in tracking_dict.items():
+        if 'center_x' not in df.columns or 'center_y' not in df.columns:
+            print(f"Warning: Skipping {animal_name} - missing coordinate columns")
+            continue
+            
+        df_clean = df.dropna(subset=['center_x', 'center_y']).copy()
+        if df_clean.empty:
+            print(f"Warning: Skipping {animal_name} - no valid coordinate data")
+            continue
+        
+        # Ensure we have frame numbers for temporal alignment
+        if 'frame' not in df_clean.columns:
+            df_clean['frame'] = range(len(df_clean))
+        
+        cleaned_data[animal_name] = df_clean
+        max_frames = max(max_frames, df_clean['frame'].max())
+    
+    if len(cleaned_data) < 2:
+        raise ValueError("Need at least 2 animals with valid data for proximity analysis")
+    
+    # Create numpy arrays for vectorized distance calculations
+    animal_names = list(cleaned_data.keys())
+    n_animals = len(animal_names)
+    max_frame = int(max_frames) + 1
+    
+    # Initialize coordinate arrays: [animal_index, frame] = coordinate (NaN if missing)
+    x_coords = np.full((n_animals, max_frame), np.nan)
+    y_coords = np.full((n_animals, max_frame), np.nan)
+    
+    # Fill coordinate arrays
+    for animal_idx, animal_name in enumerate(animal_names):
+        df = cleaned_data[animal_name]
+        frame_indices = df['frame'].astype(int).values
+        x_coords[animal_idx, frame_indices] = df['center_x'].values
+        y_coords[animal_idx, frame_indices] = df['center_y'].values
+    
+    # Calculate pairwise proximity interactions using vectorized operations
+    proximity_matrix = np.zeros((n_animals, n_animals))
+    interaction_details = {}
+    
+    print(f"Analyzing proximity interactions with threshold {proximity_threshold} pixels...")
+    
+    for i, (animal1, animal2) in enumerate(combinations(animal_names, 2)):
+        animal1_idx = animal_names.index(animal1)
+        animal2_idx = animal_names.index(animal2)
+        
+        # Get coordinate arrays for both animals
+        x1 = x_coords[animal1_idx, :]
+        y1 = y_coords[animal1_idx, :]
+        x2 = x_coords[animal2_idx, :]
+        y2 = y_coords[animal2_idx, :]
+        
+        # Find frames where both animals have valid coordinates
+        valid_frames_mask = ~(np.isnan(x1) | np.isnan(y1) | np.isnan(x2) | np.isnan(y2))
+        
+        if np.sum(valid_frames_mask) < min_interaction_time:
+            continue
+        
+        # Calculate distances for all valid frames at once (vectorized)
+        dx = x1[valid_frames_mask] - x2[valid_frames_mask]
+        dy = y1[valid_frames_mask] - y2[valid_frames_mask]
+        distances = np.sqrt(dx**2 + dy**2)
+        
+        # Calculate interaction metrics
+        proximity_mask = distances <= proximity_threshold
+        proximity_frames = np.sum(proximity_mask)
+        total_frames = len(distances)
+        
+        if proximity_frames < min_interaction_time:
+            continue
+        
+        # Get frame numbers for interaction events
+        valid_frame_indices = np.where(valid_frames_mask)[0]
+        interaction_events = valid_frame_indices[proximity_mask].tolist()
+        
+        # Calculate statistics
+        total_distance = np.sum(distances)
+        min_distance = np.min(distances)
+        avg_distance = np.mean(distances)
+        interaction_strength = proximity_frames / total_frames
+            
+        # Store interaction metrics
+        idx1 = animal1_idx
+        idx2 = animal2_idx
+        
+        proximity_matrix[idx1, idx2] = interaction_strength
+        proximity_matrix[idx2, idx1] = interaction_strength
+        
+        interaction_details[(animal1, animal2)] = {
+            'proximity_frames': proximity_frames,
+            'total_frames': total_frames,
+            'interaction_strength': interaction_strength,
+            'avg_distance': avg_distance,
+            'min_distance': min_distance,
+            'interaction_events': interaction_events
+        }
+    
+    print(f"Found {len(interaction_details)} significant interactions between animals")
+
+    # Create network graph
+    G = nx.Graph()
+    
+    # Add nodes (animals)
+    for i, animal_name in enumerate(animal_names):
+        # Node size based on total movement/activity
+        df = cleaned_data[animal_name]
+        total_movement = calculate_path_statistics(df)['total_distance']
+        
+        G.add_node(animal_name, 
+                   activity=total_movement,
+                   color=colors[i],
+                   frames=len(df))
+    
+    # Add edges (interactions)
+    edge_weights = []
+    edge_colors = []
+    
+    for (animal1, animal2), details in interaction_details.items():
+        weight = details['interaction_strength']
+        G.add_edge(animal1, animal2, 
+                   weight=weight,
+                   proximity_frames=details['proximity_frames'],
+                   avg_distance=details['avg_distance'],
+                   min_distance=details['min_distance'])
+        
+        edge_weights.append(weight * 10)  # Scale for visualization
+        # Edge color intensity based on interaction strength
+        edge_colors.append(weight)
+    
+    if len(G.edges()) == 0:
+        print("Warning: No significant interactions found between animals")
+        # Create figure with just nodes
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.text(0.5, 0.5, 'No significant interactions detected\n' +
+               f'(threshold: {proximity_threshold} pixels, min time: {min_interaction_time} frames)',
+               ha='center', va='center', transform=ax.transAxes,
+               bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
+        ax.set_title(title or 'Proximity Network (No Interactions)')
+        return fig
+    
+    # Create visualization
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Choose layout algorithm
+    if layout_type == 'spring':
+        pos = nx.spring_layout(G, k=2, iterations=50)
+    elif layout_type == 'circular':
+        pos = nx.circular_layout(G)
+    elif layout_type == 'kamada_kawai':
+        pos = nx.kamada_kawai_layout(G)
+    else:
+        pos = nx.spring_layout(G)
+    
+    # Draw edges with varying thickness and color
+    if edge_weights:
+        edges = nx.draw_networkx_edges(G, pos, 
+                                     width=edge_weights,
+                                     edge_color=edge_colors,
+                                     edge_cmap=plt.cm.Reds,
+                                     alpha=0.6,
+                                     ax=ax)
+    
+    # Draw nodes
+    node_colors = [G.nodes[node]['color'] for node in G.nodes()]
+    node_sizes = [G.nodes[node]['activity'] / max([G.nodes[n]['activity'] for n in G.nodes()]) * 
+                  node_size_factor + 200 for node in G.nodes()]  # Base size + scaled activity
+    
+    nx.draw_networkx_nodes(G, pos,
+                          node_color=node_colors,
+                          node_size=node_sizes,
+                          alpha=0.8,
+                          edgecolors='black',
+                          linewidths=2,
+                          ax=ax)
+    
+    # Draw labels
+    nx.draw_networkx_labels(G, pos,
+                           font_size=12,
+                           font_weight='bold',
+                           font_color='white',
+                           ax=ax)
+    
+    # Create custom legend
+    from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
+    
+    legend_elements = []
+    
+    # Animal legend
+    for i, animal_name in enumerate(animal_names):
+        activity = G.nodes[animal_name]['activity']
+        frames = G.nodes[animal_name]['frames']
+        legend_elements.append(Patch(facecolor=colors[i], 
+                                   label=f'{animal_name} ({frames} frames, {activity:.0f}px moved)'))
+    
+    # Interaction strength legend
+    if edge_weights:
+        legend_elements.extend([
+            Line2D([0], [0], color='red', lw=1, alpha=0.6, label='Weak interaction'),
+            Line2D([0], [0], color='red', lw=3, alpha=0.6, label='Strong interaction')
+        ])
+    
+    ax.legend(handles=legend_elements, bbox_to_anchor=(1.05, 1), loc='upper left')
+    
+    # Formatting
+    ax.set_aspect('equal')
+    ax.axis('off')
+    
+    # Set title
+    if title is None:
+        title = f'Animal Proximity Network\n({len(G.nodes())} animals, {len(G.edges())} interactions)'
+    ax.set_title(title, pad=20, fontsize=14, fontweight='bold')
+    
+    # Add network statistics
+    stats_text = f'Proximity threshold: {proximity_threshold} pixels\n'
+    stats_text += f'Min interaction time: {min_interaction_time} frames\n'
+    stats_text += f'Network density: {nx.density(G):.3f}'
+    
+    if len(G.edges()) > 0:
+        avg_clustering = nx.average_clustering(G)
+        stats_text += f'\nAverage clustering: {avg_clustering:.3f}'
+    
+    ax.text(0.02, 0.02, stats_text, transform=ax.transAxes,
+           verticalalignment='bottom',
+           bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
+    
+    plt.tight_layout()
+    
+    # Print detailed interaction statistics
+    print(f"\nProximity Network Analysis Results:")
+    print(f"  Animals analyzed: {len(animal_names)}")
+    print(f"  Significant interactions: {len(interaction_details)}")
+    print(f"  Network density: {nx.density(G):.3f}")
+    
+    if interaction_details:
+        print("\nDetailed Interactions:")
+        for (animal1, animal2), details in interaction_details.items():
+            print(f"  {animal1} ↔ {animal2}:")
+            print(f"    Proximity time: {details['proximity_frames']} / {details['total_frames']} frames ({details['interaction_strength']*100:.1f}%)")
+            print(f"    Avg distance: {details['avg_distance']:.1f} pixels")
+            print(f"    Min distance: {details['min_distance']:.1f} pixels")
     
     return fig
 

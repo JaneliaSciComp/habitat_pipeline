@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.animation import FuncAnimation
 from matplotlib.colors import LogNorm
+from matplotlib.collections import LineCollection
+from scipy.spatial import Voronoi, voronoi_plot_2d
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Any
 import seaborn as sns
@@ -58,11 +60,34 @@ def plot_animal_path(df: pd.DataFrame, animal_name: str,
     # Create figure
     fig, ax = plt.subplots(figsize=figsize)
     
-    # Plot path
+    # Get coordinates
     x_coords = df_clean['center_x'].values
     y_coords = df_clean['center_y'].values
     
-    ax.plot(x_coords, y_coords, '-', color=color, linewidth=1.5, alpha=0.7, label=animal_name)
+    # Create path with gradient colors representing time
+    if len(x_coords) > 1:
+        # Create line segments
+        points = np.array([x_coords, y_coords]).T.reshape(-1, 1, 2)
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+        
+        # Create colors representing time progression
+        colors = np.linspace(0, 1, len(segments))
+        
+        # Create LineCollection with gradient colors
+        lc = LineCollection(segments, cmap='viridis' if color is None else color, 
+                          linewidths=1.5, alpha=0.8)
+        lc.set_array(colors)
+        
+        # Add to plot
+        line = ax.add_collection(lc)
+        
+        # Add colorbar to show time progression
+        cbar = plt.colorbar(line, ax=ax, shrink=0.6, aspect=20)
+        cbar.set_label('Time Progression (Start → End)')
+    else:
+        # Single point - just plot as a dot
+        ax.plot(x_coords[0], y_coords[0], 'o', color=color if color else 'blue', 
+               markersize=8, label=animal_name)
     
     # Mark start and end points
     if show_start_end and len(x_coords) > 1:
@@ -311,6 +336,411 @@ def calculate_path_statistics(df: pd.DataFrame) -> Dict[str, float]:
         stats['avg_speed'] = 0.0
     
     return stats
+
+
+def plot_territorial_occupancy(tracking_dict: Dict[str, pd.DataFrame],
+                             figsize: Tuple[int, int] = (12, 10),
+                             bins: int = 50,
+                             colors: Optional[List[str]] = None,
+                             title: Optional[str] = None,
+                             min_occupancy: int = 5) -> plt.Figure:
+    """
+    Create a territorial map showing which animal occupied each location for the most time.
+    
+    Args:
+        tracking_dict: Dictionary where keys are animal names and values are DataFrames
+        figsize: Figure size as (width, height)
+        bins: Number of bins for spatial discretization
+        colors: List of colors for each animal. If None, uses default color palette
+        title: Custom title for the plot
+        min_occupancy: Minimum number of frames required to claim a territory
+        
+    Returns:
+        matplotlib.Figure: The created figure showing territorial occupancy
+    """
+    if not tracking_dict:
+        raise ValueError("No tracking data provided")
+    
+    # Set up colors for animals
+    animal_names = list(tracking_dict.keys())
+    if colors is None:
+        colors = sns.color_palette("Set2", len(animal_names))
+    elif len(colors) < len(animal_names):
+        colors = (colors * ((len(animal_names) // len(colors)) + 1))[:len(animal_names)]
+    
+    # Find overall coordinate bounds
+    all_x_coords = []
+    all_y_coords = []
+    
+    for animal_name, df in tracking_dict.items():
+        if 'center_x' in df.columns and 'center_y' in df.columns:
+            df_clean = df.dropna(subset=['center_x', 'center_y'])
+            if not df_clean.empty:
+                all_x_coords.extend(df_clean['center_x'].values)
+                all_y_coords.extend(df_clean['center_y'].values)
+    
+    if not all_x_coords:
+        raise ValueError("No valid coordinate data found for any animal")
+    
+    x_min, x_max = np.min(all_x_coords), np.max(all_x_coords)
+    y_min, y_max = np.min(all_y_coords), np.max(all_y_coords)
+    
+    # Create spatial bins
+    x_edges = np.linspace(x_min, x_max, bins + 1)
+    y_edges = np.linspace(y_min, y_max, bins + 1)
+    
+    # Initialize occupancy matrix for each animal
+    occupancy_maps = {}
+    
+    for i, (animal_name, df) in enumerate(tracking_dict.items()):
+        if 'center_x' not in df.columns or 'center_y' not in df.columns:
+            print(f"Warning: Skipping {animal_name} - missing coordinate columns")
+            continue
+            
+        df_clean = df.dropna(subset=['center_x', 'center_y'])
+        if df_clean.empty:
+            print(f"Warning: Skipping {animal_name} - no valid coordinate data")
+            continue
+        
+        # Create 2D histogram for this animal
+        x_coords = df_clean['center_x'].values
+        y_coords = df_clean['center_y'].values
+        
+        counts, _, _ = np.histogram2d(x_coords, y_coords, bins=[x_edges, y_edges])
+        occupancy_maps[animal_name] = counts
+    
+    if not occupancy_maps:
+        raise ValueError("No valid occupancy data could be generated")
+    
+    # Create territorial ownership map
+    territorial_map = np.zeros((bins, bins), dtype=int)
+    max_occupancy_map = np.zeros((bins, bins))
+    
+    # For each spatial bin, find which animal spent most time there
+    for i in range(bins):
+        for j in range(bins):
+            max_count = 0
+            dominant_animal_idx = -1
+            
+            for animal_idx, (animal_name, occupancy) in enumerate(occupancy_maps.items()):
+                if occupancy[i, j] > max_count and occupancy[i, j] >= min_occupancy:
+                    max_count = occupancy[i, j]
+                    dominant_animal_idx = animal_idx
+            
+            territorial_map[i, j] = dominant_animal_idx
+            max_occupancy_map[i, j] = max_count
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Create custom colormap for territorial display
+    from matplotlib.colors import ListedColormap
+    
+    # Add neutral color for unoccupied areas
+    territorial_colors = ['lightgray'] + [colors[i] for i in range(len(animal_names))]
+    cmap = ListedColormap(territorial_colors)
+    
+    # Plot territorial map
+    extent = [x_min, x_max, y_min, y_max]
+    im = ax.imshow(territorial_map.T, extent=extent, origin='lower', 
+                   cmap=cmap, vmin=-1, vmax=len(animal_names)-1, alpha=0.8)
+    
+    # Overlay occupancy intensity as contours
+    X, Y = np.meshgrid(x_edges[:-1] + np.diff(x_edges)/2, 
+                       y_edges[:-1] + np.diff(y_edges)/2)
+    
+    # Plot contour lines showing occupancy intensity
+    contours = ax.contour(X, Y, max_occupancy_map.T, levels=5, colors='black', 
+                         alpha=0.3, linewidths=0.5)
+    
+    # Add animal paths as thin lines for reference
+    for i, (animal_name, df) in enumerate(tracking_dict.items()):
+        if animal_name not in occupancy_maps:
+            continue
+            
+        df_clean = df.dropna(subset=['center_x', 'center_y'])
+        if df_clean.empty:
+            continue
+            
+        x_coords = df_clean['center_x'].values
+        y_coords = df_clean['center_y'].values
+        
+        ax.plot(x_coords, y_coords, '-', color=colors[i], 
+               linewidth=0.5, alpha=0.4)
+    
+    # Formatting
+    ax.set_xlabel('X Coordinate (pixels)')
+    ax.set_ylabel('Y Coordinate (pixels)')
+    ax.invert_yaxis()
+    
+    # Create custom legend
+    from matplotlib.patches import Patch
+    legend_elements = [Patch(facecolor='lightgray', label='Unoccupied')]
+    for i, animal_name in enumerate(animal_names):
+        if animal_name in occupancy_maps:
+            legend_elements.append(Patch(facecolor=colors[i], label=animal_name))
+    
+    ax.legend(handles=legend_elements, bbox_to_anchor=(1.05, 1), loc='upper left')
+    
+    # Set title
+    if title is None:
+        title = f'Territorial Occupancy Map ({len(animal_names)} animals)'
+    ax.set_title(title)
+    
+    # Add text box with statistics
+    total_bins = bins * bins
+    occupied_bins = np.sum(territorial_map >= 0)
+    stats_text = f'Grid: {bins}×{bins}\nOccupied: {occupied_bins}/{total_bins} bins\nMin occupancy: {min_occupancy} frames'
+    
+    ax.text(0.02, 0.02, stats_text, transform=ax.transAxes, 
+           verticalalignment='bottom',
+           bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    plt.tight_layout()
+    print(f"Created territorial occupancy map for {len(animal_names)} animals")
+    
+    # Print territorial statistics
+    for i, animal_name in enumerate(animal_names):
+        if animal_name in occupancy_maps:
+            territory_size = np.sum(territorial_map == i)
+            print(f"  {animal_name}: {territory_size} territorial bins ({territory_size/total_bins*100:.1f}%)")
+    
+    return fig
+
+
+def plot_voronoi_territories(tracking_dict: Dict[str, pd.DataFrame],
+                           figsize: Tuple[int, int] = (12, 10),
+                           colors: Optional[List[str]] = None,
+                           title: Optional[str] = None,
+                           bins: int = 50,
+                           min_occupancy: int = 20,
+                           show_paths: bool = False,
+                           show_seeds: bool = False,
+                           alpha: float = 0.6) -> plt.Figure:
+    """
+    Create a Voronoi diagram-based territorial map using binned occupancy data.
+    
+    Uses spatial binning to identify significant occupancy areas and creates Voronoi
+    territories based on these high-occupancy locations, excluding areas where animals
+    just passed through briefly.
+    
+    Args:
+        tracking_dict: Dictionary where keys are animal names and values are DataFrames
+        figsize: Figure size as (width, height)
+        colors: List of colors for each animal. If None, uses default color palette
+        title: Custom title for the plot
+        bins: Number of spatial bins for occupancy calculation
+        min_occupancy: Minimum frames required for a bin to be used as Voronoi seed
+        show_paths: If True, overlay animal paths
+        show_seeds: If True, display the seed points used for Voronoi calculation
+        alpha: Transparency of Voronoi regions
+        
+    Returns:
+        matplotlib.Figure: The created figure showing Voronoi territories
+    """
+    if not tracking_dict:
+        raise ValueError("No tracking data provided")
+    
+    # Set up colors for animals
+    animal_names = list(tracking_dict.keys())
+    if colors is None:
+        colors = sns.color_palette("Set2", len(animal_names))
+    elif len(colors) < len(animal_names):
+        colors = (colors * ((len(animal_names) // len(colors)) + 1))[:len(animal_names)]
+    
+    # Find overall coordinate bounds
+    all_x_coords = []
+    all_y_coords = []
+    
+    for animal_name, df in tracking_dict.items():
+        if 'center_x' in df.columns and 'center_y' in df.columns:
+            df_clean = df.dropna(subset=['center_x', 'center_y'])
+            if not df_clean.empty:
+                all_x_coords.extend(df_clean['center_x'].values)
+                all_y_coords.extend(df_clean['center_y'].values)
+    
+    if not all_x_coords:
+        raise ValueError("No valid coordinate data found for any animal")
+    
+    x_min, x_max = np.min(all_x_coords), np.max(all_x_coords)
+    y_min, y_max = np.min(all_y_coords), np.max(all_y_coords)
+    
+    # Create spatial bins
+    x_edges = np.linspace(x_min, x_max, bins + 1)
+    y_edges = np.linspace(y_min, y_max, bins + 1)
+    
+    # Calculate bin centers for Voronoi seeds
+    x_centers = x_edges[:-1] + np.diff(x_edges) / 2
+    y_centers = y_edges[:-1] + np.diff(y_edges) / 2
+    
+    # Initialize occupancy data
+    occupancy_maps = {}
+    animal_data = {}
+    
+    # Calculate occupancy maps for each animal
+    for animal_idx, (animal_name, df) in enumerate(tracking_dict.items()):
+        if 'center_x' not in df.columns or 'center_y' not in df.columns:
+            print(f"Warning: Skipping {animal_name} - missing coordinate columns")
+            continue
+            
+        df_clean = df.dropna(subset=['center_x', 'center_y'])
+        if df_clean.empty:
+            print(f"Warning: Skipping {animal_name} - no valid coordinate data")
+            continue
+        
+        # Create 2D histogram for this animal
+        x_coords = df_clean['center_x'].values
+        y_coords = df_clean['center_y'].values
+        
+        counts, _, _ = np.histogram2d(x_coords, y_coords, bins=[x_edges, y_edges])
+        occupancy_maps[animal_name] = counts
+        
+        animal_data[animal_name] = {
+            'all_coords': (x_coords, y_coords),
+            'color': colors[animal_idx]
+        }
+    
+    if not occupancy_maps:
+        raise ValueError("No valid occupancy data could be generated")
+    
+    # Collect Voronoi seed points from high-occupancy bins
+    all_points = []
+    point_labels = []
+    
+    for animal_idx, (animal_name, occupancy) in enumerate(occupancy_maps.items()):
+        # Find bins with sufficient occupancy
+        high_occupancy_indices = np.where(occupancy >= min_occupancy)
+        
+        if len(high_occupancy_indices[0]) == 0:
+            print(f"Warning: No high-occupancy areas found for {animal_name}")
+            continue
+        
+        # Create seed points from bin centers of high-occupancy areas
+        for i, j in zip(high_occupancy_indices[0], high_occupancy_indices[1]):
+            seed_point = [x_centers[i], y_centers[j]]
+            all_points.append(seed_point)
+            point_labels.append(animal_idx)
+    
+    if not all_points:
+        raise ValueError("No valid seed points found for Voronoi diagram")
+    
+    # Convert to numpy arrays
+    all_points = np.array(all_points)
+    point_labels = np.array(point_labels)
+    
+    # Create Voronoi diagram
+    try:
+        vor = Voronoi(all_points)
+    except Exception as e:
+        raise ValueError(f"Failed to create Voronoi diagram: {e}")
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Add some padding for plot bounds
+    x_range = x_max - x_min
+    y_range = y_max - y_min
+    padding_x = x_range * 0.02
+    padding_y = y_range * 0.02
+    
+    plot_x_min, plot_x_max = x_min - padding_x, x_max + padding_x
+    plot_y_min, plot_y_max = y_min - padding_y, y_max + padding_y
+    
+    # Plot Voronoi regions
+    from matplotlib.patches import Polygon
+    
+    for point_idx, region_idx in enumerate(vor.point_region):
+        region = vor.regions[region_idx]
+        
+        if not region or -1 in region:
+            # Skip infinite regions
+            continue
+        
+        # Get vertices of the region
+        vertices = vor.vertices[region]
+        
+        # Check if region is within plot bounds (approximately)
+        if (vertices[:, 0].min() > plot_x_max or vertices[:, 0].max() < plot_x_min or
+            vertices[:, 1].min() > plot_y_max or vertices[:, 1].max() < plot_y_min):
+            continue
+        
+        # Color region based on which animal the point belongs to
+        animal_idx = point_labels[point_idx]
+        color = colors[animal_idx]
+        
+        # Create and add polygon
+        polygon = Polygon(vertices, closed=True, facecolor=color, 
+                         edgecolor=color, alpha=alpha, linewidth=0)
+        ax.add_patch(polygon)
+    
+    # Show seed points as small dots if requested
+    if show_seeds:
+        for animal_idx, (animal_name, data) in enumerate(animal_data.items()):
+            if animal_name in occupancy_maps:
+                # Get seed points for this animal
+                animal_seeds = all_points[point_labels == animal_idx]
+                if len(animal_seeds) > 0:
+                    ax.scatter(animal_seeds[:, 0], animal_seeds[:, 1], c=data['color'], 
+                              s=20, alpha=0.9, edgecolors='white', linewidths=0.5,
+                              marker='s', zorder=10)
+    
+    # Show animal paths if requested
+    if show_paths:
+        for animal_name, data in animal_data.items():
+            x_coords, y_coords = data['all_coords']
+            ax.plot(x_coords, y_coords, '-', color=data['color'], 
+                   linewidth=1, alpha=0.5, zorder=5)
+    
+    # Set plot limits
+    # ax.set_xlim(plot_x_min, plot_x_max)
+    # ax.set_ylim(plot_y_min, plot_y_max)
+
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
+    
+    # Formatting
+    ax.set_xlabel('X Coordinate (pixels)')
+    ax.set_ylabel('Y Coordinate (pixels)')
+    ax.invert_yaxis()
+    ax.set_aspect('equal', adjustable='box')
+    
+    # Create legend
+    from matplotlib.patches import Patch
+    legend_elements = []
+    
+    for animal_idx, animal_name in enumerate(animal_names):
+        if animal_name in animal_data:
+            legend_elements.append(Patch(facecolor=colors[animal_idx], 
+                                       alpha=alpha, label=f'{animal_name} territory'))
+    
+    ax.legend(handles=legend_elements, bbox_to_anchor=(1.05, 1), loc='upper left')
+    
+    # Set title
+    if title is None:
+        title = f'Voronoi Territorial Diagram (Occupancy-Based)'
+    ax.set_title(title)
+    
+    # Add statistics text
+    n_points = len(all_points)
+    n_regions = len([r for r in vor.regions if r and -1 not in r])
+    
+    stats_text = f'Seed points: {n_points}\nVoronoi regions: {n_regions}\nGrid: {bins}×{bins}\nMin occupancy: {min_occupancy}'
+    ax.text(0.02, 0.02, stats_text, transform=ax.transAxes, 
+           verticalalignment='bottom',
+           bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    plt.tight_layout()
+    print(f"Created occupancy-based Voronoi territorial diagram with {n_points} seed points from {len(animal_names)} animals")
+    
+    # Print statistics for each animal
+    for animal_idx, (animal_name, data) in enumerate(animal_data.items()):
+        if animal_name in occupancy_maps:
+            n_animal_seeds = np.sum(point_labels == animal_idx)
+            total_occupancy = np.sum(occupancy_maps[animal_name])
+            high_occ_bins = np.sum(occupancy_maps[animal_name] >= min_occupancy)
+            print(f"  {animal_name}: {n_animal_seeds} seed points, {high_occ_bins} high-occupancy bins, {total_occupancy:.0f} total frames")
+    
+    return fig
 
 
 def save_visualization(fig: plt.Figure, output_path: Union[str, Path],

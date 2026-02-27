@@ -227,12 +227,12 @@ class KilosortData:
         """Return a list of numpy arrays, each containing spike sample indices for a cluster."""
         print("Grouping spikes by cluster...")
         sample_indices = self.read_timestamps()
-        spike_SI = sample_indices[self.spike_times]
+        spike_times = sample_indices[self.spike_times].astype(float) / SAMPLE_RATE  # convert to seconds
         spike_clusters = self.spike_clusters
         ks_ids = self.ks_ids
         order = np.argsort(spike_clusters)
         sorted_clusters = spike_clusters[order]
-        sorted_spike_SI = spike_SI[order]
+        sorted_spike_times = spike_times[order]
 
         # find boundaries for unique cluster ids
         unique_ids, start_idx, counts = np.unique(sorted_clusters, return_index=True, return_counts=True)
@@ -241,19 +241,19 @@ class KilosortData:
         grouped = {}
         for uid, s, cnt in zip(unique_ids, start_idx, counts):
             # sort spikes within group to ensure ascending order
-            grouped[int(uid)] = np.sort(sorted_spike_SI[s : s + cnt])
+            grouped[int(uid)] = np.sort(sorted_spike_times[s : s + cnt])
 
         # now collect for ks_ids (missing ids will not be present in grouped)
-        allSpikeSI_fast = [grouped.get(int(c), np.array([], dtype=spike_SI.dtype)) for c in ks_ids]
-        self.allSpikeSI = allSpikeSI_fast
-        return allSpikeSI_fast
+        spike_times_by_cell = [grouped.get(int(c), np.array([], dtype=spike_times.dtype)) for c in ks_ids]
+        self.spike_times_by_cell = spike_times_by_cell
+        return spike_times_by_cell
     
     def get_firing_rates(self, bin_size_sec=1.0):
         """Calculate firing rates for all clusters"""
         rates = {}
         duration = self.duration_seconds
         for i, cluster_id in enumerate(self.ks_ids):
-            spike_times = self.allSpikeSI[i] / SAMPLE_RATE
+            spike_times = self.spike_times_by_cell[i]
             rates[cluster_id] = len(spike_times) / duration
         return rates
 
@@ -261,7 +261,7 @@ class KilosortData:
         """Calculate inter-spike interval statistics"""
         isi_stats = {}
         for i, cluster_id in enumerate(self.ks_ids):
-            spike_times = self.allSpikeSI[i] / SAMPLE_RATE
+            spike_times = self.spike_times_by_cell[i] 
             if len(spike_times) > 1:
                 isis = np.diff(spike_times)
                 isi_stats[cluster_id] = {
@@ -270,19 +270,12 @@ class KilosortData:
                     'cv_isi': np.std(isis) / np.mean(isis)
                 }
         return isi_stats
-
-    def get_spike_data(self):
-        """Return spike times and cluster assignments."""
-        if self.spike_times is None or self.spike_clusters is None:
-            raise ValueError("Spike data not loaded. Call load_spike_data() first.")
-        
-        return self.spike_times, self.spike_clusters, self.cluster_info
-    
+            
     def save_processed_data(self, cache_dir=None):
         """Save processed data for faster subsequent loading"""
         cache_path = cache_dir or self.KSfolder / 'processed_cache.pkl'
         cache_data = {
-            'allSpikeSI': self.allSpikeSI,
+            'spike_times_by_cell': self.spike_times_by_cell,
             'ks_ids': self.ks_ids,
             'metadata': self.metadata
         }

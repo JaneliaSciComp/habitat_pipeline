@@ -9,8 +9,8 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from .database import HabitatDatabase, ExperimentSession, DataFile
-from ..ingestion.kilosort_data_import import KilosortData
-from ..video.tracking_import import load_tracking_data, parse_tracking
+from ingestion.kilosort_data_import import KilosortData
+from video.tracking_import import load_tracking_data, parse_tracking
 
 
 class PipelineIntegration:
@@ -34,7 +34,7 @@ class PipelineIntegration:
             ks_data = KilosortData(kilosort_path)
             
             # Update session with metadata
-            with self.db.get_session() as session:
+            with self.db.get_db_session() as session:
                 db_session = session.query(ExperimentSession).filter(
                     ExperimentSession.session_id == session_id,
                     ExperimentSession.animal_id == animal_id
@@ -62,7 +62,7 @@ class PipelineIntegration:
             animals = parse_tracking(tracking_df)
             
             # Update processing notes
-            with self.db.get_session() as session:
+            with self.db.get_db_session() as session:
                 data_file = session.query(DataFile).filter(
                     DataFile.session_id == session_id,
                     DataFile.data_type == 'tracking',

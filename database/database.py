@@ -113,7 +113,7 @@ class HabitatDatabase:
         Base.metadata.create_all(bind=self.engine)
         logger.info(f"Database initialized at: {db_path}")
     
-    def get_session(self) -> Session:
+    def get_db_session(self) -> Session:
         """Get database session"""
         return self.SessionLocal()
     
@@ -122,7 +122,7 @@ class HabitatDatabase:
                    sex: str = None, birth_date: datetime = None, weight_g: float = None,
                    notes: str = None) -> Animal:
         """Add new animal to database"""
-        with self.get_session() as session:
+        with self.get_db_session() as session:
             # Check if animal already exists
             existing = session.query(Animal).filter(Animal.animal_id == animal_id).first()
             if existing:
@@ -146,12 +146,12 @@ class HabitatDatabase:
     
     def get_animal(self, animal_id: str) -> Optional[Animal]:
         """Get animal by ID"""
-        with self.get_session() as session:
+        with self.get_db_session() as session:
             return session.query(Animal).filter(Animal.animal_id == animal_id).first()
     
     def get_all_animals(self) -> List[Animal]:
         """Get all animals"""
-        with self.get_session() as session:
+        with self.get_db_session() as session:
             return session.query(Animal).all()
     
     # Session operations
@@ -159,7 +159,7 @@ class HabitatDatabase:
                     experiment_type: str = None, duration_minutes: float = None,
                     notes: str = None) -> ExperimentSession:
         """Add new experiment session"""
-        with self.get_session() as session:
+        with self.get_db_session() as session:
             # Parse date if string
             if isinstance(session_date, str):
                 try:
@@ -201,7 +201,7 @@ class HabitatDatabase:
     
     def get_session(self, session_id: str, animal_id: str = None) -> Optional[ExperimentSession]:
         """Get session by ID"""
-        with self.get_session() as session:
+        with self.get_db_session() as session:
             query = session.query(ExperimentSession).filter(ExperimentSession.session_id == session_id)
             if animal_id:
                 query = query.filter(ExperimentSession.animal_id == animal_id)
@@ -209,7 +209,7 @@ class HabitatDatabase:
     
     def get_animal_sessions(self, animal_id: str) -> List[ExperimentSession]:
         """Get all sessions for an animal"""
-        with self.get_session() as session:
+        with self.get_db_session() as session:
             return session.query(ExperimentSession).filter(
                 ExperimentSession.animal_id == animal_id
             ).order_by(ExperimentSession.session_date).all()
@@ -220,7 +220,7 @@ class HabitatDatabase:
         """Add data file to database"""
         file_path = Path(file_path)
         
-        with self.get_session() as session:
+        with self.get_db_session() as session:
             # Get file info
             file_size = file_path.stat().st_size if file_path.exists() else None
             
@@ -251,7 +251,7 @@ class HabitatDatabase:
     
     def get_session_data(self, session_id: str) -> Dict[str, List[DataFile]]:
         """Get all data files for a session, grouped by type"""
-        with self.get_session() as session:
+        with self.get_db_session() as session:
             files = session.query(DataFile).filter(DataFile.session_id == session_id).all()
             
             data_by_type = {}
@@ -264,7 +264,7 @@ class HabitatDatabase:
     
     def check_data_availability(self, animal_id: str = None, session_id: str = None) -> pd.DataFrame:
         """Create availability matrix showing what data exists for each session"""
-        with self.get_session() as session:
+        with self.get_db_session() as session:
             query = """
             SELECT 
                 s.animal_id,
@@ -321,27 +321,30 @@ class HabitatDatabase:
         }
         
         try:
-            # Look for animal directories
-            for animal_dir in base_path.iterdir():
-                if not animal_dir.is_dir():
+            # Look for session directories
+            for session_dir in base_path.iterdir():
+                if not session_dir.is_dir():
                     continue
                 
-                animal_id = animal_dir.name
-                scan_results['animals_found'].append(animal_id)
+                # Extract session ID (remove _merged.kilosort suffix if present)
+                session_id = session_dir.name.replace('_merged.kilosort', '')
                 
-                if auto_add:
-                    self.add_animal(animal_id)
-                
-                # Look for session directories
-                for session_dir in animal_dir.iterdir():
-                    if not session_dir.is_dir():
+                # Look for animal directories within session
+                for animal_dir in session_dir.iterdir():
+                    if not animal_dir.is_dir():
                         continue
                     
-                    # Extract session ID (remove _merged.kilosort suffix if present)
-                    session_id = session_dir.name.replace('_merged.kilosort', '')
+                    animal_id = animal_dir.name
+                    
+                    # Add to results
+                    if animal_id not in scan_results['animals_found']:
+                        scan_results['animals_found'].append(animal_id)
                     scan_results['sessions_found'].append((animal_id, session_id))
                     
                     if auto_add:
+                        # Add animal if not exists
+                        self.add_animal(animal_id)
+                        
                         try:
                             # Try to parse date from session_id
                             session_date = datetime.strptime(session_id, "%Y%m%d")
@@ -350,8 +353,8 @@ class HabitatDatabase:
                             # If date parsing fails, use current date
                             self.add_session(session_id, animal_id, datetime.now())
                     
-                    # Look for data files
-                    self._scan_session_directory(session_dir, session_id, scan_results, auto_add)
+                    # Look for data files in the animal directory
+                    self._scan_session_directory(animal_dir, session_id, scan_results, auto_add)
         
         except Exception as e:
             scan_results['errors'].append(f"Error scanning directory: {e}")
@@ -403,7 +406,7 @@ class HabitatDatabase:
         return availability_df
     
     def __repr__(self):
-        with self.get_session() as session:
+        with self.get_db_session() as session:
             n_animals = session.query(Animal).count()
             n_sessions = session.query(ExperimentSession).count()
             n_files = session.query(DataFile).count()

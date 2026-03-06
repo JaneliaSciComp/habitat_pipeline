@@ -141,7 +141,6 @@ class HabitatDatabase:
             session.add(animal)
             session.commit()
             session.refresh(animal)
-            logger.info(f"Added animal: {animal_id}")
             return animal
     
     def get_animal(self, animal_id: str) -> Optional[Animal]:
@@ -196,7 +195,6 @@ class HabitatDatabase:
             session.add(exp_session)
             session.commit()
             session.refresh(exp_session)
-            logger.info(f"Added session: {session_id} for animal {animal_id}")
             return exp_session
     
     def get_session(self, session_id: str, animal_id: str = None) -> Optional[ExperimentSession]:
@@ -246,7 +244,6 @@ class HabitatDatabase:
             session.add(data_file)
             session.commit()
             session.refresh(data_file)
-            logger.info(f"Added data file: {data_type} for session {session_id}")
             return data_file
     
     def get_session_data(self, session_id: str) -> Dict[str, List[DataFile]]:
@@ -264,50 +261,63 @@ class HabitatDatabase:
     
     def check_data_availability(self, animal_id: str = None, session_id: str = None) -> pd.DataFrame:
         """Create availability matrix showing what data exists for each session"""
-        with self.get_db_session() as session:
-            query = """
-            SELECT 
-                s.animal_id,
-                s.session_id,
-                s.session_date,
-                s.experiment_type,
-                df.data_type,
-                COUNT(df.id) as file_count,
-                SUM(CASE WHEN df.is_processed = 1 THEN 1 ELSE 0 END) as processed_count
-            FROM sessions s
-            LEFT JOIN data_files df ON s.session_id = df.session_id
-            """
-            
-            params = {}
-            conditions = []
+        with self.get_db_session() as db_session:
+            # Build base query for sessions
+            query = db_session.query(ExperimentSession)
             
             if animal_id:
-                conditions.append("s.animal_id = :animal_id")
-                params['animal_id'] = animal_id
-            
+                query = query.filter(ExperimentSession.animal_id == animal_id)
             if session_id:
-                conditions.append("s.session_id = :session_id")
-                params['session_id'] = session_id
+                query = query.filter(ExperimentSession.session_id == session_id)
             
-            if conditions:
-                query += " WHERE " + " AND ".join(conditions)
+            sessions = query.order_by(ExperimentSession.session_date).all()
             
-            query += " GROUP BY s.animal_id, s.session_id, df.data_type ORDER BY s.session_date"
-            
-            df = pd.read_sql(query, self.engine, params=params)
-            
-            # Pivot to create availability matrix
-            if not df.empty:
-                pivot_df = df.pivot_table(
-                    index=['animal_id', 'session_id', 'session_date', 'experiment_type'],
-                    columns='data_type',
-                    values='file_count',
-                    fill_value=0
-                ).reset_index()
-                
-                return pivot_df
-            else:
+            if not sessions:
                 return pd.DataFrame()
+            
+            # Convert sessions to DataFrame
+            session_data = []
+            for session in sessions:
+                session_data.append({
+                    'animal_id': session.animal_id,
+                    'session_id': session.session_id,
+                    'session_date': session.session_date,
+                    'experiment_type': session.experiment_type
+                })
+            
+            result_df = pd.DataFrame(session_data)
+            
+            # Get data file counts for each session
+            for i, session_row in result_df.iterrows():
+                session_id_val = session_row['session_id']
+                
+                # Query data files for this session
+                data_files = db_session.query(DataFile).filter(
+                    DataFile.session_id == session_id_val
+                ).all()
+                
+                # Count files by type
+                file_counts = {}
+                for df in data_files:
+                    data_type = df.data_type
+                    if data_type not in file_counts:
+                        file_counts[data_type] = 0
+                    file_counts[data_type] += 1
+                
+                # Add counts to result dataframe
+                for data_type, count in file_counts.items():
+                    result_df.at[i, data_type] = count
+            
+            # Fill NaN values with 0
+            result_df = result_df.fillna(0)
+            
+            # Convert data type columns to int
+            data_type_columns = [col for col in result_df.columns 
+                               if col not in ['animal_id', 'session_id', 'session_date', 'experiment_type']]
+            for col in data_type_columns:
+                result_df[col] = result_df[col].astype(int)
+            
+            return result_df
     
     # Utility methods
     def scan_data_directory(self, base_path: Union[str, Path], auto_add: bool = True) -> Dict:
@@ -321,17 +331,17 @@ class HabitatDatabase:
         }
         
         try:
-            # Look for session directories
+            # Look for session directories ending with ".rec"
             for session_dir in base_path.iterdir():
-                if not session_dir.is_dir():
+                if not session_dir.is_dir() or not session_dir.name.endswith('.rec'):
                     continue
                 
-                # Extract session ID (remove _merged.kilosort suffix if present)
-                session_id = session_dir.name.replace('_merged.kilosort', '')
+                # Extract session ID by removing ".rec" suffix
+                session_id = session_dir.name[:-4]  # Remove ".rec"
                 
-                # Look for animal directories within session
+                # Look for animal directories starting with "rat"
                 for animal_dir in session_dir.iterdir():
-                    if not animal_dir.is_dir():
+                    if not animal_dir.is_dir() or not animal_dir.name.startswith('rat'):
                         continue
                     
                     animal_id = animal_dir.name
@@ -353,8 +363,8 @@ class HabitatDatabase:
                             # If date parsing fails, use current date
                             self.add_session(session_id, animal_id, datetime.now())
                     
-                    # Look for data files in the animal directory
-                    self._scan_session_directory(animal_dir, session_id, scan_results, auto_add)
+                    # Look for kilosort data in the animal directory
+                    self._scan_animal_directory(animal_dir, session_id, scan_results, auto_add)
         
         except Exception as e:
             scan_results['errors'].append(f"Error scanning directory: {e}")
@@ -362,38 +372,41 @@ class HabitatDatabase:
         
         return scan_results
     
-    def _scan_session_directory(self, session_dir: Path, session_id: str, 
+    def _scan_animal_directory(self, animal_dir: Path, session_id: str, 
                                scan_results: Dict, auto_add: bool):
-        """Helper method to scan individual session directory"""
+        """Helper method to scan individual animal directory for kilosort data"""
         try:
-            # Look for kilosort data
-            kilosort_dirs = list(session_dir.glob("**/kilosort*"))
-            for ks_dir in kilosort_dirs:
-                if (ks_dir / "spike_times.npy").exists():
-                    scan_results['data_files_found'].append((session_id, 'ephys', str(ks_dir)))
-                    if auto_add:
-                        self.add_data_file(session_id, 'ephys', ks_dir)
+            # Look for *merged.kilosort directories within the animal directory
+            kilosort_merged_dirs = list(animal_dir.glob("*merged.kilosort"))
             
-            # Look for video files
-            video_extensions = ['.avi', '.mp4', '.mov', '.mkv']
-            for ext in video_extensions:
-                video_files = list(session_dir.glob(f"**/*{ext}"))
-                for video_file in video_files:
-                    scan_results['data_files_found'].append((session_id, 'video', str(video_file)))
-                    if auto_add:
-                        self.add_data_file(session_id, 'video', video_file)
-            
-            # Look for tracking data
-            tracking_extensions = ['.csv', '.tsv', '.dlc']
-            for ext in tracking_extensions:
-                tracking_files = list(session_dir.glob(f"**/*track*{ext}"))
-                for tracking_file in tracking_files:
-                    scan_results['data_files_found'].append((session_id, 'tracking', str(tracking_file)))
-                    if auto_add:
-                        self.add_data_file(session_id, 'tracking', tracking_file)
+            for merged_dir in kilosort_merged_dirs:
+                if not merged_dir.is_dir():
+                    continue
+                
+                # Look for kilosort4 subdirectory
+                kilosort4_dir = merged_dir / "kilosort4"
+                
+                if kilosort4_dir.exists() and kilosort4_dir.is_dir():
+                    # Check if essential kilosort files exist
+                    spike_times_file = kilosort4_dir / "spike_times.npy"
+                    spike_clusters_file = kilosort4_dir / "spike_clusters.npy"
+                    
+                    if spike_times_file.exists() and spike_clusters_file.exists():
+                        scan_results['data_files_found'].append((session_id, 'ephys', str(kilosort4_dir)))
+                        if auto_add:
+                            self.add_data_file(session_id, 'ephys', kilosort4_dir)
+                    else:
+                        logger.warning(f"Kilosort directory found but missing essential files: {kilosort4_dir}")
         
         except Exception as e:
-            scan_results['errors'].append(f"Error scanning session {session_id}: {e}")
+            scan_results['errors'].append(f"Error scanning animal directory {animal_dir}: {e}")
+            logger.error(f"Error scanning animal directory {animal_dir}: {e}")
+    
+    def _scan_session_directory(self, session_dir: Path, session_id: str, 
+                               scan_results: Dict, auto_add: bool):
+        """Helper method to scan individual session directory (legacy method for compatibility)"""
+        # This method is kept for backward compatibility but redirects to _scan_animal_directory
+        self._scan_animal_directory(session_dir, session_id, scan_results, auto_add)
     
     def export_summary(self, output_path: Union[str, Path] = None) -> pd.DataFrame:
         """Export database summary to CSV"""

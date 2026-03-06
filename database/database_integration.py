@@ -157,14 +157,15 @@ class PipelineIntegration:
             session_id = row['session_id']
             
             try:
-                # Load session data to validate
-                session_data = self.load_session_data(animal_id, session_id)
+                # Check data file existence without loading
+                has_ephys = self._check_ephys_files_exist(session_id)
+                has_tracking = self._check_tracking_files_exist(session_id)
                 
                 results['processed_sessions'].append({
                     'animal_id': animal_id,
                     'session_id': session_id,
-                    'has_ephys': 'ephys' in session_data,
-                    'has_tracking': 'tracking' in session_data
+                    'has_ephys': has_ephys,
+                    'has_tracking': has_tracking
                 })
                 
             except Exception as e:
@@ -181,6 +182,52 @@ class PipelineIntegration:
             }
         
         return results
+    
+    def _check_ephys_files_exist(self, session_id: str) -> bool:
+        """Check if ephys files exist on disk without loading KilosortData"""
+        try:
+            data_files = self.db.get_session_data(session_id)
+            
+            if 'ephys' not in data_files:
+                return False
+            
+            for ephys_file in data_files['ephys']:
+                ephys_path = Path(ephys_file.file_path)
+                
+                # Check if the directory exists
+                if not ephys_path.exists():
+                    continue
+                
+                # Check for essential kilosort files
+                spike_times_file = ephys_path / "spike_times.npy"
+                spike_clusters_file = ephys_path / "spike_clusters.npy"
+                
+                if spike_times_file.exists() and spike_clusters_file.exists():
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            return False
+    
+    def _check_tracking_files_exist(self, session_id: str) -> bool:
+        """Check if tracking files exist on disk"""
+        try:
+            data_files = self.db.get_session_data(session_id)
+            
+            if 'tracking' not in data_files:
+                return False
+            
+            for tracking_file in data_files['tracking']:
+                tracking_path = Path(tracking_file.file_path)
+                
+                if tracking_path.exists():
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            return False
 
 
 def quick_setup(data_directory: Path, db_path: Optional[str] = None) -> PipelineIntegration:

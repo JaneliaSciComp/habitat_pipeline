@@ -337,15 +337,22 @@ def get_tracking_files_by_date(session_id: str, config_path: Optional[str] = Non
     
     matching_tracking_files = []
     
+    print(f"Searching for tracking files in {search_directory} with date '{session_date}' and extensions {tracking_extensions}")
     try:
-        # Search through all files in the search directory and subdirectories
-        for tracking_file in search_directory.rglob('*'):
+        # Search through files containing the session date in current directory and 1 level deep
+        # Search in current directory
+        for tracking_file in search_directory.glob(f'*{session_date}*'):
             if tracking_file.is_file():
                 # Check if file has a tracking extension
                 if tracking_file.suffix.lower() in [ext.lower() for ext in tracking_extensions]:
-                    # Check if the session date appears in the filename
-                    if session_date in tracking_file.name:
-                        matching_tracking_files.append(tracking_file)
+                    matching_tracking_files.append(tracking_file)
+        
+        # Search in 1 level deep subdirectories
+        for tracking_file in search_directory.glob(f'*/*{session_date}*'):
+            if tracking_file.is_file():
+                # Check if file has a tracking extension
+                if tracking_file.suffix.lower() in [ext.lower() for ext in tracking_extensions]:
+                    matching_tracking_files.append(tracking_file)
     
     except (PermissionError, OSError) as e:
         raise RuntimeError(f"Error accessing directory {search_directory}: {e}")

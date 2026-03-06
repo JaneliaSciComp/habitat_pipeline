@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
-from .database import HabitatDatabase, ExperimentSession, DataFile
+from .database_core import HabitatDatabase, ExperimentSession, DataFile
 from ingestion.kilosort_data_import import KilosortData
 from video.tracking_import import load_tracking_data, parse_tracking
 

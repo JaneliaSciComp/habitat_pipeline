@@ -58,10 +58,10 @@ def add_session(args):
 
 def scan_directory(args):
     """Scan directory and populate database"""
-    db = HabitatDatabase(args.db_path)
+    db = HabitatDatabase(args.db_path, verbose=args.verbose)
     
     print(f"Scanning directory: {args.directory}")
-    results = db.scan_data_directory(args.directory, auto_add=args.auto_add)
+    results = db.scan_data_directory(args.directory, auto_add=args.auto_add, verbose=args.verbose)
     
     print(f"\\nScan results:")
     print(f"  Animals found: {len(results['animals_found'])}")
@@ -72,6 +72,17 @@ def scan_directory(args):
         print(f"  Errors: {len(results['errors'])}")
         for error in results['errors']:
             print(f"    - {error}")
+    
+    # Show summary when not verbose
+    if not args.verbose:
+        print(f"\\nSummary (verbose mode disabled):")
+        print(f"  Total animals processed: {len(results['animals_found'])}")
+        print(f"  Total sessions processed: {len(results['sessions_found'])}")
+        print(f"  Total data files found: {len(results['data_files_found'])}")
+        if results['errors']:
+            print(f"  Total errors: {len(results['errors'])}")
+        else:
+            print(f"  No errors encountered")
 
 
 def show_status(args):
@@ -106,6 +117,8 @@ def main():
     """Main CLI interface"""
     parser = argparse.ArgumentParser(description="Habitat Pipeline Database Management")
     parser.add_argument("--db-path", default="habitat_pipeline.db", help="Path to database file")
+    parser.add_argument("--verbose", action="store_true", default=True, help="Enable verbose output (default: True)")
+    parser.add_argument("--quiet", dest="verbose", action="store_false", help="Disable verbose output")
     
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
     
@@ -138,6 +151,8 @@ def main():
     scan_parser = subparsers.add_parser("scan", help="Scan directory and populate database")
     scan_parser.add_argument("directory", help="Directory to scan")
     scan_parser.add_argument("--auto-add", action="store_true", help="Automatically add found data")
+    scan_parser.add_argument("--verbose", action="store_true", default=True, help="Enable verbose output (default: True)")
+    scan_parser.add_argument("--quiet", dest="verbose", action="store_false", help="Disable verbose output")
     scan_parser.set_defaults(func=scan_directory)
     
     # Status command

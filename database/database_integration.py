@@ -16,9 +16,9 @@ from video.tracking_import import load_tracking_data, parse_tracking
 class PipelineIntegration:
     """Integration between database and analysis pipeline"""
     
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: Optional[str] = None, verbose: bool = True):
         """Initialize with database connection"""
-        self.db = HabitatDatabase(db_path)
+        self.db = HabitatDatabase(db_path, verbose=verbose)
     
     def register_kilosort_data(self, kilosort_path: Path, animal_id: str, session_id: str) -> bool:
         """Register Kilosort data in database"""
@@ -230,9 +230,9 @@ class PipelineIntegration:
             return False
 
 
-def quick_setup(data_directory: Path, db_path: Optional[str] = None) -> PipelineIntegration:
+def quick_setup(data_directory: Path, db_path: Optional[str] = None, verbose: bool = True) -> PipelineIntegration:
     """Quick setup: scan directory and create database"""
-    integration = PipelineIntegration(db_path)
+    integration = PipelineIntegration(db_path, verbose=verbose)
     
     print(f"Scanning and setting up database from: {data_directory}")
     results = integration.batch_process_directory(data_directory)

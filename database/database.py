@@ -126,7 +126,8 @@ class HabitatDatabase:
             # Check if animal already exists
             existing = session.query(Animal).filter(Animal.animal_id == animal_id).first()
             if existing:
-                logger.warning(f"Animal {animal_id} already exists. Use update_animal() to modify.")
+                if self.verbose:
+                    logger.warning(f"Animal {animal_id} already exists. Use update_animal() to modify.")
                 return existing
             
             animal = Animal(
@@ -181,7 +182,8 @@ class HabitatDatabase:
                 ExperimentSession.animal_id == animal_id
             ).first()
             if existing:
-                logger.warning(f"Session {session_id} for animal {animal_id} already exists.")
+                if self.verbose:
+                    logger.warning(f"Session {session_id} for animal {animal_id} already exists.")
                 return existing
             
             exp_session = ExperimentSession(
@@ -230,7 +232,8 @@ class HabitatDatabase:
             ).first()
             
             if existing:
-                logger.warning(f"Data file already exists: {file_path}")
+                if self.verbose:
+                    logger.warning(f"Data file already exists: {file_path}")
                 return existing
             
             data_file = DataFile(
@@ -320,8 +323,16 @@ class HabitatDatabase:
             return result_df
     
     # Utility methods
-    def scan_data_directory(self, base_path: Union[str, Path], auto_add: bool = True) -> Dict:
+    def scan_data_directory(self, base_path: Union[str, Path], auto_add: bool = True, verbose: bool = None) -> Dict:
         """Scan directory structure and optionally auto-populate database"""
+        # Use provided verbose setting or fall back to instance setting
+        if verbose is None:
+            verbose = self.verbose
+        
+        # Temporarily set verbose mode for this operation
+        original_verbose = self.verbose
+        self.verbose = verbose
+        
         base_path = Path(base_path)
         scan_results = {
             'animals_found': [],
@@ -356,12 +367,21 @@ class HabitatDatabase:
                         self.add_animal(animal_id)
                         
                         try:
-                            # Try to parse date from session_id
-                            session_date = datetime.strptime(session_id, "%Y%m%d")
-                            self.add_session(session_id, animal_id, session_date)
+                            # Parse date and time from session_id format YYYYMMDD_HHMMSS
+                            if '_' in session_id and len(session_id) >= 15:
+                                date_part, time_part = session_id.split('_', 1)
+                                # Parse YYYYMMDD_HHMMSS
+                                session_date = datetime.strptime(f"{date_part}_{time_part}", "%Y%m%d_%H%M%S")
+                            else:
+                                # Fallback: try to parse just date part YYYYMMDD
+                                date_part = session_id.split('_')[0] if '_' in session_id else session_id
+                                session_date = datetime.strptime(date_part, "%Y%m%d")
                         except ValueError:
-                            # If date parsing fails, use current date
-                            self.add_session(session_id, animal_id, datetime.now())
+                            # If parsing fails, use current date
+                            session_date = datetime.now()
+                            logger.warning(f"Could not parse date from session_id '{session_id}', using current date")
+                        
+                        self.add_session(session_id, animal_id, session_date)
                     
                     # Look for kilosort data in the animal directory
                     self._scan_animal_directory(animal_dir, session_id, scan_results, auto_add)
@@ -369,6 +389,9 @@ class HabitatDatabase:
         except Exception as e:
             scan_results['errors'].append(f"Error scanning directory: {e}")
             logger.error(f"Error scanning directory: {e}")
+        finally:
+            # Restore original verbose setting
+            self.verbose = original_verbose
         
         return scan_results
     
@@ -428,9 +451,9 @@ class HabitatDatabase:
 
 
 # Convenience function
-def create_database(db_path: Union[str, Path] = None) -> HabitatDatabase:
+def create_database(db_path: Union[str, Path] = None, verbose: bool = True) -> HabitatDatabase:
     """Create and return a new HabitatDatabase instance"""
-    return HabitatDatabase(db_path)
+    return HabitatDatabase(db_path, verbose=verbose)
 
 
 if __name__ == "__main__":

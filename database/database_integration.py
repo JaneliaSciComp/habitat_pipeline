@@ -16,7 +16,7 @@ from video.tracking_import import load_tracking_data, parse_tracking
 class PipelineIntegration:
     """Integration between database and analysis pipeline"""
     
-    def __init__(self, db_path: Optional[str] = None, verbose: bool = True):
+    def __init__(self, db_path: Optional[str] = None, verbose: bool = False):
         """Initialize with database connection"""
         self.db = HabitatDatabase(db_path, verbose=verbose)
     
@@ -230,7 +230,7 @@ class PipelineIntegration:
             return False
 
 
-def quick_setup(data_directory: Path, db_path: Optional[str] = None, verbose: bool = True) -> PipelineIntegration:
+def quick_setup(data_directory: Path, db_path: Optional[str] = None, verbose: bool = False) -> PipelineIntegration:
     """Quick setup: scan directory and create database"""
     integration = PipelineIntegration(db_path, verbose=verbose)
     

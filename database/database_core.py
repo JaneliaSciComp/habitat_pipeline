@@ -93,17 +93,20 @@ class DataFile(Base):
 class HabitatDatabase:
     """Main database interface for the habitat pipeline"""
     
-    def __init__(self, db_path: Union[str, Path] = None):
+    def __init__(self, db_path: Union[str, Path] = None, verbose: bool = False):
         """
         Initialize database connection.
         
         Args:
             db_path: Path to SQLite database file. If None, creates in current directory.
+            verbose: Enable verbose logging and warnings.
         """
         if db_path is None:
             db_path = Path.cwd() / "habitat_pipeline.db"
         else:
             db_path = Path(db_path)
+            
+        self.verbose = verbose
             
         self.db_path = db_path
         self.engine = create_engine(f'sqlite:///{db_path}', echo=False)

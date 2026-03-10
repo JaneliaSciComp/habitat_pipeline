@@ -10,7 +10,7 @@ from pathlib import Path
 from datetime import datetime
 import pandas as pd
 
-from .database import HabitatDatabase
+from .database_core import HabitatDatabase
 
 
 def init_database(args):

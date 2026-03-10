@@ -316,14 +316,6 @@ def get_tracking_files_by_date(session_id: str, config_path: Optional[str] = Non
     if not tracking_base.exists():
         raise FileNotFoundError(f"Tracking directory not found: {tracking_base}")
     
-    # Set search directory based on subfolder parameter
-    if subfolder is not None:
-        search_directory = tracking_base / subfolder
-        if not search_directory.exists():
-            raise FileNotFoundError(f"Subfolder not found: {search_directory}")
-    else:
-        search_directory = tracking_base
-    
     # Extract date from session_id (first 8 characters, assuming YYYYMMDD format)
     # Handle both "20251210" and "20251210_110059" formats
     if len(session_id) >= 8:
@@ -334,6 +326,25 @@ def get_tracking_files_by_date(session_id: str, config_path: Optional[str] = Non
             raise ValueError(f"Could not extract valid date from session_id: {session_id}")
     else:
         raise ValueError(f"Session ID too short to extract date: {session_id}")
+    
+    # Set search directory based on subfolder parameter
+    if subfolder is not None:
+        search_directory = tracking_base / subfolder
+        if not search_directory.exists():
+            raise FileNotFoundError(f"Subfolder not found: {search_directory}")
+    else:
+        # Try to find a subfolder containing the session_id or session_date (one level deep only)
+        search_directory = tracking_base
+        try:
+            # Only search immediate subdirectories (one level deep)
+            for potential_subfolder in tracking_base.iterdir():
+                if potential_subfolder.is_dir() and (session_id in potential_subfolder.name or session_date in potential_subfolder.name):
+                    search_directory = potential_subfolder
+                    print(f"Found matching subfolder: {potential_subfolder.name}")
+                    break
+        except (PermissionError, OSError):
+            # If we can't read the directory, fall back to searching the base directory
+            pass
     
     matching_tracking_files = []
     
@@ -348,11 +359,11 @@ def get_tracking_files_by_date(session_id: str, config_path: Optional[str] = Non
                     matching_tracking_files.append(tracking_file)
         
         # Search in 1 level deep subdirectories
-        for tracking_file in search_directory.glob(f'*/*{session_date}*'):
-            if tracking_file.is_file():
-                # Check if file has a tracking extension
-                if tracking_file.suffix.lower() in [ext.lower() for ext in tracking_extensions]:
-                    matching_tracking_files.append(tracking_file)
+        # for tracking_file in search_directory.glob(f'*/*{session_date}*'):
+        #     if tracking_file.is_file():
+        #         # Check if file has a tracking extension
+        #         if tracking_file.suffix.lower() in [ext.lower() for ext in tracking_extensions]:
+        #             matching_tracking_files.append(tracking_file)
     
     except (PermissionError, OSError) as e:
         raise RuntimeError(f"Error accessing directory {search_directory}: {e}")

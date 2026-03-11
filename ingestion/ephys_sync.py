@@ -500,3 +500,368 @@ Time Range:
     print(f"Time range: {matched_ephys.max() - matched_ephys.min():.3f} s")
     
     return fig
+
+
+class DataSyncManager:
+    """
+    Data Synchronization Manager for Ephys and Behavioral Data
+    
+    This class manages the synchronization between ephys and behavioral data streams
+    using the existing ephys_sync functions. It provides a unified interface for
+    loading sync data, creating mappings, and converting timestamps between systems.
+    
+    Attributes:
+        animal_id: Animal identifier
+        session_id: Session identifier
+        dio_channel: DIO channel used for sync
+        ephys_sync: Array of ephys sync timestamps
+        behavior_sync: Array of behavioral sync timestamps  
+        system_time: System time at creation
+        mapping: Dictionary containing sync mapping parameters
+        metadata: Dictionary containing sync session metadata
+    """
+    
+    def __init__(self, animal_id: str, session_id: str, dio_channel: int = 1, 
+                 config_path: str = None, auto_load: bool = True):
+        """
+        Initialize DataSyncManager.
+        
+        Args:
+            animal_id: Animal identifier (e.g., "613")
+            session_id: Session identifier (e.g., "20251210") 
+            dio_channel: DIO channel number for sync (default: 1)
+            config_path: Path to configuration file (default: None)
+            auto_load: If True, automatically load sync data and create mapping
+        """
+        self.animal_id = animal_id
+        self.session_id = session_id
+        self.dio_channel = dio_channel
+        self.config_path = config_path
+        
+        # Initialize data attributes
+        self.ephys_sync = None
+        self.behavior_sync = None 
+        self.system_time = None
+        self.mapping = None
+        
+        # Initialize metadata
+        self.metadata = {
+            'animal_id': animal_id,
+            'session_id': session_id,
+            'dio_channel': dio_channel,
+            'loaded_at': None,
+            'mapping_method': None,
+            'mapping_quality': {},
+            'sync_stats': {}
+        }
+        
+        # Auto-load if requested
+        if auto_load:
+            self.load_sync_data()
+    
+    def load_sync_data(self) -> tuple:
+        """
+        Load ephys and behavioral synchronization data.
+        
+        Returns:
+            Tuple of (ephys_sync, behavior_sync, system_time)
+        """
+        try:
+            print(f"Loading sync data for {self.animal_id}/{self.session_id}")
+            
+            # Use existing load_ephys_sync function
+            self.ephys_sync, self.behavior_sync, self.system_time = load_ephys_sync(
+                self.animal_id, self.session_id, self.dio_channel, self.config_path
+            )
+            
+            # Update metadata
+            self.metadata['loaded_at'] = np.datetime64('now').astype(str)
+            self.metadata['sync_stats'] = {
+                'ephys_sync_count': len(self.ephys_sync),
+                'behavior_sync_count': len(self.behavior_sync),
+                'ephys_duration': float(self.ephys_sync[-1] - self.ephys_sync[0]) if len(self.ephys_sync) > 1 else 0,
+                'behavior_duration': float(self.behavior_sync[-1] - self.behavior_sync[0]) if len(self.behavior_sync) > 1 else 0,
+                'system_time': self.system_time
+            }
+            
+            print(f"Successfully loaded sync data:")
+            print(f"  - Ephys sync events: {len(self.ephys_sync)}")
+            print(f"  - Behavior sync events: {len(self.behavior_sync)}")
+            print(f"  - System time: {self.system_time}")
+            
+            return self.ephys_sync, self.behavior_sync, self.system_time
+            
+        except Exception as e:
+            print(f"Error loading sync data: {e}")
+            raise
+    
+    def create_mapping(self, method: str = 'interval', **kwargs) -> dict:
+        """
+        Create synchronization mapping between ephys and behavioral timestamps.
+        
+        Args:
+            method: Mapping method ('interval' or 'new_algorithm')
+            **kwargs: Additional parameters for mapping functions
+            
+        Returns:
+            Dictionary containing mapping parameters and conversion functions
+        """
+        if self.ephys_sync is None or self.behavior_sync is None:
+            raise ValueError("Sync data not loaded. Call load_sync_data() first.")
+        
+        try:
+            print(f"Creating sync mapping using '{method}' method")
+            
+            if method == 'interval':
+                # Use find_sync_mapping function
+                mapping_params = {
+                    'search_window': kwargs.get('search_window', 300),
+                    'interval_tolerance': kwargs.get('interval_tolerance', 0.02),
+                    'min_sequence_length': kwargs.get('min_sequence_length', 10)
+                }
+                
+                self.mapping = find_sync_mapping(
+                    self.behavior_sync, self.ephys_sync, self.system_time, **mapping_params
+                )
+                
+            elif method == 'new_algorithm':
+                # Use find_sync_mapping_new function
+                mapping_params = {
+                    'tolerance': kwargs.get('tolerance', 0.1),
+                    'search_window': kwargs.get('search_window', 300),
+                    'initial_subset_size': kwargs.get('initial_subset_size', 10)
+                }
+                
+                best_offset, correlation, params = find_sync_mapping_new(
+                    self.ephys_sync, self.behavior_sync, self.system_time, **mapping_params
+                )
+                
+                # Create mapping dictionary in standard format
+                self.mapping = {
+                    'method': 'new_algorithm',
+                    'offset': best_offset,
+                    'correlation': correlation,
+                    'mapping_params': params
+                }
+                
+                # Add conversion functions for new algorithm
+                def ephys_to_behavior_new(t_ephys):
+                    """Convert ephys to behavior timestamps using new algorithm"""
+                    # Simple offset-based conversion (can be enhanced)
+                    offset_time = self.behavior_sync[best_offset] - self.ephys_sync[0]
+                    return t_ephys + offset_time
+                
+                def behavior_to_ephys_new(t_behavior):
+                    """Convert behavior to ephys timestamps using new algorithm"""
+                    offset_time = self.behavior_sync[best_offset] - self.ephys_sync[0]
+                    return t_behavior - offset_time
+                
+                self.mapping['ephys_to_behavior'] = ephys_to_behavior_new
+                self.mapping['behavior_to_ephys'] = behavior_to_ephys_new
+                
+            else:
+                raise ValueError(f"Unknown mapping method: {method}")
+            
+            # Update metadata
+            self.metadata['mapping_method'] = method
+            self.metadata['mapping_quality'] = self._extract_quality_metrics()
+            
+            print(f"Successfully created {method} mapping")
+            self._print_mapping_summary()
+            
+            return self.mapping
+            
+        except Exception as e:
+            print(f"Error creating mapping: {e}")
+            raise
+    
+    def _extract_quality_metrics(self) -> dict:
+        """Extract quality metrics from mapping results."""
+        if not self.mapping:
+            return {}
+        
+        quality = {}
+        
+        if 'r_squared' in self.mapping:
+            # Linear regression mapping
+            quality['r_squared'] = self.mapping['r_squared']
+            quality['n_matches'] = self.mapping['n_matches']
+            quality['slope'] = self.mapping['slope']
+            quality['intercept'] = self.mapping['intercept']
+            
+        if 'correlation' in self.mapping:
+            # New algorithm mapping
+            quality['correlation'] = self.mapping['correlation']
+            
+        if 'mapping_params' in self.mapping:
+            # Additional parameters from new algorithm
+            params = self.mapping['mapping_params']
+            quality.update({
+                'match_fraction': params.get('match_fraction', 0),
+                'mean_interval_diff': params.get('mean_interval_diff', 0),
+                'matched_timestamps': params.get('matched_timestamps', 0)
+            })
+        
+        return quality
+    
+    def _print_mapping_summary(self):
+        """Print summary of mapping results."""
+        if not self.mapping:
+            return
+        
+        print("=== Sync Mapping Summary ===")
+        
+        if 'r_squared' in self.mapping:
+            print(f"Method: Linear regression")
+            print(f"R²: {self.mapping['r_squared']:.6f}")
+            print(f"Matches: {self.mapping['n_matches']}")
+            print(f"Slope: {self.mapping['slope']:.8f}")
+            
+        if 'correlation' in self.mapping:
+            print(f"Method: New algorithm")
+            print(f"Correlation: {self.mapping['correlation']:.6f}")
+            
+        if 'mapping_params' in self.mapping:
+            params = self.mapping['mapping_params']
+            print(f"Match fraction: {params.get('match_fraction', 0):.2%}")
+            print(f"Mean interval diff: {params.get('mean_interval_diff', 0):.6f}s")
+    
+    def convert_ephys_to_behavior(self, ephys_timestamps):
+        """
+        Convert ephys timestamps to behavioral timestamps.
+        
+        Args:
+            ephys_timestamps: Array-like of ephys timestamps
+            
+        Returns:
+            Array of corresponding behavioral timestamps
+        """
+        if not self.mapping or 'ephys_to_behavior' not in self.mapping:
+            raise ValueError("Mapping not created. Call create_mapping() first.")
+        
+        return self.mapping['ephys_to_behavior'](ephys_timestamps)
+    
+    def convert_behavior_to_ephys(self, behavior_timestamps):
+        """
+        Convert behavioral timestamps to ephys timestamps.
+        
+        Args:
+            behavior_timestamps: Array-like of behavioral timestamps
+            
+        Returns:
+            Array of corresponding ephys timestamps  
+        """
+        if not self.mapping or 'behavior_to_ephys' not in self.mapping:
+            raise ValueError("Mapping not created. Call create_mapping() first.")
+        
+        return self.mapping['behavior_to_ephys'](behavior_timestamps)
+    
+    def plot_sync_results(self, figsize=(15, 10)):
+        """
+        Plot synchronization results using the existing plot function.
+        
+        Args:
+            figsize: Tuple specifying figure size
+            
+        Returns:
+            matplotlib figure object
+        """
+        if not self.mapping:
+            raise ValueError("Mapping not created. Call create_mapping() first.")
+        
+        # Only works with interval method that returns proper mapping dict
+        if 'matched_ephys' in self.mapping:
+            return plot_sync_results(
+                self.mapping, self.ephys_sync, self.behavior_sync, figsize
+            )
+        else:
+            print("Plotting only available for 'interval' mapping method")
+            return None
+    
+    def get_sync_summary(self) -> dict:
+        """
+        Get comprehensive summary of synchronization session.
+        
+        Returns:
+            Dictionary containing all sync data and metadata
+        """
+        summary = {
+            'metadata': self.metadata.copy(),
+            'sync_data': {
+                'ephys_sync_available': self.ephys_sync is not None,
+                'behavior_sync_available': self.behavior_sync is not None,
+                'mapping_available': self.mapping is not None
+            }
+        }
+        
+        if self.ephys_sync is not None:
+            summary['sync_data']['ephys_sync_shape'] = self.ephys_sync.shape
+            summary['sync_data']['ephys_time_range'] = (
+                float(self.ephys_sync[0]), float(self.ephys_sync[-1])
+            )
+        
+        if self.behavior_sync is not None:
+            summary['sync_data']['behavior_sync_shape'] = self.behavior_sync.shape  
+            summary['sync_data']['behavior_time_range'] = (
+                float(self.behavior_sync[0]), float(self.behavior_sync[-1])
+            )
+        
+        if self.mapping:
+            summary['mapping'] = {
+                'method': self.metadata.get('mapping_method'),
+                'quality_metrics': self.metadata.get('mapping_quality', {})
+            }
+        
+        return summary
+    
+    def __repr__(self) -> str:
+        """String representation of DataSyncManager."""
+        status = "loaded" if self.ephys_sync is not None else "not loaded"
+        mapped = "mapped" if self.mapping is not None else "not mapped"
+        
+        return (f"DataSyncManager({self.animal_id}/{self.session_id}, "
+                f"DIO{self.dio_channel}, {status}, {mapped})")
+
+
+if __name__ == "__main__":
+    # Example usage of DataSyncManager
+    print("DataSyncManager Example Usage:")
+    print("=" * 50)
+    
+    # Example with real data (commented out - replace with actual IDs)
+    print("To use DataSyncManager with real data:")
+    print('sync_manager = DataSyncManager("613", "20251210", dio_channel=1)')
+    print("")
+    
+    print("This class provides a complete synchronization workflow:")
+    print("1. Automatic loading of ephys and behavioral sync data")
+    print("2. Multiple mapping algorithms (interval-based or new algorithm)")  
+    print("3. Timestamp conversion between systems")
+    print("4. Quality assessment and visualization")
+    print("")
+    
+    print("Key methods:")
+    print("  - load_sync_data(): Load synchronization timestamps")
+    print("  - create_mapping(): Create sync mapping using specified algorithm")
+    print("  - convert_ephys_to_behavior(): Convert timestamps from ephys to behavior time")
+    print("  - convert_behavior_to_ephys(): Convert timestamps from behavior to ephys time")
+    print("  - plot_sync_results(): Visualize synchronization quality")
+    print("  - get_sync_summary(): Get comprehensive sync session summary")
+    print("")
+    
+    print("Example workflow:")
+    print("# Initialize and load data automatically")
+    print('sync = DataSyncManager("animal_id", "session_id", auto_load=True)')
+    print("")
+    print("# Create mapping using interval method")  
+    print('mapping = sync.create_mapping(method="interval", interval_tolerance=0.02)')
+    print("")
+    print("# Convert some ephys timestamps to behavior time")
+    print("ephys_times = [100.0, 200.0, 300.0]")
+    print("behavior_times = sync.convert_ephys_to_behavior(ephys_times)")
+    print("")
+    print("# Plot synchronization results")
+    print("fig = sync.plot_sync_results()")
+    print("")
+    print("# Get comprehensive summary")
+    print("summary = sync.get_sync_summary()")

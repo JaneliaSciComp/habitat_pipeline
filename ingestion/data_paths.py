@@ -8,7 +8,8 @@ default_paths.json file.
 
 import json
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Union
+from datetime import datetime
 import glob
 import pandas as pd
 
@@ -542,12 +543,424 @@ def get_kilosort_path_with_validation(animal_id: str, session_id: str,
     return kilosort_path
 
 
-if __name__ == "__main__":
-    # Example usage
-    print("Kilosort Path Management Example:")
-    print("-" * 40)
+class DataPathManager:
+    """
+    Data Path Manager for Habitat Pipeline Sessions
     
-    # Example with partial matching
+    This class manages all data file paths for a specific animal/session combination
+    using the existing data_paths functions. It provides a centralized interface for
+    accessing ephys, video, tracking, and synchronization data paths.
+    
+    Attributes:
+        animal_id: Animal identifier
+        session_id: Session identifier  
+        config_path: Path to configuration file
+        kilosort_path: Path to Kilosort ephys data
+        dio_paths: Dictionary of DIO channel paths
+        video_files: List of video file paths
+        tracking_files: List of tracking file paths
+        pulse_log_path: Path to pulse log file
+        metadata: Dictionary containing session metadata
+    """
+    
+    def __init__(self, animal_id: str, session_id: str, config_path: Optional[str] = None, 
+                 auto_load: bool = True):
+        """
+        Initialize DataPathManager for a specific animal/session.
+        
+        Args:
+            animal_id: Animal identifier (e.g., "613" or "rat613")
+            session_id: Session identifier (e.g., "20251210" or "20251210_110059")
+            config_path: Optional path to config file
+            auto_load: If True, automatically discover and load all data paths
+        """
+        self.animal_id = animal_id
+        self.session_id = session_id
+        self.config_path = config_path
+        
+        # Initialize path attributes
+        self.kilosort_path = None
+        self.dio_paths = {}
+        self.video_files = []
+        self.tracking_files = []
+        self.pulse_log_path = None
+        
+        # Initialize metadata
+        self.metadata = {
+            'animal_id': animal_id,
+            'session_id': session_id,
+            'loaded_at': None,
+            'data_availability': {},
+            'path_validation': {},
+            'discovered_files': {}
+        }
+        
+        # Auto-load paths if requested
+        if auto_load:
+            self.load_all_paths()
+    
+    def load_all_paths(self):
+        """Load all available data paths for this animal/session."""
+        print(f"Loading data paths for {self.animal_id}/{self.session_id}")
+        
+        try:
+            self._load_ephys_paths()
+            self._load_video_paths() 
+            self._load_tracking_paths()
+            self._load_sync_paths()
+            self._update_metadata()
+            
+            print(f"Successfully loaded data paths:")
+            self._print_availability_summary()
+            
+        except Exception as e:
+            print(f"Error loading paths: {e}")
+            raise
+    
+    def _load_ephys_paths(self):
+        """Load ephys-related paths (Kilosort and DIO)."""
+        try:
+            # Load Kilosort path
+            self.kilosort_path = get_kilosort_path(
+                self.animal_id, self.session_id, self.config_path
+            )
+            print(f"  ✓ Kilosort path: {self.kilosort_path}")
+            
+            # Load DIO paths for common channels
+            self.dio_paths = {}
+            for channel in range(1, 5):  # Try channels 1-4
+                try:
+                    dio_path = get_dio_path(
+                        self.animal_id, self.session_id, channel, self.config_path
+                    )
+                    self.dio_paths[channel] = dio_path
+                    print(f"  ✓ DIO channel {channel}: {dio_path}")
+                except (FileNotFoundError, ValueError):
+                    # Channel doesn't exist, skip
+                    pass
+                    
+        except Exception as e:
+            print(f"  ✗ Error loading ephys paths: {e}")
+            self.kilosort_path = None
+    
+    def _load_video_paths(self):
+        """Load video file paths."""
+        try:
+            self.video_files = get_video_files_by_date(
+                self.session_id, self.config_path, subfolder="social_videos"
+            )
+            print(f"  ✓ Found {len(self.video_files)} video files")
+            
+        except Exception as e:
+            print(f"  ✗ Error loading video paths: {e}")
+            self.video_files = []
+    
+    def _load_tracking_paths(self):
+        """Load tracking file paths."""
+        try:
+            self.tracking_files = get_tracking_files_by_date(
+                self.session_id, self.config_path
+            )
+            print(f"  ✓ Found {len(self.tracking_files)} tracking files")
+            
+        except Exception as e:
+            print(f"  ✗ Error loading tracking paths: {e}")
+            self.tracking_files = []
+    
+    def _load_sync_paths(self):
+        """Load synchronization-related paths."""
+        try:
+            self.pulse_log_path = get_pulse_log_path(self.config_path)
+            print(f"  ✓ Pulse log: {self.pulse_log_path}")
+            
+        except Exception as e:
+            print(f"  ✗ Error loading sync paths: {e}")
+            self.pulse_log_path = None
+    
+    def _update_metadata(self):
+        """Update metadata with current path information."""
+        self.metadata['loaded_at'] = datetime.now().isoformat()
+        
+        # Data availability
+        self.metadata['data_availability'] = {
+            'ephys': self.kilosort_path is not None,
+            'dio_channels': list(self.dio_paths.keys()),
+            'video_files': len(self.video_files),
+            'tracking_files': len(self.tracking_files),
+            'pulse_log': self.pulse_log_path is not None
+        }
+        
+        # File counts
+        self.metadata['discovered_files'] = {
+            'video_count': len(self.video_files),
+            'tracking_count': len(self.tracking_files),
+            'dio_channels': len(self.dio_paths)
+        }
+    
+    def _print_availability_summary(self):
+        """Print summary of available data."""
+        availability = self.metadata['data_availability']
+        
+        print("Data Availability Summary:")
+        print(f"  - Ephys (Kilosort): {'✓' if availability['ephys'] else '✗'}")
+        print(f"  - DIO channels: {availability['dio_channels'] if availability['dio_channels'] else 'None'}")
+        print(f"  - Video files: {availability['video_files']}")
+        print(f"  - Tracking files: {availability['tracking_files']}")
+        print(f"  - Pulse log: {'✓' if availability['pulse_log'] else '✗'}")
+    
+    def validate_paths(self) -> Dict[str, bool]:
+        """
+        Validate that all discovered paths actually exist.
+        
+        Returns:
+            Dictionary with validation results for each path type
+        """
+        validation = {}
+        
+        # Validate Kilosort path
+        if self.kilosort_path:
+            validation['kilosort'] = verify_kilosort_path(self.kilosort_path, check_files=True)
+        else:
+            validation['kilosort'] = False
+        
+        # Validate DIO paths
+        validation['dio_channels'] = {}
+        for channel, dio_path in self.dio_paths.items():
+            validation['dio_channels'][channel] = dio_path.exists()
+        
+        # Validate video files
+        validation['video_files'] = {
+            'total': len(self.video_files),
+            'existing': sum(1 for vf in self.video_files if vf.exists())
+        }
+        
+        # Validate tracking files
+        validation['tracking_files'] = {
+            'total': len(self.tracking_files),
+            'existing': sum(1 for tf in self.tracking_files if tf.exists())
+        }
+        
+        # Validate pulse log
+        if self.pulse_log_path:
+            validation['pulse_log'] = self.pulse_log_path.exists()
+        else:
+            validation['pulse_log'] = False
+        
+        # Store in metadata
+        self.metadata['path_validation'] = validation
+        
+        return validation
+    
+    def get_kilosort_path(self) -> Optional[Path]:
+        """Get Kilosort data path."""
+        return self.kilosort_path
+    
+    def get_dio_path(self, channel: int = 1) -> Optional[Path]:
+        """
+        Get DIO path for specific channel.
+        
+        Args:
+            channel: DIO channel number
+            
+        Returns:
+            Path to DIO file or None if not available
+        """
+        return self.dio_paths.get(channel)
+    
+    def get_available_dio_channels(self) -> List[int]:
+        """Get list of available DIO channels."""
+        return list(self.dio_paths.keys())
+    
+    def get_video_files(self, extension_filter: Optional[str] = None) -> List[Path]:
+        """
+        Get video files, optionally filtered by extension.
+        
+        Args:
+            extension_filter: Optional file extension to filter by (e.g., '.mp4')
+            
+        Returns:
+            List of video file paths
+        """
+        if extension_filter:
+            return [vf for vf in self.video_files if vf.suffix.lower() == extension_filter.lower()]
+        return self.video_files.copy()
+    
+    def get_tracking_files(self, extension_filter: Optional[str] = None) -> List[Path]:
+        """
+        Get tracking files, optionally filtered by extension.
+        
+        Args:
+            extension_filter: Optional file extension to filter by (e.g., '.csv')
+            
+        Returns:
+            List of tracking file paths
+        """
+        if extension_filter:
+            return [tf for tf in self.tracking_files if tf.suffix.lower() == extension_filter.lower()]
+        return self.tracking_files.copy()
+    
+    def get_pulse_log_path(self) -> Optional[Path]:
+        """Get pulse log path."""
+        return self.pulse_log_path
+    
+    def has_complete_dataset(self, required_types: Optional[List[str]] = None) -> bool:
+        """
+        Check if session has complete dataset.
+        
+        Args:
+            required_types: List of required data types ['ephys', 'video', 'tracking', 'sync']
+                          If None, checks for ['ephys', 'video', 'tracking']
+            
+        Returns:
+            True if all required data types are available
+        """
+        if required_types is None:
+            required_types = ['ephys', 'video', 'tracking']
+        
+        availability = self.metadata['data_availability']
+        
+        for data_type in required_types:
+            if data_type == 'ephys' and not availability['ephys']:
+                return False
+            elif data_type == 'video' and availability['video_files'] == 0:
+                return False
+            elif data_type == 'tracking' and availability['tracking_files'] == 0:
+                return False
+            elif data_type == 'sync' and not availability['pulse_log']:
+                return False
+        
+        return True
+    
+    def export_paths_summary(self, output_path: Optional[Union[str, Path]] = None) -> Dict:
+        """
+        Export summary of all paths and metadata.
+        
+        Args:
+            output_path: Optional path to save summary as JSON
+            
+        Returns:
+            Dictionary containing complete paths summary
+        """
+        summary = {
+            'session_info': {
+                'animal_id': self.animal_id,
+                'session_id': self.session_id,
+                'config_path': str(self.config_path) if self.config_path else None
+            },
+            'paths': {
+                'kilosort': str(self.kilosort_path) if self.kilosort_path else None,
+                'dio_channels': {ch: str(path) for ch, path in self.dio_paths.items()},
+                'video_files': [str(vf) for vf in self.video_files],
+                'tracking_files': [str(tf) for tf in self.tracking_files], 
+                'pulse_log': str(self.pulse_log_path) if self.pulse_log_path else None
+            },
+            'metadata': self.metadata
+        }
+        
+        # Save to file if requested
+        if output_path is not None:
+            output_path = Path(output_path)
+            import json
+            with open(output_path, 'w') as f:
+                json.dump(summary, f, indent=2)
+            print(f"Path summary exported to: {output_path}")
+        
+        return summary
+    
+    def __repr__(self) -> str:
+        """String representation of DataPathManager."""
+        availability = self.metadata.get('data_availability', {})
+        ephys_status = "✓" if availability.get('ephys', False) else "✗"
+        video_count = availability.get('video_files', 0)
+        tracking_count = availability.get('tracking_files', 0)
+        
+        return (f"DataPathManager({self.animal_id}/{self.session_id}, "
+                f"ephys:{ephys_status}, video:{video_count}, tracking:{tracking_count})")
+
+
+if __name__ == "__main__":
+    # Example usage of DataPathManager class
+    print("=== DataPathManager Class Example ===")
+    
+    try:
+        # Create DataPathManager for a session
+        animal_id = "613"
+        session_id = "20241210"
+        
+        print(f"\n1. Creating DataPathManager for {animal_id}/{session_id}")
+        path_manager = DataPathManager(animal_id, session_id, auto_load=True)
+        
+        print(f"\n2. DataPathManager status:")
+        print(path_manager)
+        
+        print(f"\n3. Checking available data:")
+        print(f"   - Kilosort path: {path_manager.get_kilosort_path()}")
+        print(f"   - Available DIO channels: {path_manager.get_available_dio_channels()}")
+        print(f"   - Video files: {len(path_manager.get_video_files())}")
+        print(f"   - Tracking files: {len(path_manager.get_tracking_files())}")
+        print(f"   - Pulse log: {path_manager.get_pulse_log_path()}")
+        
+        print(f"\n4. Validating paths:")
+        validation = path_manager.validate_paths()
+        print(f"   - Kilosort valid: {validation.get('kilosort', False)}")
+        print(f"   - Video files valid: {validation['video_files']['existing']}/{validation['video_files']['total']}")
+        print(f"   - Tracking files valid: {validation['tracking_files']['existing']}/{validation['tracking_files']['total']}")
+        
+        print(f"\n5. Checking completeness:")
+        has_ephys_video = path_manager.has_complete_dataset(['ephys', 'video'])
+        has_all_data = path_manager.has_complete_dataset(['ephys', 'video', 'tracking'])
+        print(f"   - Has ephys + video: {has_ephys_video}")
+        print(f"   - Has complete dataset: {has_all_data}")
+        
+        print(f"\n6. Export summary:")
+        summary = path_manager.export_paths_summary()
+        print(f"   - Summary contains {len(summary)} sections")
+        print(f"   - Session info: {summary['session_info']}")
+        
+    except Exception as e:
+        print(f"Error during DataPathManager testing: {e}")
+        print("Note: This is expected if test data doesn't exist")
+    
+    print("\n=== Original Functions (Backward Compatibility) ===")
+    
+    # Test original functions still work
+    try:
+        animal_id = "613"
+        session_id = "20251210"
+        
+        print(f"\nTesting original functions with {animal_id}/{session_id}:")
+        
+        # Test original Kilosort function
+        kilosort_path = get_kilosort_path(animal_id, session_id)
+        print(f"Original get_kilosort_path: {kilosort_path}")
+        
+        # Test original video function
+        video_files = get_video_files_by_date(session_id)
+        print(f"Original get_video_files_by_date: {len(video_files)} files")
+        
+        # Test tracking function
+        tracking_files = get_tracking_files_by_date(session_id)
+        print(f"Original get_tracking_files_by_date: {len(tracking_files)} files")
+        
+        # Test DIO function
+        try:
+            dio_path = get_dio_path(animal_id, session_id, channel=1)
+            print(f"Original get_dio_path (ch1): {dio_path}")
+        except Exception as e:
+            print(f"Original get_dio_path (ch1): Error - {e}")
+        
+        # Test validation function
+        if kilosort_path:
+            is_valid = verify_kilosort_path(kilosort_path, check_files=False)
+            print(f"Original verify_kilosort_path: {is_valid}")
+        
+    except Exception as e:
+        print(f"Error testing original functions: {e}")
+        print("Note: This is expected if test data doesn't exist")
+    
+    print(f"\n=== Original Kilosort Example (Partial Matching) ===")
+    
+    # Original example with partial matching
     animal_id = "613"  # Partial match for "rat613"
     session_id = "20251210"  # Partial match for "20251210_110059"
     

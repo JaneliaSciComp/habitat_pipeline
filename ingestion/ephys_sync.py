@@ -558,6 +558,7 @@ class DataSyncManager:
         # Auto-load if requested
         if auto_load:
             self.load_sync_data()
+            self.create_mapping(method='interval')
     
     def load_sync_data(self) -> tuple:
         """

@@ -1,26 +1,27 @@
 import numpy as np
 from scipy import stats
 
-from ingestion.data_paths import get_dio_path, get_pulse_log_path
+from ingestion.data_paths import get_dio_path, get_pulse_log_path, DataStorageManager
 
 SAMPLE_RATE = 30000.0  # Hz
 
-def load_ephys_sync(animal_id, session_id, dio_channel=1, config_path=None):
+def load_ephys_sync(data_manager, dio_channel=1):
     """
-    Load and process ephys synchronization data for a given animal and session.
+    Load and process ephys synchronization data using DataPathManager.
 
     Parameters:
-    - animal_id: str, ID of the animal (e.g., "613")
-    - session_id: str, ID of the session (e.g., "20251210")
+    - data_manager: DataPathManager instance containing session paths
     - dio_channel: int, DIO channel number to load (default is 1)
-    - config_path: str or None, path to the configuration file (default is None)
 
     Returns:
     - TSESync: np.ndarray, timestamps of synchronization events
-    - sync_params: dict, parameters of the synchronization fit
+    - TSBSync: np.ndarray, behavioral sync timestamps
+    - system_time_at_creation: float, system time when recording started
     """
-    # Get DIO file path
-    dio_path = get_dio_path(animal_id, session_id, dio_channel, config_path=config_path)
+    # Get DIO file path from DataPathManager
+    dio_path = data_manager.get_dio_path(channel=dio_channel)
+    if dio_path is None:
+        raise FileNotFoundError(f"DIO channel {dio_channel} not available in DataPathManager")
     
     # Load DIO data
     from ingestion.trodes_to_python import readTrodesExtractedDataFile
@@ -37,8 +38,10 @@ def load_ephys_sync(animal_id, session_id, dio_channel=1, config_path=None):
     TSESync = time[state == 1]   
     TSESync = np.array(TSESync) / SAMPLE_RATE  # Convert to seconds
     
-    # Load pulse log data
-    pulse_log_path = get_pulse_log_path(config_path=config_path)
+    # Load pulse log data from DataPathManager
+    pulse_log_path = data_manager.get_pulse_log_path()
+    if pulse_log_path is None:
+        raise FileNotFoundError("Pulse log path not available in DataPathManager")
 
     TSBSync = []
     with open(pulse_log_path, 'r') as f:
@@ -507,12 +510,11 @@ class DataSyncManager:
     Data Synchronization Manager for Ephys and Behavioral Data
     
     This class manages the synchronization between ephys and behavioral data streams
-    using the existing ephys_sync functions. It provides a unified interface for
+    using a DataPathManager instance. It provides a unified interface for
     loading sync data, creating mappings, and converting timestamps between systems.
     
     Attributes:
-        animal_id: Animal identifier
-        session_id: Session identifier
+        data_manager: DataPathManager instance containing session paths
         dio_channel: DIO channel used for sync
         ephys_sync: Array of ephys sync timestamps
         behavior_sync: Array of behavioral sync timestamps  
@@ -521,22 +523,22 @@ class DataSyncManager:
         metadata: Dictionary containing sync session metadata
     """
     
-    def __init__(self, animal_id: str, session_id: str, dio_channel: int = 1, 
-                 config_path: str = None, auto_load: bool = True):
+    def __init__(self, data_manager: DataStorageManager, dio_channel: int = 1, 
+                 auto_load: bool = True):
         """
         Initialize DataSyncManager.
         
         Args:
-            animal_id: Animal identifier (e.g., "613")
-            session_id: Session identifier (e.g., "20251210") 
+            data_manager: DataStorageManager instance containing session paths
             dio_channel: DIO channel number for sync (default: 1)
-            config_path: Path to configuration file (default: None)
             auto_load: If True, automatically load sync data and create mapping
         """
-        self.animal_id = animal_id
-        self.session_id = session_id
+        self.data_manager = data_manager
         self.dio_channel = dio_channel
-        self.config_path = config_path
+        
+        # Extract identifiers from data_manager for compatibility
+        self.animal_id = data_manager.animal_id
+        self.session_id = data_manager.session_id
         
         # Initialize data attributes
         self.ephys_sync = None
@@ -546,8 +548,8 @@ class DataSyncManager:
         
         # Initialize metadata
         self.metadata = {
-            'animal_id': animal_id,
-            'session_id': session_id,
+            'animal_id': self.animal_id,
+            'session_id': self.session_id,
             'dio_channel': dio_channel,
             'loaded_at': None,
             'mapping_method': None,
@@ -570,9 +572,9 @@ class DataSyncManager:
         try:
             print(f"Loading sync data for {self.animal_id}/{self.session_id}")
             
-            # Use existing load_ephys_sync function
+            # Use existing load_ephys_sync function with DataPathManager
             self.ephys_sync, self.behavior_sync, self.system_time = load_ephys_sync(
-                self.animal_id, self.session_id, self.dio_channel, self.config_path
+                self.data_manager, self.dio_channel
             )
             
             # Update metadata
@@ -824,21 +826,79 @@ class DataSyncManager:
                 f"DIO{self.dio_channel}, {status}, {mapped})")
 
 
+# Convenience factory function for backward compatibility
+def create_sync_manager(animal_id: str, session_id: str, dio_channel: int = 1, 
+                       config_path: str = None, auto_load: bool = True) -> DataSyncManager:
+    """
+    Convenience factory function to create DataSyncManager with DataPathManager.
+    
+    This function maintains backward compatibility by accepting the same parameters
+    as the old DataSyncManager constructor and creating the required DataPathManager
+    instance internally.
+    
+    Args:
+        animal_id: Animal identifier (e.g., "613")
+        session_id: Session identifier (e.g., "20251210") 
+        dio_channel: DIO channel number for sync (default: 1)
+        config_path: Path to configuration file (default: None)
+        auto_load: If True, automatically load sync data and create mapping
+        
+    Returns:
+        DataSyncManager instance ready for use
+    """
+    # Create DataPathManager instance
+    data_manager = DataPathManager(animal_id, session_id, config_path, auto_load=True)
+    
+    # Create and return DataSyncManager
+    return DataSyncManager(data_manager, dio_channel, auto_load)
+
+
+# Legacy function for backward compatibility
+def load_ephys_sync_legacy(animal_id, session_id, dio_channel=1, config_path=None):
+    """
+    Legacy version of load_ephys_sync for backward compatibility.
+    
+    This function maintains the old interface but uses DataPathManager internally.
+    
+    Parameters:
+    - animal_id: str, ID of the animal (e.g., "613")
+    - session_id: str, ID of the session (e.g., "20251210")
+    - dio_channel: int, DIO channel number to load (default is 1)
+    - config_path: str or None, path to the configuration file (default is None)
+
+    Returns:
+    - TSESync: np.ndarray, timestamps of synchronization events
+    - TSBSync: np.ndarray, behavioral sync timestamps  
+    - system_time_at_creation: float, system time when recording started
+    """
+    # Create DataPathManager and use new function
+    data_manager = DataPathManager(animal_id, session_id, config_path, auto_load=True)
+    return load_ephys_sync(data_manager, dio_channel)
+
+
 if __name__ == "__main__":
     # Example usage of DataSyncManager
     print("DataSyncManager Example Usage:")
     print("=" * 50)
     
-    # Example with real data (commented out - replace with actual IDs)
-    print("To use DataSyncManager with real data:")
-    print('sync_manager = DataSyncManager("613", "20251210", dio_channel=1)')
+    # Method 1: Using DataPathManager directly (recommended)
+    print("Method 1: Using DataPathManager directly")
+    print('from ingestion.data_paths import DataPathManager')
+    print('data_manager = DataPathManager("613", "20251210", auto_load=True)')
+    print('sync_manager = DataSyncManager(data_manager, dio_channel=1)')
+    print("")
+    
+    # Method 2: Using convenience factory function (backward compatibility)
+    print("Method 2: Using convenience factory function")
+    print('sync_manager = create_sync_manager("613", "20251210", dio_channel=1)')
     print("")
     
     print("This class provides a complete synchronization workflow:")
-    print("1. Automatic loading of ephys and behavioral sync data")
-    print("2. Multiple mapping algorithms (interval-based or new algorithm)")  
-    print("3. Timestamp conversion between systems")
-    print("4. Quality assessment and visualization")
+    print("1. Uses DataPathManager for unified path management")
+    print("2. Automatic loading of ephys and behavioral sync data")
+    print("3. Multiple mapping algorithms (interval-based or new algorithm)")  
+    print("4. Timestamp conversion between systems")
+    print("5. Quality assessment and visualization")
     print("")
     
     print("Key methods:")
@@ -851,8 +911,11 @@ if __name__ == "__main__":
     print("")
     
     print("Example workflow:")
+    print("# Create DataPathManager")
+    print('data_manager = DataPathManager("animal_id", "session_id", auto_load=True)')
+    print("")
     print("# Initialize and load data automatically")
-    print('sync = DataSyncManager("animal_id", "session_id", auto_load=True)')
+    print('sync = DataSyncManager(data_manager, auto_load=True)')
     print("")
     print("# Create mapping using interval method")  
     print('mapping = sync.create_mapping(method="interval", interval_tolerance=0.02)')

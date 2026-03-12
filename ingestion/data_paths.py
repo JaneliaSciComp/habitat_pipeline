@@ -375,6 +375,104 @@ def get_tracking_files_by_date(session_id: str, config_path: Optional[str] = Non
     return matching_tracking_files
 
 
+def get_behavioral_events_by_date(session_id: str, config_path: Optional[str] = None, 
+                                subfolder: Optional[str] = None) -> List[Path]:
+    """
+    Find behavioral event CSV files in the events directory that match the date from the session_id.
+    
+    The function extracts the date portion from session_id (e.g., "20251210" from "20251210_110059")
+    and searches for CSV files containing this date in their filename within subfolders.
+    
+    Args:
+        session_id: Session identifier containing date (e.g., "20251210" or "20251210_110059")
+        config_path: Optional path to config file. If None, uses default location.
+        subfolder: Optional subfolder name within events directory to search in. If None, searches all subfolders.
+        
+    Returns:
+        List[Path]: List of behavioral event CSV file paths that match the session date
+    """
+    # Load configuration
+    config = _load_config(config_path)
+    
+    # Get the events base path
+    if 'events' not in config:
+        raise KeyError("'events' key not found in configuration file")
+    
+    events_base = Path(config['events'])
+    
+    if not events_base.exists():
+        raise FileNotFoundError(f"Events directory not found: {events_base}")
+    
+    # Extract date from session_id (first 8 characters, assuming YYYYMMDD format)
+    # Handle both "20251210" and "20251210_110059" formats
+    if len(session_id) >= 8:
+        session_date = session_id[:8]
+        
+        # Validate that it looks like a date (8 digits)
+        if not session_date.isdigit():
+            raise ValueError(f"Could not extract valid date from session_id: {session_id}")
+    else:
+        raise ValueError(f"Session ID too short to extract date: {session_id}")
+    
+    matching_event_files = []
+    
+    try:
+        # Set search directory based on subfolder parameter
+        if subfolder is not None:
+            search_directory = events_base / subfolder
+            if not search_directory.exists():
+                raise FileNotFoundError(f"Subfolder not found: {search_directory}")
+            search_directories = [search_directory]
+        else:
+            # Try to find subfolders containing the session_id or session_date
+            search_directories = []
+            try:
+                # Search immediate subdirectories (one level deep)
+                for potential_subfolder in events_base.iterdir():
+                    if potential_subfolder.is_dir():
+                        if (session_id in potential_subfolder.name or 
+                            session_date in potential_subfolder.name):
+                            search_directories.append(potential_subfolder)
+                            print(f"Found matching events subfolder: {potential_subfolder.name}")
+                
+                # If no matching subfolders found, search all subdirectories
+                if not search_directories:
+                    search_directories = [d for d in events_base.iterdir() if d.is_dir()]
+                    
+            except (PermissionError, OSError):
+                # If we can't read the directory, fall back to searching the base directory
+                search_directories = [events_base]
+        
+        # Search for CSV files in the identified directories
+        for search_dir in search_directories:
+            # Search for CSV files containing the session_id or session_date
+            for pattern in [f"*{session_id}*.csv", f"*{session_date}*.csv"]:
+                for event_file in search_dir.glob(pattern):
+                    if event_file.is_file() and event_file not in matching_event_files:
+                        matching_event_files.append(event_file)
+            
+            # Also search one level deeper in case there are nested directories
+            for subdir in search_dir.iterdir():
+                if subdir.is_dir():
+                    for pattern in [f"*{session_id}*.csv", f"*{session_date}*.csv"]:
+                        for event_file in subdir.glob(pattern):
+                            if event_file.is_file() and event_file not in matching_event_files:
+                                matching_event_files.append(event_file)
+    
+    except (PermissionError, OSError) as e:
+        raise RuntimeError(f"Error accessing events directory {events_base}: {e}")
+    
+    # Sort event files by filename for consistent ordering
+    matching_event_files.sort(key=lambda x: x.name)
+    
+    if not matching_event_files:
+        print(f"Warning: No behavioral event CSV files found for session {session_id} in {events_base}")
+    else:
+        print(f"Found {len(matching_event_files)} behavioral event file(s) for session {session_id}")
+    
+    return matching_event_files
+
+
 def get_animals_and_sessions(config_path: Optional[str] = None) -> pd.DataFrame:
     """
     Get a DataFrame of all animals and sessions from the ephys folder.
@@ -543,9 +641,9 @@ def get_kilosort_path_with_validation(animal_id: str, session_id: str,
     return kilosort_path
 
 
-class DataPathManager:
+class DataStorageManager:
     """
-    Data Path Manager for Habitat Pipeline Sessions
+    Data Storage Manager for Habitat Pipeline Sessions
     
     This class manages all data file paths for a specific animal/session combination
     using the existing data_paths functions. It provides a centralized interface for
@@ -559,6 +657,7 @@ class DataPathManager:
         dio_paths: Dictionary of DIO channel paths
         video_files: List of video file paths
         tracking_files: List of tracking file paths
+        behavioral_event_files: List of behavioral event CSV file paths
         pulse_log_path: Path to pulse log file
         metadata: Dictionary containing session metadata
     """
@@ -583,6 +682,7 @@ class DataPathManager:
         self.dio_paths = {}
         self.video_files = []
         self.tracking_files = []
+        self.behavioral_event_files = []
         self.pulse_log_path = None
         
         # Initialize metadata
@@ -607,6 +707,7 @@ class DataPathManager:
             self._load_ephys_paths()
             self._load_video_paths() 
             self._load_tracking_paths()
+            self._load_behavioral_events()
             self._load_sync_paths()
             self._update_metadata()
             
@@ -667,6 +768,18 @@ class DataPathManager:
             print(f"  ✗ Error loading tracking paths: {e}")
             self.tracking_files = []
     
+    def _load_behavioral_events(self):
+        """Load behavioral event file paths."""
+        try:
+            self.behavioral_event_files = get_behavioral_events_by_date(
+                self.session_id, self.config_path
+            )
+            print(f"  ✓ Found {len(self.behavioral_event_files)} behavioral event files")
+            
+        except Exception as e:
+            print(f"  ✗ Error loading behavioral event paths: {e}")
+            self.behavioral_event_files = []
+    
     def _load_sync_paths(self):
         """Load synchronization-related paths."""
         try:
@@ -687,6 +800,7 @@ class DataPathManager:
             'dio_channels': list(self.dio_paths.keys()),
             'video_files': len(self.video_files),
             'tracking_files': len(self.tracking_files),
+            'behavioral_event_files': len(self.behavioral_event_files),
             'pulse_log': self.pulse_log_path is not None
         }
         
@@ -694,6 +808,7 @@ class DataPathManager:
         self.metadata['discovered_files'] = {
             'video_count': len(self.video_files),
             'tracking_count': len(self.tracking_files),
+            'behavioral_event_count': len(self.behavioral_event_files),
             'dio_channels': len(self.dio_paths)
         }
     
@@ -706,6 +821,7 @@ class DataPathManager:
         print(f"  - DIO channels: {availability['dio_channels'] if availability['dio_channels'] else 'None'}")
         print(f"  - Video files: {availability['video_files']}")
         print(f"  - Tracking files: {availability['tracking_files']}")
+        print(f"  - Behavioral event files: {availability['behavioral_event_files']}")
         print(f"  - Pulse log: {'✓' if availability['pulse_log'] else '✗'}")
     
     def validate_paths(self) -> Dict[str, bool]:
@@ -738,6 +854,12 @@ class DataPathManager:
         validation['tracking_files'] = {
             'total': len(self.tracking_files),
             'existing': sum(1 for tf in self.tracking_files if tf.exists())
+        }
+        
+        # Validate behavioral event files
+        validation['behavioral_event_files'] = {
+            'total': len(self.behavioral_event_files),
+            'existing': sum(1 for bf in self.behavioral_event_files if bf.exists())
         }
         
         # Validate pulse log
@@ -799,6 +921,20 @@ class DataPathManager:
             return [tf for tf in self.tracking_files if tf.suffix.lower() == extension_filter.lower()]
         return self.tracking_files.copy()
     
+    def get_behavioral_event_files(self, extension_filter: Optional[str] = None) -> List[Path]:
+        """
+        Get behavioral event files, optionally filtered by extension.
+        
+        Args:
+            extension_filter: Optional file extension to filter by (e.g., '.csv')
+            
+        Returns:
+            List of behavioral event file paths
+        """
+        if extension_filter:
+            return [bf for bf in self.behavioral_event_files if bf.suffix.lower() == extension_filter.lower()]
+        return self.behavioral_event_files.copy()
+    
     def get_pulse_log_path(self) -> Optional[Path]:
         """Get pulse log path."""
         return self.pulse_log_path
@@ -808,7 +944,7 @@ class DataPathManager:
         Check if session has complete dataset.
         
         Args:
-            required_types: List of required data types ['ephys', 'video', 'tracking', 'sync']
+            required_types: List of required data types ['ephys', 'video', 'tracking', 'behavioral_events', 'sync']
                           If None, checks for ['ephys', 'video', 'tracking']
             
         Returns:
@@ -825,6 +961,8 @@ class DataPathManager:
             elif data_type == 'video' and availability['video_files'] == 0:
                 return False
             elif data_type == 'tracking' and availability['tracking_files'] == 0:
+                return False
+            elif data_type == 'behavioral_events' and availability['behavioral_event_files'] == 0:
                 return False
             elif data_type == 'sync' and not availability['pulse_log']:
                 return False
@@ -851,7 +989,8 @@ class DataPathManager:
                 'kilosort': str(self.kilosort_path) if self.kilosort_path else None,
                 'dio_channels': {ch: str(path) for ch, path in self.dio_paths.items()},
                 'video_files': [str(vf) for vf in self.video_files],
-                'tracking_files': [str(tf) for tf in self.tracking_files], 
+                'tracking_files': [str(tf) for tf in self.tracking_files],
+                'behavioral_event_files': [str(bf) for bf in self.behavioral_event_files], 
                 'pulse_log': str(self.pulse_log_path) if self.pulse_log_path else None
             },
             'metadata': self.metadata
@@ -873,9 +1012,11 @@ class DataPathManager:
         ephys_status = "✓" if availability.get('ephys', False) else "✗"
         video_count = availability.get('video_files', 0)
         tracking_count = availability.get('tracking_files', 0)
+        behavioral_event_count = availability.get('behavioral_event_files', 0)
         
         return (f"DataPathManager({self.animal_id}/{self.session_id}, "
-                f"ephys:{ephys_status}, video:{video_count}, tracking:{tracking_count})")
+                f"ephys:{ephys_status}, video:{video_count}, tracking:{tracking_count}, "
+                f"events:{behavioral_event_count})")
 
 
 if __name__ == "__main__":
@@ -887,10 +1028,10 @@ if __name__ == "__main__":
         animal_id = "613"
         session_id = "20241210"
         
-        print(f"\n1. Creating DataPathManager for {animal_id}/{session_id}")
-        path_manager = DataPathManager(animal_id, session_id, auto_load=True)
+        print(f"\n1. Creating DataStorageManager for {animal_id}/{session_id}")
+        path_manager = DataStorageManager(animal_id, session_id, auto_load=True)
         
-        print(f"\n2. DataPathManager status:")
+        print(f"\n2. DataStorageManager status:")
         print(path_manager)
         
         print(f"\n3. Checking available data:")
@@ -898,6 +1039,7 @@ if __name__ == "__main__":
         print(f"   - Available DIO channels: {path_manager.get_available_dio_channels()}")
         print(f"   - Video files: {len(path_manager.get_video_files())}")
         print(f"   - Tracking files: {len(path_manager.get_tracking_files())}")
+        print(f"   - Behavioral event files: {len(path_manager.get_behavioral_event_files())}")
         print(f"   - Pulse log: {path_manager.get_pulse_log_path()}")
         
         print(f"\n4. Validating paths:")
@@ -905,12 +1047,15 @@ if __name__ == "__main__":
         print(f"   - Kilosort valid: {validation.get('kilosort', False)}")
         print(f"   - Video files valid: {validation['video_files']['existing']}/{validation['video_files']['total']}")
         print(f"   - Tracking files valid: {validation['tracking_files']['existing']}/{validation['tracking_files']['total']}")
+        print(f"   - Behavioral event files valid: {validation['behavioral_event_files']['existing']}/{validation['behavioral_event_files']['total']}")
         
         print(f"\n5. Checking completeness:")
         has_ephys_video = path_manager.has_complete_dataset(['ephys', 'video'])
         has_all_data = path_manager.has_complete_dataset(['ephys', 'video', 'tracking'])
+        has_with_events = path_manager.has_complete_dataset(['ephys', 'video', 'tracking', 'behavioral_events'])
         print(f"   - Has ephys + video: {has_ephys_video}")
         print(f"   - Has complete dataset: {has_all_data}")
+        print(f"   - Has complete dataset + events: {has_with_events}")
         
         print(f"\n6. Export summary:")
         summary = path_manager.export_paths_summary()
@@ -941,6 +1086,13 @@ if __name__ == "__main__":
         # Test tracking function
         tracking_files = get_tracking_files_by_date(session_id)
         print(f"Original get_tracking_files_by_date: {len(tracking_files)} files")
+        
+        # Test behavioral events function
+        try:
+            behavioral_event_files = get_behavioral_events_by_date(session_id)
+            print(f"Original get_behavioral_events_by_date: {len(behavioral_event_files)} files")
+        except Exception as e:
+            print(f"Original get_behavioral_events_by_date: Error - {e}")
         
         # Test DIO function
         try:

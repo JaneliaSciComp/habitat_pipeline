@@ -375,7 +375,7 @@ def get_tracking_files_by_date(session_id: str, config_path: Optional[str] = Non
     return matching_tracking_files
 
 
-def get_behavioral_events_by_date(session_id: str, config_path: Optional[str] = None, 
+def get_event_files_by_date(session_id: str, config_path: Optional[str] = None, 
                                 subfolder: Optional[str] = None) -> List[Path]:
     """
     Find behavioral event CSV files in the events directory that match the date from the session_id.
@@ -771,7 +771,7 @@ class DataStorageManager:
     def _load_behavioral_events(self):
         """Load behavioral event file paths."""
         try:
-            self.behavioral_event_files = get_behavioral_events_by_date(
+            self.behavioral_event_files = get_event_files_by_date(
                 self.session_id, self.config_path
             )
             print(f"  ✓ Found {len(self.behavioral_event_files)} behavioral event files")
@@ -1089,10 +1089,10 @@ if __name__ == "__main__":
         
         # Test behavioral events function
         try:
-            behavioral_event_files = get_behavioral_events_by_date(session_id)
-            print(f"Original get_behavioral_events_by_date: {len(behavioral_event_files)} files")
+            behavioral_event_files = get_event_files_by_date(session_id)
+            print(f"Original get_event_files_by_date: {len(behavioral_event_files)} files")
         except Exception as e:
-            print(f"Original get_behavioral_events_by_date: Error - {e}")
+            print(f"Original get_event_files_by_date: Error - {e}")
         
         # Test DIO function
         try:

@@ -14,45 +14,35 @@ from datetime import datetime
 import json
 import warnings
 
-# Import for DataStorageManager integration
-try:
-    from ingestion.data_paths import DataStorageManager
-    DATASTORAGEMANAGER_AVAILABLE = True
-except ImportError:
-    DataStorageManager = None
-    DATASTORAGEMANAGER_AVAILABLE = False
+# Import DataStorageManager for session management
+from ingestion.data_paths import DataStorageManager
 
 
-def load_tracking_data(input_source: Union[str, Path, 'DataStorageManager'], file_index: int = 0) -> pd.DataFrame:
+def load_tracking_data(data_manager: DataStorageManager, file_index: int = 0) -> pd.DataFrame:
     """
-    Load tracking data from a file path or DataStorageManager and return it as a DataFrame.
+    Load tracking data from a DataStorageManager and return it as a DataFrame.
     
-    This function loads tracking data from various file formats and converts
-    them to a pandas DataFrame. Can accept either a direct file path or a
-    DataStorageManager instance that will automatically select tracking files.
+    This function loads tracking data from various file formats using a
+    DataStorageManager instance to automatically select tracking files.
     
     Args:
-        input_source: Either a file path (string/Path) or DataStorageManager instance
-        file_index: If using DataStorageManager, index of tracking file to use (default: 0)
+        data_manager: DataStorageManager instance containing session paths
+        file_index: Index of tracking file to use (default: 0)
         
     Returns:
         pandas.DataFrame: Loaded tracking data
     """
     
-    # Handle DataStorageManager input
-    if DATASTORAGEMANAGER_AVAILABLE and isinstance(input_source, DataStorageManager):
-        tracking_files = input_source.get_tracking_files()
-        if not tracking_files:
-            raise FileNotFoundError(f"No tracking files found in DataStorageManager for {input_source.animal_id}/{input_source.session_id}")
-        
-        if file_index >= len(tracking_files):
-            raise IndexError(f"File index {file_index} out of range. Available files: {len(tracking_files)}")
-        
-        file_path = tracking_files[file_index]
-        print(f"Using tracking file from DataStorageManager: {file_path}")
-    else:
-        # Handle direct file path input
-        file_path = Path(input_source)
+    # Get tracking files from DataStorageManager
+    tracking_files = data_manager.get_tracking_files()
+    if not tracking_files:
+        raise FileNotFoundError(f"No tracking files found in DataStorageManager for {data_manager.animal_id}/{data_manager.session_id}")
+    
+    if file_index >= len(tracking_files):
+        raise IndexError(f"File index {file_index} out of range. Available files: {len(tracking_files)}")
+    
+    file_path = tracking_files[file_index]
+    print(f"Using tracking file from DataStorageManager: {file_path}")
     
     # Convert to Path object for easier handling
     file_path = Path(file_path)
@@ -225,11 +215,11 @@ class VideoTrackingData:
     VideoTrackingData class for managing video tracking data.
     
     This class encapsulates raw tracking data, parsed data organized by objects,
-    and frame timestamps. Can load data from either direct file paths or from
-    a DataStorageManager instance for integrated session management.
+    and frame timestamps. Uses a DataStorageManager instance for integrated 
+    session management and automatic file discovery.
     
     Attributes:
-        data_manager: DataStorageManager instance (if used)
+        data_manager: DataStorageManager instance
         file_path: Path to the tracking data file
         raw_data: Raw tracking DataFrame as loaded from file
         parsed_data: Dictionary of DataFrames organized by object name
@@ -237,62 +227,47 @@ class VideoTrackingData:
         metadata: Dictionary containing metadata about the tracking data
     """
     
-    def __init__(self, input_source: Union[str, Path, 'DataStorageManager'], 
-                 load_ts: bool = True, file_index: int = 0):
+    def __init__(self, data_manager: DataStorageManager, load_ts: bool = True, file_index: int = 0):
         """
-        Initialize VideoTrackingData from a file path or DataStorageManager.
+        Initialize VideoTrackingData from a DataStorageManager.
         
         Args:
-            input_source: Either a file path (str/Path) or DataStorageManager instance
+            data_manager: DataStorageManager instance containing session paths
             load_ts: If True, attempt to load associated timestamp file
-            file_index: If using DataStorageManager, index of tracking file to use (default: 0)
+            file_index: Index of tracking file to use (default: 0)
         """
         # Initialize attributes
-        self.data_manager = None
-        self.file_path = None
+        self.data_manager = data_manager
         self.file_index = file_index
         self.raw_data = None
         self.parsed_data = {}
         self.timestamps = None
         
-        # Handle different input types
-        if DATASTORAGEMANAGER_AVAILABLE and isinstance(input_source, DataStorageManager):
-            # Using DataStorageManager
-            self.data_manager = input_source
-            tracking_files = self.data_manager.get_tracking_files()
-            
-            if not tracking_files:
-                raise FileNotFoundError(f"No tracking files found in DataStorageManager for {self.data_manager.animal_id}/{self.data_manager.session_id}")
-            
-            if file_index >= len(tracking_files):
-                raise IndexError(f"File index {file_index} out of range. Available files: {len(tracking_files)}")
-            
-            self.file_path = tracking_files[file_index]
-            print(f"Using tracking file from DataStorageManager: {self.file_path}")
-            
-        else:
-            # Using direct file path
-            self.file_path = Path(input_source)
+        # Get tracking file from DataStorageManager
+        tracking_files = self.data_manager.get_tracking_files()
+        
+        if not tracking_files:
+            raise FileNotFoundError(f"No tracking files found in DataStorageManager for {self.data_manager.animal_id}/{self.data_manager.session_id}")
+        
+        if file_index >= len(tracking_files):
+            raise IndexError(f"File index {file_index} out of range. Available files: {len(tracking_files)}")
+        
+        self.file_path = tracking_files[file_index]
+        print(f"Using tracking file from DataStorageManager: {self.file_path}")
         
         # Initialize metadata
         self.metadata = {
             'loaded_at': datetime.now().isoformat(),
             'file_path': str(self.file_path),
-            'data_manager_used': self.data_manager is not None,
-            'file_index': file_index if self.data_manager else None,
+            'file_index': file_index,
+            'animal_id': self.data_manager.animal_id,
+            'session_id': self.data_manager.session_id,
+            'available_tracking_files': len(self.data_manager.get_tracking_files()),
             'has_timestamps': False,
             'n_objects': 0,
             'n_frames': 0,
             'object_names': []
         }
-        
-        # Add session info if using DataStorageManager
-        if self.data_manager:
-            self.metadata.update({
-                'animal_id': self.data_manager.animal_id,
-                'session_id': self.data_manager.session_id,
-                'available_tracking_files': len(self.data_manager.get_tracking_files())
-            })
         
         # Load the data
         self._load_data(load_ts)
@@ -302,7 +277,7 @@ class VideoTrackingData:
         try:
             # Load raw tracking data
             print(f"Loading tracking data from: {self.file_path}")
-            self.raw_data = load_tracking_data(self.file_path)
+            self.raw_data = load_tracking_data(self.data_manager, self.file_index)
             
             # Parse data by objects
             print("Parsing tracking data by objects...")
@@ -454,34 +429,28 @@ class VideoTrackingData:
     
     def __repr__(self) -> str:
         """String representation of VideoTrackingData."""
-        data_source = f"DataStorageManager({self.data_manager.animal_id}/{self.data_manager.session_id})" if self.data_manager else f"file='{self.file_path.name}'"
-        return (f"VideoTrackingData({data_source}, "
+        return (f"VideoTrackingData(DataStorageManager({self.data_manager.animal_id}/{self.data_manager.session_id}), "
                 f"objects={self.metadata['n_objects']}, "
                 f"frames={self.metadata['n_frames']}, "
                 f"timestamps={self.metadata['has_timestamps']})")
     
     def get_alternative_tracking_files(self) -> List[Path]:
         """
-        Get list of alternative tracking files if using DataStorageManager.
+        Get list of alternative tracking files from DataStorageManager.
         
         Returns:
-            List of available tracking file paths, or empty list if not using DataStorageManager
+            List of available tracking file paths
         """
-        if self.data_manager:
-            return self.data_manager.get_tracking_files()
-        return []
+        return self.data_manager.get_tracking_files()
     
     def switch_tracking_file(self, file_index: int, load_ts: bool = True):
         """
-        Switch to a different tracking file if using DataStorageManager.
+        Switch to a different tracking file using DataStorageManager.
         
         Args:
             file_index: Index of the tracking file to switch to
             load_ts: If True, attempt to load associated timestamp file
         """
-        if not self.data_manager:
-            raise ValueError("Cannot switch tracking files - not using DataStorageManager")
-        
         tracking_files = self.data_manager.get_tracking_files()
         if file_index >= len(tracking_files):
             raise IndexError(f"File index {file_index} out of range. Available files: {len(tracking_files)}")
@@ -500,27 +469,11 @@ class VideoTrackingData:
     
     def has_data_manager(self) -> bool:
         """Check if this instance is using a DataStorageManager."""
-        return self.data_manager is not None
+        return True  # Always true since we only accept DataStorageManager
 
 
-# Convenience factory functions for backward compatibility and different use cases
-def create_tracking_data_from_file(file_path: Union[str, Path], load_ts: bool = True) -> VideoTrackingData:
-    """
-    Convenience function to create VideoTrackingData from a file path.
-    
-    This function maintains backward compatibility with the original interface.
-    
-    Args:
-        file_path: Path to the tracking data file
-        load_ts: If True, attempt to load associated timestamp file
-        
-    Returns:
-        VideoTrackingData instance
-    """
-    return VideoTrackingData(file_path, load_ts=load_ts)
-
-
-def create_tracking_data_from_manager(data_manager: 'DataStorageManager', 
+# Convenience factory function
+def create_tracking_data_from_manager(data_manager: DataStorageManager, 
                                      file_index: int = 0, 
                                      load_ts: bool = True) -> VideoTrackingData:
     """
@@ -534,9 +487,6 @@ def create_tracking_data_from_manager(data_manager: 'DataStorageManager',
     Returns:
         VideoTrackingData instance
     """
-    if not DATASTORAGEMANAGER_AVAILABLE:
-        raise ImportError("DataStorageManager not available. Cannot create tracking data from manager.")
-    
     return VideoTrackingData(data_manager, load_ts=load_ts, file_index=file_index)
 
 
@@ -588,15 +538,8 @@ if __name__ == "__main__":
     print("Example 2: Using VideoTrackingData class")
     print("=" * 60)
     
-    # Method 1: Using direct file path (original method)
-    print("Method 1: Using direct file path")
-    print("  tracking_data = VideoTrackingData('path/to/tracking/file.csv')")
-    print("  # or using convenience function")
-    print("  tracking_data = create_tracking_data_from_file('path/to/tracking/file.csv')")
-    print("")
-    
-    # Method 2: Using DataStorageManager (new method)
-    print("Method 2: Using DataStorageManager (recommended for session management)")
+    # Using DataStorageManager (only method)
+    print("Using DataStorageManager for session management:")
     print("  from ingestion.data_paths import DataStorageManager")
     print("  data_manager = DataStorageManager('animal_id', 'session_id', auto_load=True)")
     print("  tracking_data = VideoTrackingData(data_manager)  # Uses first tracking file")
@@ -613,7 +556,7 @@ if __name__ == "__main__":
     print("  - Easy access to individual object trajectories")
     print("  - Metadata and summary generation")
     print("  - Export capabilities")
-    print("  - Ability to switch between tracking files (when using DataStorageManager)")
+    print("  - Ability to switch between tracking files")
     print("")
     
     print("Key methods:")
@@ -632,25 +575,3 @@ if __name__ == "__main__":
     print("  summary = tracking.export_summary()")
     
     print("\\n" + "=" * 60)
-    print("")
-    print("Key methods:")
-    print("  - get_object_data(name): Get data for specific object")
-    print("  - get_object_trajectory(name): Get trajectory (x,y,frame) data")
-    print("  - get_object_names(): List all tracked objects")
-    print("  - export_summary(): Generate summary statistics")
-    print("")
-    print("Example usage:")
-    print("  # Load tracking data")
-    print("  tracking = VideoTrackingData('RatCity_mask_metrics.csv')")
-    print("  ")
-    print("  # Get object names")
-    print("  objects = tracking.get_object_names()")
-    print("  print(f'Found objects: {objects}')")
-    print("  ")
-    print("  # Get trajectory for specific object")
-    print("  trajectory = tracking.get_object_trajectory('mouse1')")
-    print("  if trajectory is not None:")
-    print("      print(trajectory[['frame', 'center_x', 'center_y']].head())")
-    print("  ")
-    print("  # Export summary")
-    print("  summary = tracking.export_summary('tracking_summary.json')")

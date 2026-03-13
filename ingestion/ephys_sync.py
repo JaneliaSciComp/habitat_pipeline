@@ -510,11 +510,11 @@ class DataSyncManager:
     Data Synchronization Manager for Ephys and Behavioral Data
     
     This class manages the synchronization between ephys and behavioral data streams
-    using a DataPathManager instance. It provides a unified interface for
+    using a DataStorageManager instance. It provides a unified interface for
     loading sync data, creating mappings, and converting timestamps between systems.
     
     Attributes:
-        data_manager: DataPathManager instance containing session paths
+        data_manager: DataStorageManager instance containing session paths
         dio_channel: DIO channel used for sync
         ephys_sync: Array of ephys sync timestamps
         behavior_sync: Array of behavioral sync timestamps  
@@ -846,8 +846,8 @@ def create_sync_manager(animal_id: str, session_id: str, dio_channel: int = 1,
     Returns:
         DataSyncManager instance ready for use
     """
-    # Create DataPathManager instance
-    data_manager = DataPathManager(animal_id, session_id, config_path, auto_load=True)
+    # Create DataStorageManager instance
+    data_manager = DataStorageManager(animal_id, session_id, config_path, auto_load=True)
     
     # Create and return DataSyncManager
     return DataSyncManager(data_manager, dio_channel, auto_load)
@@ -858,7 +858,7 @@ def load_ephys_sync_legacy(animal_id, session_id, dio_channel=1, config_path=Non
     """
     Legacy version of load_ephys_sync for backward compatibility.
     
-    This function maintains the old interface but uses DataPathManager internally.
+    This function maintains the old interface but uses DataStorageManager internally.
     
     Parameters:
     - animal_id: str, ID of the animal (e.g., "613")
@@ -871,8 +871,8 @@ def load_ephys_sync_legacy(animal_id, session_id, dio_channel=1, config_path=Non
     - TSBSync: np.ndarray, behavioral sync timestamps  
     - system_time_at_creation: float, system time when recording started
     """
-    # Create DataPathManager and use new function
-    data_manager = DataPathManager(animal_id, session_id, config_path, auto_load=True)
+    # Create DataStorageManager and use new function
+    data_manager = DataStorageManager(animal_id, session_id, config_path, auto_load=True)
     return load_ephys_sync(data_manager, dio_channel)
 
 
@@ -881,10 +881,10 @@ if __name__ == "__main__":
     print("DataSyncManager Example Usage:")
     print("=" * 50)
     
-    # Method 1: Using DataPathManager directly (recommended)
-    print("Method 1: Using DataPathManager directly")
-    print('from ingestion.data_paths import DataPathManager')
-    print('data_manager = DataPathManager("613", "20251210", auto_load=True)')
+    # Method 1: Using DataStorageManager directly (recommended)
+    print("Method 1: Using DataStorageManager directly")
+    print('from ingestion.data_paths import DataStorageManager')
+    print('data_manager = DataStorageManager("613", "20251210", auto_load=True)')
     print('sync_manager = DataSyncManager(data_manager, dio_channel=1)')
     print("")
     
@@ -894,7 +894,7 @@ if __name__ == "__main__":
     print("")
     
     print("This class provides a complete synchronization workflow:")
-    print("1. Uses DataPathManager for unified path management")
+    print("1. Uses DataStorageManager for unified path management")
     print("2. Automatic loading of ephys and behavioral sync data")
     print("3. Multiple mapping algorithms (interval-based or new algorithm)")  
     print("4. Timestamp conversion between systems")
@@ -911,8 +911,8 @@ if __name__ == "__main__":
     print("")
     
     print("Example workflow:")
-    print("# Create DataPathManager")
-    print('data_manager = DataPathManager("animal_id", "session_id", auto_load=True)')
+    print("# Create DataStorageManager")
+    print('data_manager = DataStorageManager("animal_id", "session_id", auto_load=True)')
     print("")
     print("# Initialize and load data automatically")
     print('sync = DataSyncManager(data_manager, auto_load=True)')

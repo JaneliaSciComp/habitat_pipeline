@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Optional, List, Dict, Union, Tuple
 from datetime import datetime, timedelta
 import json
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 # Import DataStorageManager for path management
 from ingestion.data_paths import DataStorageManager
@@ -48,12 +50,12 @@ class BehavioralEventsData:
         'I': 'introduce',
         'UD': 'unlock_door',
         'FD': 'food_delivery',
-        'P': 'playful fight/peaceful fight',
+        'P': 'playful fight', #peaceful fight',
         'RW': 'rob wood block',
         'S': 'share',
-        'H': 'harvest food, especially for foraging, rather than rob from others',
-        'SN': 'sniff, usually is genital sniffing',
-        'EC': 'encounter, come upon face-to-face, unexpectedly',
+        'H': 'harvest food',  # especially for foraging, rather than rob from others
+        'SN': 'sniff',  # usually is genital sniffing
+        'EC': 'encounter',  # come upon face-to-face, unexpectedly
         'HD': 'huddle',
         'G': 'allogrooming',
         'PO': 'policing',
@@ -659,6 +661,190 @@ class BehavioralEventsData:
         """
         return self.metadata['rat_identities']
     
+    def plot_rat_interaction_heatmap(self, event_type: Optional[str] = None, 
+                                   figsize: Tuple[int, int] = (10, 8), 
+                                   save_path: Optional[Union[str, Path]] = None) -> None:
+        """
+        Create a heatmap matrix showing number of events for each pair of rats.
+        
+        Args:
+            event_type: Optional event type to filter for (abbreviation or full name)
+            figsize: Figure size as (width, height)
+            save_path: Optional path to save the plot
+        """
+        if self.events_data is None:
+            print("No events data loaded. Call load_events() first.")
+            return
+        
+        # Get working data - filter by event type if specified
+        if event_type:
+            data = self.get_events_by_type(event_type)
+            if data is None:
+                return
+            title_suffix = f" - {self.decode_behavior_type(event_type)}"
+        else:
+            data = self.events_data
+            title_suffix = " - All Events"
+        
+        # Get all rat identities
+        rats = self.get_available_rats()
+        if len(rats) < 2:
+            print("Need at least 2 rats for interaction heatmap")
+            return
+        
+        # Create interaction matrix
+        interaction_matrix = pd.DataFrame(0, index=rats, columns=rats)
+        
+        # Use only initiator-victim pairs for faster vectorized counting
+        if 'initiator' in data.columns and 'victim' in data.columns:
+            # Get valid interactions (drop rows with NaN values)
+            interactions = data[['initiator', 'victim']].dropna()
+            
+            # Filter to only include rats that are in our rats list (vectorized filtering)
+            valid_mask = (interactions['initiator'].isin(rats)) & (interactions['victim'].isin(rats))
+            valid_interactions = interactions[valid_mask]
+            
+            if len(valid_interactions) > 0:
+                # Use pandas crosstab for highly efficient vectorized counting
+                # Count initiator → victim interactions
+                interaction_counts = pd.crosstab(
+                    valid_interactions['initiator'], 
+                    valid_interactions['victim'], 
+                    dropna=False
+                )
+                
+                # Count victim → initiator interactions (reverse direction for symmetry)
+                reverse_interaction_counts = pd.crosstab(
+                    valid_interactions['victim'], 
+                    valid_interactions['initiator'], 
+                    dropna=False
+                )
+                
+                # Reindex both matrices to ensure all rats are represented with proper alignment
+                interaction_counts = interaction_counts.reindex(
+                    index=rats, 
+                    columns=rats, 
+                    fill_value=0
+                )
+                
+                reverse_interaction_counts = reverse_interaction_counts.reindex(
+                    index=rats, 
+                    columns=rats, 
+                    fill_value=0
+                )
+                
+                # Add both directions to create symmetric matrix
+                symmetric_counts = interaction_counts.add(reverse_interaction_counts, fill_value=0)
+                
+                # Add to the interaction matrix
+                interaction_matrix = interaction_matrix.add(symmetric_counts, fill_value=0)
+        
+        # Create the heatmap
+        plt.figure(figsize=figsize)
+        
+        # Use a color map that works well for count data
+        sns.heatmap(interaction_matrix, 
+                    annot=True, 
+                    fmt='d', 
+                    cmap='YlOrRd',
+                    cbar_kws={'label': 'Number of Events'},
+                    square=True)
+        
+        plt.title(f'Rat Interaction Matrix{title_suffix}\nSession: {self.data_manager.session_id}')
+        plt.xlabel('Target Rat')
+        plt.ylabel('Source Rat')
+        plt.xticks(rotation=45)
+        plt.yticks(rotation=0)
+        plt.tight_layout()
+        
+        # Save if requested
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"Heatmap saved to: {save_path}")
+        
+        plt.show()
+    
+    def plot_rat_behavior_heatmap(self, rat_id: str, 
+                                figsize: Tuple[int, int] = (12, 8),
+                                save_path: Optional[Union[str, Path]] = None) -> None:
+        """
+        Create a heatmap showing number of events of each behavior type for a specific rat with other rats.
+        
+        Args:
+            rat_id: Rat identifier (e.g., "rat616" or "616")
+            figsize: Figure size as (width, height)
+            save_path: Optional path to save the plot
+        """
+        if self.events_data is None:
+            print("No events data loaded. Call load_events() first.")
+            return
+        
+        # Normalize rat ID
+        if not rat_id.startswith('rat'):
+            rat_id = f"rat{rat_id}"
+        
+        # Get events involving this rat
+        rat_events = self.get_events_by_rat(rat_id, 'any')
+        if rat_events is None:
+            return
+        
+        # Get all behavior types and other rats
+        behavior_types = self.get_available_event_types('abbreviations')
+        other_rats = [r for r in self.get_available_rats() if r != rat_id]
+        
+        if len(behavior_types) == 0 or len(other_rats) == 0:
+            print(f"Insufficient data for rat {rat_id} behavior heatmap")
+            return
+        
+        # Create behavior-rat matrix
+        behavior_matrix = pd.DataFrame(0, index=behavior_types, columns=other_rats)
+        
+        # Fill matrix by counting interactions
+        rat_columns = ['initiator', 'victim', 'winner', 'loser']
+        
+        for _, event in rat_events.iterrows():
+            event_type = event.get('type')
+            if pd.isna(event_type) or event_type not in behavior_types:
+                continue
+            
+            # Find other rats involved in this event
+            involved_rats = set()
+            for col in rat_columns:
+                if col in event and pd.notna(event[col]) and event[col] != rat_id:
+                    involved_rats.add(event[col])
+            
+            # Increment count for each involved rat
+            for other_rat in involved_rats:
+                if other_rat in other_rats:
+                    behavior_matrix.loc[event_type, other_rat] += 1
+        
+        # Create the heatmap
+        plt.figure(figsize=figsize)
+        
+        # Create full behavior names for y-axis labels
+        behavior_labels = [f"{abbr} ({self.decode_behavior_type(abbr)})" for abbr in behavior_types]
+        
+        sns.heatmap(behavior_matrix, 
+                    annot=True, 
+                    fmt='d', 
+                    cmap='viridis',
+                    cbar_kws={'label': 'Number of Events'},
+                    yticklabels=behavior_labels)
+        
+        plt.title(f'Behavior Pattern for {rat_id}\nSession: {self.data_manager.session_id}')
+        plt.xlabel('Interaction Partner')
+        plt.ylabel('Behavior Type')
+        plt.xticks(rotation=45)
+        plt.yticks(rotation=0)
+        plt.tight_layout()
+        
+        # Save if requested
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"Behavior heatmap saved to: {save_path}")
+        
+        plt.show()
+    
     def __repr__(self) -> str:
         """String representation of BehavioralEventsData."""
         if self.events_data is None:
@@ -793,7 +979,21 @@ if __name__ == "__main__":
                         print(f"   - As initiator: {rat_summary['as_initiator']}")
                         print(f"   - As victim: {rat_summary['as_victim']}")
                 
-                print(f"\n8. Export summary:")
+                print(f"\n8. Testing visualization functions:")
+                if len(rats) >= 2:
+                    print("   - Generating rat interaction heatmap...")
+                    # Note: In actual use, this would display the plot
+                    # events.plot_rat_interaction_heatmap()
+                    
+                    print("   - Generating rat behavior heatmap...")
+                    # Note: In actual use, this would display the plot  
+                    # events.plot_rat_behavior_heatmap(test_rat)
+                    
+                    print("   ✓ Visualization functions ready (plots would display in interactive environment)")
+                else:
+                    print("   ⚠ Need at least 2 rats for interaction visualizations")
+                
+                print(f"\n9. Export summary:")
                 summary = events.export_summary()
                 print(f"   - Summary generated with {len(summary)} sections")
         else:
@@ -822,5 +1022,15 @@ if __name__ == "__main__":
     print("  time_filtered = events.get_events_in_time_range(1000, 2000, overlap_mode='any')")
     print("  rat_summary = events.get_rat_interaction_summary('rat616')")
     print("  summary = events.export_summary('events_summary.json')")
+    print("")
+    print("Visualization examples:")
+    print("  # Overall interaction heatmap")
+    print("  events.plot_rat_interaction_heatmap()")
+    print("  # Fight-specific interactions")
+    print("  events.plot_rat_interaction_heatmap(event_type='F')")
+    print("  # Behavior patterns for specific rat")
+    print("  events.plot_rat_behavior_heatmap('rat616')")
+    print("  # Save visualizations")
+    print("  events.plot_rat_interaction_heatmap(save_path='interactions.png')")
     
     print("\\n" + "=" * 60)

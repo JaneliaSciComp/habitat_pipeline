@@ -17,6 +17,7 @@ import seaborn as sns
 
 # Import DataStorageManager for path management
 from ingestion.data_paths import DataStorageManager
+from ingestion.ephys_sync import DataSyncManager
 
 
 class BehavioralEventsData:
@@ -661,6 +662,124 @@ class BehavioralEventsData:
         """
         return self.metadata['rat_identities']
     
+    def synchronize_with_ephys(self, sync_manager: 'DataSyncManager', 
+                             create_new_columns: bool = True) -> bool:
+        """
+        Convert event timestamps from behavioral time to ephys time using DataSyncManager.
+        
+        Args:
+            sync_manager: DataSyncManager instance for time synchronization
+            create_new_columns: If True, creates new columns (ts_start_ephys, ts_end_ephys).
+                              If False, overwrites original timestamp columns.
+                              
+        Returns:
+            True if synchronization was successful, False otherwise
+        """
+        if self.events_data is None:
+            print("No events data loaded. Call load_events() first.")
+            return False
+        
+        # Check if we have timestamp columns
+        if 'ts_start' not in self.events_data.columns:
+            print("No 'ts_start' column found in behavioral events data")
+            return False
+        
+        print(f"Synchronizing {len(self.events_data)} behavioral events with ephys timestamps...")
+        
+        # Convert ts_start timestamps
+        try:
+            # Get valid start timestamps (drop NaN values)
+            valid_start_mask = self.events_data['ts_start'].notna()
+            valid_start_data = self.events_data[valid_start_mask].copy()
+            
+            if len(valid_start_data) == 0:
+                print("No valid start timestamps found")
+                return False
+            
+            # Convert from nanoseconds to seconds and sync to ephys time
+            start_times_seconds = valid_start_data['ts_start'] / 1e9
+            ephys_start_times = []
+            
+            print("Converting start timestamps...")
+            for i, behav_time in enumerate(start_times_seconds):
+                try:
+                    ephys_time = sync_manager.convert_behavior_to_ephys(behav_time)
+                    ephys_start_times.append(ephys_time)
+                except Exception as e:
+                    print(f"Warning: Failed to convert start timestamp {behav_time}: {e}")
+                    ephys_start_times.append(None)
+                
+                # Progress indicator for large datasets
+                if (i + 1) % 1000 == 0:
+                    print(f"  Processed {i + 1}/{len(start_times_seconds)} start timestamps")
+            
+            # Store ephys start times
+            if create_new_columns:
+                self.events_data.loc[:, 'ts_start_ephys'] = None  # Initialize column
+                self.events_data.loc[valid_start_mask, 'ts_start_ephys'] = ephys_start_times
+            else:
+                self.events_data.loc[valid_start_mask, 'ts_start'] = ephys_start_times
+            
+            # Convert ts_end timestamps if available
+            if 'ts_end' in self.events_data.columns:
+                valid_end_mask = self.events_data['ts_end'].notna()
+                valid_end_data = self.events_data[valid_end_mask].copy()
+                
+                if len(valid_end_data) > 0:
+                    end_times_seconds = valid_end_data['ts_end'] / 1e9
+                    ephys_end_times = []
+                    
+                    print("Converting end timestamps...")
+                    for i, behav_time in enumerate(end_times_seconds):
+                        try:
+                            ephys_time = sync_manager.convert_behavior_to_ephys(behav_time)
+                            ephys_end_times.append(ephys_time)
+                        except Exception as e:
+                            print(f"Warning: Failed to convert end timestamp {behav_time}: {e}")
+                            ephys_end_times.append(None)
+                        
+                        # Progress indicator for large datasets
+                        if (i + 1) % 1000 == 0:
+                            print(f"  Processed {i + 1}/{len(end_times_seconds)} end timestamps")
+                    
+                    # Store ephys end times
+                    if create_new_columns:
+                        self.events_data.loc[:, 'ts_end_ephys'] = None  # Initialize column
+                        self.events_data.loc[valid_end_mask, 'ts_end_ephys'] = ephys_end_times
+                    else:
+                        self.events_data.loc[valid_end_mask, 'ts_end'] = ephys_end_times
+            
+            # Update metadata to reflect synchronization
+            self.metadata['synchronized_with_ephys'] = True
+            self.metadata['sync_columns_created'] = create_new_columns
+            self.metadata['ephys_sync_timestamp'] = datetime.now().isoformat()
+            
+            # Count successful conversions
+            if create_new_columns:
+                valid_ephys_start = self.events_data['ts_start_ephys'].notna().sum()
+                valid_ephys_end = (self.events_data['ts_end_ephys'].notna().sum() 
+                                 if 'ts_end_ephys' in self.events_data.columns else 0)
+            else:
+                valid_ephys_start = len([t for t in ephys_start_times if t is not None])
+                valid_ephys_end = (len([t for t in ephys_end_times if t is not None]) 
+                                 if 'ts_end' in self.events_data.columns and len(ephys_end_times) > 0 else 0)
+            
+            print(f"Synchronization complete:")
+            print(f"  ✓ Start timestamps: {valid_ephys_start}/{len(self.events_data)} converted")
+            if 'ts_end' in self.events_data.columns:
+                print(f"  ✓ End timestamps: {valid_ephys_end}/{len(self.events_data)} converted")
+            
+            if create_new_columns:
+                print(f"  ✓ New columns created: ts_start_ephys, ts_end_ephys")
+            else:
+                print(f"  ✓ Original timestamp columns updated")
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error during timestamp synchronization: {e}")
+            return False
+    
     def plot_rat_interaction_heatmap(self, event_type: Optional[str] = None, 
                                    figsize: Tuple[int, int] = (10, 8), 
                                    save_path: Optional[Union[str, Path]] = None) -> None:
@@ -1032,5 +1151,12 @@ if __name__ == "__main__":
     print("  events.plot_rat_behavior_heatmap('rat616')")
     print("  # Save visualizations")
     print("  events.plot_rat_interaction_heatmap(save_path='interactions.png')")
+    print("")
+    print("Ephys synchronization examples:")
+    print("  # Create sync manager and synchronize timestamps")
+    print("  from ingestion.ephys_sync import DataSyncManager")
+    print("  sync = DataSyncManager(data_manager, dio_channel=1)")
+    print("  events.synchronize_with_ephys(sync, create_new_columns=True)")
+    print("  # Now events have ts_start_ephys and ts_end_ephys columns")
     
     print("\\n" + "=" * 60)

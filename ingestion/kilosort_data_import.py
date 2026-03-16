@@ -248,6 +248,13 @@ class KilosortData:
         self.spike_times_by_cell = spike_times_by_cell
         return spike_times_by_cell
     
+    @property
+    def duration_seconds(self):
+        """Calculate total recording duration in seconds"""
+        if self.spike_times is None or len(self.spike_times) == 0:
+            return 0.0
+        return (self.spike_times.max() - self.spike_times.min()) / SAMPLE_RATE
+    
     def get_firing_rates(self, bin_size_sec=1.0):
         """Calculate firing rates for all clusters"""
         rates = {}
@@ -270,7 +277,197 @@ class KilosortData:
                     'cv_isi': np.std(isis) / np.mean(isis)
                 }
         return isi_stats
+
+    def calculate_firing_pattern_metrics(self, time_bin_sec=60.0):
+        """
+        Calculate firing pattern quality metrics (7-9):
+        - Firing Rate: Average spikes per second
+        - Presence Ratio: Fraction of recording time with detectable activity
+        - Coefficient of Variation: Variability in interspike intervals
+        
+        Parameters:
+        -----------
+        time_bin_sec : float, default=60.0
+            Time bin size in seconds for calculating presence ratio
             
+        Returns:
+        --------
+        dict : Dictionary with cluster_id as keys and metrics as values
+        """
+        metrics = {}
+        duration = self.duration_seconds
+        
+        if duration <= 0:
+            print("Warning: Recording duration is 0, cannot calculate metrics")
+            return metrics
+            
+        for i, cluster_id in enumerate(self.ks_ids):
+            spike_times = self.spike_times_by_cell[i]
+            
+            if len(spike_times) == 0:
+                metrics[cluster_id] = {
+                    'firing_rate': 0.0,
+                    'presence_ratio': 0.0,
+                    'cv_isi': float('inf')
+                }
+                continue
+                
+            # 1. Firing Rate (spikes/second)
+            firing_rate = len(spike_times) / duration
+            
+            # 2. Presence Ratio (fraction of time bins with spikes)
+            n_bins = int(np.ceil(duration / time_bin_sec))
+            if n_bins > 0:
+                bin_edges = np.linspace(spike_times[0] if len(spike_times) > 0 else 0, 
+                                      spike_times[0] + duration if len(spike_times) > 0 else duration, 
+                                      n_bins + 1)
+                spike_counts, _ = np.histogram(spike_times, bins=bin_edges)
+                presence_ratio = np.sum(spike_counts > 0) / n_bins
+            else:
+                presence_ratio = 0.0
+            
+            # 3. Coefficient of Variation of ISI
+            if len(spike_times) > 1:
+                isis = np.diff(spike_times)
+                mean_isi = np.mean(isis)
+                cv_isi = np.std(isis) / mean_isi if mean_isi > 0 else float('inf')
+            else:
+                cv_isi = float('inf')
+                
+            metrics[cluster_id] = {
+                'firing_rate': firing_rate,
+                'presence_ratio': presence_ratio,
+                'cv_isi': cv_isi
+            }
+            
+        return metrics
+    
+    def filter_cells_by_firing_patterns(self, 
+                                       min_firing_rate=0.5,
+                                       max_firing_rate=100.0,
+                                       min_presence_ratio=0.8,
+                                       max_cv_isi=10.0,
+                                       time_bin_sec=60.0):
+        """
+        Filter cells based on firing pattern quality metrics.
+        
+        Parameters:
+        -----------
+        min_firing_rate : float, default=0.5
+            Minimum acceptable firing rate (Hz)
+        max_firing_rate : float, default=100.0
+            Maximum acceptable firing rate (Hz)
+        min_presence_ratio : float, default=0.8
+            Minimum fraction of time bins with activity (0-1)
+        max_cv_isi : float, default=10.0
+            Maximum coefficient of variation for ISI
+        time_bin_sec : float, default=60.0
+            Time bin size for presence ratio calculation
+            
+        Returns:
+        --------
+        dict : Dictionary with filtering results
+            - 'passed_clusters': list of cluster IDs that passed all criteria
+            - 'failed_clusters': dict with cluster IDs and reasons for failure
+            - 'metrics': dict with calculated metrics for all clusters
+            - 'summary': dict with counts and percentages
+        """
+        # Calculate metrics
+        metrics = self.calculate_firing_pattern_metrics(time_bin_sec=time_bin_sec)
+        
+        passed_clusters = []
+        failed_clusters = {}
+        
+        for cluster_id, cluster_metrics in metrics.items():
+            reasons = []
+            
+            # Check firing rate
+            fr = cluster_metrics['firing_rate']
+            if fr < min_firing_rate:
+                reasons.append(f"firing_rate_too_low ({fr:.2f} < {min_firing_rate})")
+            elif fr > max_firing_rate:
+                reasons.append(f"firing_rate_too_high ({fr:.2f} > {max_firing_rate})")
+            
+            # Check presence ratio
+            pr = cluster_metrics['presence_ratio']
+            if pr < min_presence_ratio:
+                reasons.append(f"presence_ratio_too_low ({pr:.3f} < {min_presence_ratio})")
+            
+            # Check CV ISI
+            cv = cluster_metrics['cv_isi']
+            if cv > max_cv_isi:
+                reasons.append(f"cv_isi_too_high ({cv:.3f} > {max_cv_isi})")
+            
+            if len(reasons) == 0:
+                passed_clusters.append(cluster_id)
+            else:
+                failed_clusters[cluster_id] = reasons
+        
+        # Summary statistics
+        total_clusters = len(metrics)
+        passed_count = len(passed_clusters)
+        failed_count = len(failed_clusters)
+        
+        summary = {
+            'total_clusters': total_clusters,
+            'passed_count': passed_count,
+            'failed_count': failed_count,
+            'pass_rate': passed_count / total_clusters if total_clusters > 0 else 0.0
+        }
+        
+        return {
+            'passed_clusters': passed_clusters,
+            'failed_clusters': failed_clusters,
+            'metrics': metrics,
+            'summary': summary
+        }
+    
+    def print_firing_pattern_summary(self, filter_results=None, **filter_kwargs):
+        """
+        Print a summary of firing pattern quality metrics and filtering results.
+        
+        Parameters:
+        -----------
+        filter_results : dict, optional
+            Results from filter_cells_by_firing_patterns(). If None, will run filtering.
+        **filter_kwargs : keyword arguments
+            Parameters to pass to filter_cells_by_firing_patterns() if filter_results is None
+        """
+        if filter_results is None:
+            filter_results = self.filter_cells_by_firing_patterns(**filter_kwargs)
+        
+        metrics = filter_results['metrics']
+        summary = filter_results['summary']
+        
+        print(f"\n=== Firing Pattern Quality Metrics Summary ===")
+        print(f"Total clusters: {summary['total_clusters']}")
+        print(f"Passed quality checks: {summary['passed_count']} ({summary['pass_rate']:.1%})")
+        print(f"Failed quality checks: {summary['failed_count']}")
+        
+        if len(metrics) > 0:
+            # Calculate overall statistics
+            firing_rates = [m['firing_rate'] for m in metrics.values()]
+            presence_ratios = [m['presence_ratio'] for m in metrics.values()]
+            cv_isis = [m['cv_isi'] for m in metrics.values() if np.isfinite(m['cv_isi'])]
+            
+            print(f"\nOverall Statistics:")
+            print(f"  Firing Rate: {np.mean(firing_rates):.2f} ± {np.std(firing_rates):.2f} Hz")
+            print(f"  Presence Ratio: {np.mean(presence_ratios):.3f} ± {np.std(presence_ratios):.3f}")
+            if len(cv_isis) > 0:
+                print(f"  CV ISI: {np.mean(cv_isis):.3f} ± {np.std(cv_isis):.3f}")
+            
+            # Show failure reasons
+            if filter_results['failed_clusters']:
+                print(f"\nFailure reasons:")
+                failure_counts = {}
+                for reasons in filter_results['failed_clusters'].values():
+                    for reason in reasons:
+                        failure_type = reason.split('(')[0].strip()
+                        failure_counts[failure_type] = failure_counts.get(failure_type, 0) + 1
+                
+                for reason, count in sorted(failure_counts.items()):
+                    print(f"  {reason}: {count} clusters")
+
     def save_processed_data(self, cache_dir=None):
         """Save processed data for faster subsequent loading"""
         cache_path = cache_dir or self.KSfolder / 'processed_cache.pkl'

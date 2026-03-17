@@ -1,19 +1,50 @@
 import os
 from pathlib import Path
 import pickle
+from typing import Union
 
 import numpy as np
 import pandas as pd
+from ingestion.data_paths import DataStorageManager
+
 
 SAMPLE_RATE = 30000.0
 
 
 class KilosortData:
-    def __init__(self, data_dir):
-        self.data_dir = Path(data_dir)
+    def __init__(self, data_input: Union[str, Path, "DataStorageManager"]):
+        """
+        Initialize KilosortData with either a data directory path or DataStorageManager.
+        
+        Parameters:
+        -----------
+        data_input : Union[str, Path, DataStorageManager]
+            Either a path to the kilosort data directory or a DataStorageManager instance
+        """
+        # Handle different input types
+        if hasattr(data_input, 'get_kilosort_path'):
+            # Input is a DataStorageManager
+            self.data_storage_manager = data_input
+            kilosort_path = data_input.get_kilosort_path()
+            if kilosort_path is None:
+                raise ValueError("DataStorageManager does not have a valid Kilosort path")
+            self.data_dir = Path(kilosort_path)
+            self.animal_id = data_input.animal_id
+            self.session_id = data_input.session_id
+            self._use_data_manager = True
+        else:
+            # Input is a path (backward compatibility)
+            self.data_dir = Path(data_input)
+            self.data_storage_manager = None
+            self._use_data_manager = False
+            
         self.cluster_info = None
         self.locate_KS_folder()
-        self.extract_ids_from_path()
+        
+        # Extract IDs from path only if not using DataStorageManager
+        if not self._use_data_manager:
+            self.extract_ids_from_path()
+            
         self.load_spike_data()
         self.select_clusters()
         self.extract_cluster_properties()
@@ -489,3 +520,45 @@ class KilosortData:
         
         return (f"KilosortData(animal={self.animal_id}, session={self.session_id}, "
                 f"n_spikes={n_spikes}, n_clusters={n_clusters}, duration={duration:.1f}s)")
+    
+    def get_data_storage_manager(self):
+        """
+        Get the DataStorageManager instance if available.
+        
+        Returns:
+        --------
+        DataStorageManager or None : The data storage manager used to initialize this object
+        """
+        return self.data_storage_manager
+    
+    def is_using_data_manager(self) -> bool:
+        """
+        Check if this instance was initialized using a DataStorageManager.
+        
+        Returns:
+        --------
+        bool : True if initialized with DataStorageManager, False if with path
+        """
+        return self._use_data_manager
+    
+    @classmethod
+    def from_data_manager(cls, data_manager):
+        """
+        Alternative constructor to create KilosortData from DataStorageManager.
+        
+        Parameters:
+        -----------
+        data_manager : DataStorageManager
+            DataStorageManager instance with loaded paths
+            
+        Returns:
+        --------
+        KilosortData : New instance initialized from the data manager
+        
+        Examples:
+        ---------
+        >>> from ingestion.data_paths import DataStorageManager
+        >>> data_manager = DataStorageManager("631", "20251216", auto_load=True) 
+        >>> ks_data = KilosortData.from_data_manager(data_manager)
+        """
+        return cls(data_manager)

@@ -17,8 +17,14 @@ Usage:
     from ephys.decode_opponent_identity import decode_opponent_identity_population
     from ingestion.kilosort_data_import import KilosortData
     from video.behavioral_events import BehavioralEventsData
+    from ingestion.data_paths import DataStorageManager
     
-    # Load data
+    # Method 1: Using DataStorageManager (recommended)
+    data_manager = DataStorageManager("631", "20251216", auto_load=True)
+    ks_data = KilosortData(data_manager)
+    behavior_data = BehavioralEventsData(data_manager)
+    
+    # Method 2: Using paths (backward compatibility)
     ks_data = KilosortData(kilosort_path)
     behavior_data = BehavioralEventsData(data_manager)
     

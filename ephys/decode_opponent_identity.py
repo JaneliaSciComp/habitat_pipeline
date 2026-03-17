@@ -240,7 +240,8 @@ def decode_opponent_identity_single_cell(spike_times: np.ndarray,
 
 def extract_behavioral_opponent_labels(behavior_data, 
                                      animal_of_interest: str,
-                                     behavior_type: str = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+                                     behavior_type: str = None,
+                                     min_events_per_class: int = 5) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Extract opponent identity labels from behavioral events for a specific animal.
     
@@ -252,6 +253,8 @@ def extract_behavioral_opponent_labels(behavior_data,
         Animal identifier to focus on (e.g., '631')
     behavior_type : str, optional
         Filter by specific behavior type (e.g., 'F' for fights)
+    min_events_per_class : int, optional
+        Minimum number of events required per opponent class (default: 5)
         
     Returns:
     --------
@@ -299,6 +302,21 @@ def extract_behavioral_opponent_labels(behavior_data,
     
     opponent_labels = np.array(opponent_labels)
     
+    # Filter by minimum events per class
+    if min_events_per_class > 1:
+        # Count events per opponent class
+        unique_opponents, counts = np.unique(opponent_labels, return_counts=True)
+        valid_opponents = unique_opponents[counts >= min_events_per_class]
+        
+        if len(valid_opponents) == 0:
+            return np.array([]), np.array([]), np.array([])
+        
+        # Filter events to only include valid opponent classes
+        valid_mask = np.isin(opponent_labels, valid_opponents)
+        event_start_times = event_start_times[valid_mask]
+        event_end_times = event_end_times[valid_mask]
+        opponent_labels = opponent_labels[valid_mask]
+    
     return event_start_times, event_end_times, opponent_labels
 
 
@@ -309,8 +327,8 @@ def decode_opponent_identity_population(ks_data,
                                       use_quality_cells: bool = True,
                                       quality_thresholds: Dict = None,
                                       alignment: str = 'start',
-                                      time_window: Tuple[float, float] = (-0.5, 1.0),
-                                      time_bin_size: float = 0.1,
+                                      time_window: Tuple[float, float] = (-1.0, 2.0),
+                                      time_bin_size: float = 0.5,
                                       cv_folds: int = 5,
                                       min_events_per_class: int = 5) -> Dict:
     """
@@ -354,7 +372,7 @@ def decode_opponent_identity_population(ks_data,
     # Extract behavioral events and opponent labels
     try:
         event_start_times, event_end_times, opponent_labels = extract_behavioral_opponent_labels(
-            behavior_data, animal_of_interest, behavior_type
+            behavior_data, animal_of_interest, behavior_type, min_events_per_class
         )
         
         if len(event_start_times) == 0:
@@ -379,8 +397,8 @@ def decode_opponent_identity_population(ks_data,
         if quality_thresholds is None:
             # Use moderate quality thresholds
             quality_thresholds = {
-                'min_firing_rate': 0.1,
-                'min_presence_ratio': 0.5, 
+                'min_firing_rate': 0.5,
+                'min_presence_ratio': 0.8, 
                 'max_cv_isi': 5.0
             }
         
@@ -453,6 +471,7 @@ def decode_opponent_identity_population(ks_data,
         'best_cell_accuracy': np.max(accuracies) if accuracies else np.nan,
         'best_cell_id': successful_cluster_ids[np.argmax(accuracies)] if accuracies else None,
         'parameters': {
+            'animal_of_interest': animal_of_interest,
             'behavior_type': behavior_type,
             'use_quality_cells': use_quality_cells,
             'quality_thresholds': quality_thresholds,
@@ -509,11 +528,15 @@ def plot_decoding_accuracy_distribution(results: Dict,
         print("No valid accuracies to plot")
         return None
     
+    # Calculate chance level based on number of classes
+    n_classes = len(results['behavioral_summary']['unique_opponents'])
+    chance_level = 1.0 / n_classes
+    
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
     
     # Histogram
     ax1.hist(accuracies, bins=20, alpha=0.7, color='skyblue', edgecolor='navy')
-    ax1.axvline(0.5, color='red', linestyle='--', alpha=0.7, label='Chance (50%)')
+    ax1.axvline(chance_level, color='red', linestyle='--', alpha=0.7, label=f'Chance ({chance_level:.1%})')
     ax1.axvline(np.mean(accuracies), color='orange', linestyle='-', linewidth=2, 
                label=f'Mean ({np.mean(accuracies):.1%})')
     ax1.set_xlabel('Decoding Accuracy')
@@ -524,7 +547,7 @@ def plot_decoding_accuracy_distribution(results: Dict,
     
     # Box plot
     ax2.boxplot([accuracies], labels=['All Cells'])
-    ax2.axhline(0.5, color='red', linestyle='--', alpha=0.7)
+    ax2.axhline(chance_level, color='red', linestyle='--', alpha=0.7)
     ax2.set_ylabel('Decoding Accuracy') 
     ax2.set_title('Accuracy Distribution Summary')
     ax2.grid(True, alpha=0.3)
@@ -536,7 +559,7 @@ def plot_decoding_accuracy_distribution(results: Dict,
     Median: {np.median(accuracies):.1%}
     Std: {np.std(accuracies):.1%}
     Best: {np.max(accuracies):.1%}
-    > Chance: {np.sum(np.array(accuracies) > 0.5)}/{len(accuracies)}
+    > Chance: {np.sum(np.array(accuracies) > chance_level)}/{len(accuracies)}
     """
     
     fig.text(0.02, 0.98, stats_text, transform=fig.transFigure, 
@@ -590,6 +613,10 @@ def plot_best_cells_decoding(results: Dict,
         print("No valid accuracies to plot")
         return None
     
+    # Calculate chance level based on number of classes
+    n_classes = len(results['behavioral_summary']['unique_opponents'])
+    chance_level = 1.0 / n_classes
+    
     # Sort by accuracy and take top N
     cell_accs_sorted = sorted(cell_accs, key=lambda x: x[1], reverse=True)
     top_cells = cell_accs_sorted[:min(n_top_cells, len(cell_accs_sorted))]
@@ -606,7 +633,7 @@ def plot_best_cells_decoding(results: Dict,
     ax1.set_xlabel('Decoding Accuracy')
     ax1.set_ylabel('Cluster ID')
     ax1.set_title(f'Top {len(top_cells)} Cells by Decoding Accuracy')
-    ax1.axvline(0.5, color='red', linestyle='--', alpha=0.7)
+    ax1.axvline(chance_level, color='red', linestyle='--', alpha=0.7)
     ax1.grid(True, alpha=0.3)
     
     # Add accuracy values on bars
@@ -678,6 +705,10 @@ def plot_decoding_summary(results: Dict,
         print("No successful results to plot")
         return None
     
+    # Calculate chance level based on number of classes
+    n_classes = len(results['behavioral_summary']['unique_opponents'])
+    chance_level = 1.0 / n_classes
+    
     fig = plt.figure(figsize=figsize)
     
     # Create grid layout
@@ -691,7 +722,7 @@ def plot_decoding_summary(results: Dict,
     
     if accuracies:
         ax1.hist(accuracies, bins=15, alpha=0.7, color='skyblue', edgecolor='navy')
-        ax1.axvline(0.5, color='red', linestyle='--', alpha=0.7, label='Chance')
+        ax1.axvline(chance_level, color='red', linestyle='--', alpha=0.7, label='Chance')
         ax1.axvline(np.mean(accuracies), color='orange', linestyle='-', 
                    linewidth=2, label=f'Mean ({np.mean(accuracies):.1%})')
         ax1.set_xlabel('Accuracy')
@@ -744,7 +775,7 @@ def plot_decoding_summary(results: Dict,
         accuracies_top = [cell[1] for cell in top_cells]
         
         bars = ax4.bar(x_pos, accuracies_top, color='lightcoral')
-        ax4.axhline(0.5, color='red', linestyle='--', alpha=0.7, label='Chance')
+        ax4.axhline(chance_level, color='red', linestyle='--', alpha=0.7, label='Chance')
         ax4.set_xlabel('Cell Rank')
         ax4.set_ylabel('Accuracy')
         ax4.set_title(f'Top {top_n} Cells by Accuracy')
@@ -776,7 +807,7 @@ def plot_decoding_summary(results: Dict,
     Population Accuracy: {results['population_accuracy_mean']:.1%} ± {results['population_accuracy_std']:.1%}
     Best Cell Accuracy: {results['best_cell_accuracy']:.1%}
     Best Cell ID: {results['best_cell_id']}
-    Cells > Chance: {np.sum(np.array(accuracies) > 0.5) if accuracies else 0}/{len(accuracies) if accuracies else 0}
+    Cells > Chance: {np.sum(np.array(accuracies) > chance_level) if accuracies else 0}/{len(accuracies) if accuracies else 0}
     """
     
     ax5.text(0.05, 0.95, param_text, transform=ax5.transAxes, fontsize=10,
@@ -789,6 +820,196 @@ def plot_decoding_summary(results: Dict,
     if save_path:
         fig.savefig(save_path, dpi=300, bbox_inches='tight')
         print(f"Saved summary plot: {save_path}")
+    
+    return fig
+
+
+def plot_top_cells_firing_rates(ks_data,
+                               behavior_data,
+                               test_results: Dict,
+                               time_window: Tuple[float, float] = (-0.5, 1.0), 
+                               time_bin_size: float = 0.05,
+                               n_top_cells: int = 6,
+                               figsize: Tuple[int, int] = (15, 10),
+                               save_path: str = None) -> plt.Figure:
+    """
+    Plot average firing rates around event times for top performing cells by opponent class.
+    
+    Parameters:
+    -----------
+    ks_data : KilosortData
+        Kilosort electrophysiology data
+    behavior_data : BehavioralEventsData  
+        Behavioral events data
+    test_results : Dict
+        Results from decode_opponent_identity_population()
+    time_window : tuple, default=(-0.5, 1.0)
+        Time window around events (start, end) in seconds
+    time_bin_size : float, default=0.05
+        Size of time bins in seconds for PETH
+    n_top_cells : int, default=6
+        Number of top cells to plot
+    figsize : tuple, default=(15, 10)
+        Figure size (width, height)
+    save_path : str, optional
+        Path to save figure
+        
+    Returns:
+    --------
+    plt.Figure : The created figure
+    """
+    if test_results['status'] != 'success' or test_results['n_successful_cells'] == 0:
+        print("No successful results to plot")
+        return None
+    
+    # Get top performing cells
+    cell_accs = [(cluster_id, test_results['cell_results'][cluster_id]['accuracy']) 
+                 for cluster_id in test_results['successful_cells']
+                 if not np.isnan(test_results['cell_results'][cluster_id]['accuracy'])]
+    
+    if len(cell_accs) == 0:
+        print("No valid accuracies to plot")
+        return None
+    
+    # Sort by accuracy and take top N
+    cell_accs_sorted = sorted(cell_accs, key=lambda x: x[1], reverse=True)
+    top_cells = cell_accs_sorted[:min(n_top_cells, len(cell_accs_sorted))]
+    
+    # Extract behavioral events and opponent labels
+    params = test_results['parameters']
+    try:
+        event_start_times, event_end_times, opponent_labels = extract_behavioral_opponent_labels(
+            behavior_data, 
+            animal_of_interest=params.get('animal_of_interest', ''),
+            behavior_type=params['behavior_type'],
+            min_events_per_class=params['min_events_per_class']
+        )
+        
+        if len(event_start_times) == 0:
+            print("No behavioral events found")
+            return None
+            
+    except Exception as e:
+        print(f"Error extracting behavioral events: {e}")
+        return None
+    
+    # Choose alignment times
+    if params['alignment'] == 'start':
+        event_times = event_start_times
+    else:
+        event_times = event_end_times
+    
+    # Get unique opponent classes and colors
+    unique_opponents = np.unique(opponent_labels)
+    colors = plt.cm.Set1(np.linspace(0, 1, len(unique_opponents)))
+    
+    # Create time bins
+    bin_edges = np.arange(time_window[0], time_window[1] + time_bin_size, time_bin_size)
+    bin_centers = bin_edges[:-1] + time_bin_size / 2
+    
+    # Set up subplots
+    n_rows = int(np.ceil(n_top_cells / 3))
+    n_cols = min(3, n_top_cells)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize, 
+                            sharex=True, sharey=True)
+    
+    if n_top_cells == 1:
+        axes = [axes] 
+    elif n_rows == 1:
+        axes = axes.reshape(1, -1)
+    
+    # Plot each top cell
+    for cell_idx, (cluster_id, accuracy) in enumerate(top_cells):
+        if cell_idx >= n_top_cells:
+            break
+            
+        # Get subplot
+        row = cell_idx // n_cols
+        col = cell_idx % n_cols
+        ax = axes[row, col] if n_rows > 1 else axes[0, col] if n_cols > 1 else axes[0]
+        
+        # Get spike times for this cell
+        cell_position = None
+        for i, ks_id in enumerate(ks_data.ks_ids):
+            if ks_id == cluster_id:
+                cell_position = i
+                break
+        
+        if cell_position is None:
+            print(f"Warning: Cell {cluster_id} not found in spike data")
+            continue
+            
+        spike_times = ks_data.spike_times_by_cell[cell_position]
+        
+        # Process each opponent class
+        for opp_idx, opponent in enumerate(unique_opponents):
+            # Get events for this opponent class
+            class_mask = opponent_labels == opponent
+            class_event_times = event_times[class_mask]
+            
+            if len(class_event_times) == 0:
+                continue
+            
+            # Align spikes to events for this class
+            aligned_spikes = align_spikes_to_events(spike_times, class_event_times, time_window)
+            
+            # Calculate firing rates for each trial
+            trial_firing_rates = []
+            for trial_spikes in aligned_spikes:
+                if len(trial_spikes) > 0:
+                    counts, _ = np.histogram(trial_spikes, bins=bin_edges)
+                    firing_rate = counts / time_bin_size  # Convert to Hz
+                else:
+                    firing_rate = np.zeros(len(bin_centers))
+                trial_firing_rates.append(firing_rate)
+            
+            # Convert to array and calculate statistics
+            trial_firing_rates = np.array(trial_firing_rates)
+            mean_firing_rate = np.mean(trial_firing_rates, axis=0)
+            sem_firing_rate = np.std(trial_firing_rates, axis=0) / np.sqrt(len(trial_firing_rates))
+            
+            # Plot mean with SEM shading
+            color = colors[opp_idx]
+            ax.plot(bin_centers, mean_firing_rate, color=color, linewidth=2, 
+                   label=f'Opponent {opponent} (n={len(class_event_times)})')
+            ax.fill_between(bin_centers, 
+                          mean_firing_rate - sem_firing_rate,
+                          mean_firing_rate + sem_firing_rate,
+                          color=color, alpha=0.3)
+        
+        # Formatting
+        ax.axvline(0, color='black', linestyle='--', alpha=0.5, linewidth=1)
+        ax.set_title(f'Cell {cluster_id}\nAccuracy: {accuracy:.1%}', fontsize=10)
+        ax.grid(True, alpha=0.3)
+        
+        if cell_idx == 0:  # Add legend to first subplot
+            ax.legend(fontsize=8, loc='upper right')
+    
+    # Remove empty subplots
+    total_subplots = n_rows * n_cols
+    for idx in range(n_top_cells, total_subplots):
+        row = idx // n_cols
+        col = idx % n_cols
+        if n_rows > 1:
+            fig.delaxes(axes[row, col])
+        elif n_cols > 1:
+            fig.delaxes(axes[0, col])
+    
+    # Set common labels
+    fig.text(0.5, 0.02, 'Time from Event (s)', ha='center', fontsize=12)
+    fig.text(0.02, 0.5, 'Firing Rate (Hz)', va='center', rotation=90, fontsize=12)
+    
+    plt.suptitle(f'Peri-Event Firing Rates - Top {len(top_cells)} Cells\n' +
+                f'Behavior: {params["behavior_type"]}, ' +
+                f'Alignment: {params["alignment"]}, ' + 
+                f'Window: {time_window[0]:.1f} to {time_window[1]:.1f}s',
+                fontsize=14, fontweight='bold')
+    
+    plt.tight_layout()
+    
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Saved firing rate plot: {save_path}")
     
     return fig
 

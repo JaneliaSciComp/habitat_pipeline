@@ -1,37 +1,44 @@
-# Habitat Pipeline - Data Processing Flow Architecture
+# Habitat Pipeline - Architecture Overview
 
-## Block Diagram Overview
+## System Architecture Diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │                                  HABITAT PIPELINE                                    │
-│                            Data Processing Flow Architecture                          │
+│                        Multi-Animal Neurobehavioral Analysis System                 │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────┐    ┌─────────────────────┐    ┌─────────────────────┐
-│     USER INPUT      │    │   CONFIGURATION     │    │    FILE SYSTEM      │
+│    USER INTERFACE   │    │   CONFIGURATION     │    │    DATA SOURCES     │
 ├─────────────────────┤    ├─────────────────────┤    ├─────────────────────┤
-│ • animal_id         │    │ • default_paths.json│    │ • Kilosort Files    │
-│ • session_id        │    │ • ephys path        │    │ • Tracking Files    │
-│ • config_path       │    │ • video path        │    │ • Timestamp Files   │
-│ • output_dir        │    │ • tracking path     │    │ • Sync Files        │
-│ • processing flags  │    │                     │    │                     │
+│ • Jupyter Notebooks │    │ • default_paths.json│    │ • Kilosort Output   │
+│ • Command Line Tools│    │ • Analysis Parameters│   │ • Video Tracking    │
+│ • Interactive Plots │    │ • Quality Thresholds│    │ • Behavioral Events │
+│ • Python API        │    │ • ML Hyperparams    │    │ • DIO Sync Channels │
 └─────────────────────┘    └─────────────────────┘    └─────────────────────┘
           │                          │                          │
           │                          │                          │
           ▼                          ▼                          ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                              WORKFLOW.PY (Main Orchestrator)                        │
+│                         DATA STORAGE MANAGER (Core Hub)                             │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
-│ • parse_arguments()                                                                 │
-│ • setup_output_directory()                                                          │
-│ • main() - coordinates all processing steps                                        │
+│ • Centralized path resolution and data discovery                                    │
+│ • Auto-detection of ephys, video, tracking, and behavioral files                   │
+│ • Session metadata management and validation                                        │
+│ • Standardized data access APIs across all modules                                 │
 └─────────────────────────────────────────────────────────────────────────────────────┘
           │
           ├─────────────────┬─────────────────┬─────────────────┬─────────────────┐
           ▼                 ▼                 ▼                 ▼                 ▼
 ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│ PATH MANAGEMENT │ │ EPHYS PROCESSING│ │VIDEO PROCESSING │ │ VISUALIZATION   │ │ SYNCHRONIZATION │
+│ EPHYS ANALYSIS  │ │BEHAVIORAL EVENTS│ │ VIDEO TRACKING  │ │ SYNCHRONIZATION │ │MACHINE LEARNING │
+│     MODULE      │ │     MODULE      │ │     MODULE      │ │     MODULE      │ │     MODULE      │
+└─────────────────┘ └─────────────────┘ └─────────────────┘ └─────────────────┘ └─────────────────┘
+         │                  │                  │                  │                  │
+         ▼                  ▼                  ▼                  ▼                  ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│ QUALITY CONTROL │ │   VISUALIZATION │ │   DATABASE      │ │     WORKFLOWS   │ │     OUTPUTS     │
+│     MODULE      │ │     MODULE      │ │     MODULE      │ │     MODULE      │ │     MODULE      │
 └─────────────────┘ └─────────────────┘ └─────────────────┘ └─────────────────┘ └─────────────────┘
 
 ═══════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -39,280 +46,357 @@
 ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                          1. PATH MANAGEMENT MODULE                                   │
-│                        ingestion/data_paths.py                                      │
+│                          1. DATA STORAGE MANAGER                                    │
+│                           ingestion/data_paths.py                                   │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 
 INPUT: animal_id, session_id, config_path
   │
   ▼
 ┌─────────────────────────┐
-│ get_kilosort_path()     │ ──────┐
+│ DataStorageManager      │ ──────┐
 ├─────────────────────────┤       │
-│ • Reads config file     │       │
-│ • Partial ID matching   │       │ 
-│ • Directory traversal   │       │
-│ • Path construction     │       │
+│ • Auto-load all paths   │       │
+│ • Path validation       │       │ 
+│ • Metadata collection   │       │
+│ • Error handling        │       │
 └─────────────────────────┘       │
   │                               │
-  ▼                               │
-kilosort_path ────────────────────┤
-  │                               │
-  ▼                               │
-┌─────────────────────────┐       │
-│ verify_kilosort_path()  │ ◄─────┘
-├─────────────────────────┤
-│ • Path existence check  │
-│ • Required files check  │
-│ • Detailed error msgs   │
-└─────────────────────────┘
-  │
-  ▼
-OUTPUT: validated_kilosort_path, validation_message
+  ▼                               ▼
+┌─────────────────────────┐ ┌──────────────────────────┐
+│ DATA DISCOVERY:         │ │ INTEGRATED ACCESS:       │
+│ • Kilosort ephys data   │ │ • get_kilosort_path()   │
+│ • Video tracking files  │ │ • get_video_files()     │
+│ • Behavioral events     │ │ • get_tracking_files()  │
+│ • DIO sync channels     │ │ • get_dio_path()        │
+│ • Session metadata      │ │ • Session validation    │
+└─────────────────────────┘ └──────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                        2. EPHYS PROCESSING MODULE                                   │
-│                    ingestion/kilosort_data_import.py                                │
+│                        2. ENHANCED EPHYS ANALYSIS MODULE                            │
+│                      ingestion/kilosort_data_import.py                              │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 
-INPUT: kilosort_path
+INPUT: DataStorageManager OR kilosort_path (backward compatible)
   │
   ▼
 ┌─────────────────────────┐
 │ KilosortData.__init__() │
 ├─────────────────────────┤
-│ • locate_KS_folder()    │ ──┐
-│ • extract_ids_from_path()│  │
-│ • load_spike_data()     │  │
-│ • select_clusters()     │  │
-│ • extract_cluster_props()│  │
-│ • get_cluster_spikes_fast│  │
+│ • DataManager detection │ ──┐
+│ • Spike data loading    │  │
+│ • Cluster selection     │  │
+│ • Quality computation   │  │
+│ • Fast spike extraction │  │
 └─────────────────────────┘  │
   │                          │
   ▼                          │
 ┌─────────────────────────┐  │
-│ LOADED DATA:            │  │
-│ • spike_times           │  │
-│ • spike_clusters        │  │
-│ • cluster_info          │  │
-│ • ks_ids                │  │
-│ • channel info          │  │
-│ • amplitudes            │  │
-│ • firing rates          │  │
-│ • cell_numbers          │  │
-│ • allSpikeSI            │  │
+│ QUALITY METRICS:        │  │
+│ • Firing rate stats     │  │
+│ • Presence ratio        │  │
+│ • ISI statistics        │  │
+│ • CV coefficient        │  │
+│ • Quality filtering     │  │
 └─────────────────────────┘  │
   │                          │
   ▼                          │
 ┌─────────────────────────┐  │
-│ UTILITY METHODS:        │  │
-│ • get_spike_data()      │  │
-│ • read_timestamps()     │  │
-│ • waveform2channel()    │  │
-│ • __repr__()           │ ◄┘
+│ ANALYSIS METHODS:       │  │
+│ • calculate_firing_     │  │
+│   pattern_metrics()     │  │
+│ • filter_cells_by_      │  │
+│   firing_patterns()     │  │
+│ • print_firing_pattern_ │ ◄┘
+│   summary()             │
 └─────────────────────────┘
-  │
-  ▼
-OUTPUT: KilosortData object with all ephys data and metadata
 
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                        3. VIDEO PROCESSING MODULE                                   │
-│                        video/tracking_import.py                                     │
+│                       3. BEHAVIORAL EVENTS ANALYSIS MODULE                          │
+│                           video/behavioral_events.py                                │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 
-INPUT: tracking_file_path
+INPUT: DataStorageManager
   │
   ▼
 ┌─────────────────────────┐
-│ load_tracking_data()    │
+│ BehavioralEventsData    │
+├─────────────────────────┤
+│ • CSV event loading     │ ──┐
+│ • Multi-animal support  │  │
+│ • Event classification  │  │
+│ • Temporal alignment    │  │
+└─────────────────────────┘  │
+  │                          │
+  ▼                          │
+┌─────────────────────────┐  │
+│ EVENT PROCESSING:       │  │
+│ • Initiator/victim      │  │
+│   identification        │  │
+│ • Event type filtering  │  │
+│ • Opponent extraction   │  │
+│ • Ephys synchronization │  │
+└─────────────────────────┘  │
+  │                          │
+  ▼                          │
+┌─────────────────────────┐  │
+│ VISUALIZATION:          │  │
+│ • Interaction heatmaps  │  │
+│ • Behavior timelines    │ ◄┘
+│ • Animal-specific plots │
+└─────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                       4. VIDEO TRACKING MODULE                                      │
+│                           video/tracking_import.py                                  │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+
+INPUT: DataStorageManager
+  │
+  ▼
+┌─────────────────────────┐
+│ VideoTrackingData       │
 ├─────────────────────────┤
 │ • Multi-format support  │ ──┐
-│ • CSV/TSV/TXT parsing   │   │
-│ • Encoding detection    │   │
-│ • Error handling        │   │
-└─────────────────────────┘   │
-  │                           │
-  ▼                           │
-tracking_DataFrame ───────────┤
-  │                           │
-  ▼                           │
-┌─────────────────────────┐   │
-│ parse_tracking()        │   │
-├─────────────────────────┤   │
-│ • Group by object_name  │   │
-│ • Remove ID columns     │   │
-│ • Validate data        │ ◄─┘
-│ • Reset indices        │
+│ • Object name parsing   │  │
+│ • Trajectory extraction │  │
+│ • Timestamp loading     │  │
+└─────────────────────────┘  │
+  │                          │
+  ▼                          │
+┌─────────────────────────┐  │
+│ TRACKING FEATURES:      │  │
+│ • Position coordinates  │  │
+│ • Movement metrics      │  │
+│ • Object properties     │  │
+│ • Temporal trajectories │ ◄┘
 └─────────────────────────┘
-  │
-  ▼
-animals_dict: Dict[animal_name, DataFrame]
-  │
-  ├─────────────────────────────────┐
-  │                                 │
-  ▼                                 ▼
-┌─────────────────────────┐ ┌─────────────────────────┐
-│ load_timestamps()       │ │ Per-animal DataFrames:  │
-├─────────────────────────┤ ├─────────────────────────┤
-│ • Pattern matching      │ │ • frame                 │
-│ • _mask_metrics → _ts   │ │ • center_x, center_y    │
-│ • Fuzzy file search     │ │ • area, perimeter       │
-│ • Load .npy arrays      │ │ • circularity          │
-└─────────────────────────┘ │ • orientation          │
-  │                         │ • bbox coordinates     │
-  ▼                         └─────────────────────────┘
-timestamps_array
-  │
-  ▼
-OUTPUT: tracking_path, tracking_df, animals_dict, timestamps
 
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                        4. VISUALIZATION MODULE                                      │
-│                      video/path_visualization.py                                   │
+│                         5. NEURAL DECODING MODULE                                   │
+│                          ephys/decode_opponent_identity.py                          │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 
-INPUT: animals_dict, animal_name, parameters
-  │
-  ├─────────────────┬─────────────────┬─────────────────┬─────────────────┐
-  ▼                 ▼                 ▼                 ▼                 ▼
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│plot_animal_path()│ │plot_multiple_   │ │plot_path_       │ │calculate_path_  │ │save_           │
-├─────────────────┤ │paths()          │ │heatmap()        │ │statistics()     │ │visualization() │
-│• Extract coords │ ├─────────────────┤ ├─────────────────┤ ├─────────────────┤ ├─────────────────┤
-│• Plot trajectory│ │• Multi-animal   │ │• 2D histogram   │ │• Total distance │ │• File output    │
-│• Mark start/end │ │  comparison     │ │• Time density   │ │• Speed analysis │ │• Multiple       │
-│• Add statistics │ │• Color coding   │ │• Heatmap colors │ │• Position stats │ │  formats        │
-│• Distance calc  │ │• Legend/labels  │ │• Territory map  │ │• Movement metrics│ │• High DPI       │
-└─────────────────┘ └─────────────────┘ └─────────────────┘ └─────────────────┘ └─────────────────┘
-  │                 │                 │                 │                 │
-  ▼                 ▼                 ▼                 ▼                 ▼
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                            VISUALIZATION OUTPUTS                                    │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│ • Individual path plots with statistics                                             │
-│ • Multi-animal comparison plots                                                     │
-│ • Position heatmaps and territory analysis                                         │
-│ • Movement statistics and metrics                                                  │
-│ • High-quality saved plots (PNG/PDF/SVG)                                          │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                      5. SYNCHRONIZATION MODULE                                      │
-│                      ingestion/ephys_sync.py                                       │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-
-INPUT: animal_id, session_id, channel, timestamps
+INPUT: KilosortData, BehavioralEventsData, analysis_parameters
   │
   ▼
 ┌─────────────────────────┐
-│ load_ephys_sync()       │
+│ SINGLE CELL ANALYSIS:   │
 ├─────────────────────────┤
-│ • Load sync channels    │ ──┐
-│ • Extract timestamps    │   │
-│ • System time reference │   │
-└─────────────────────────┘   │
-  │                           │
-  ▼                           │
-TSESync, TSBSync, sys_time ───┤
-  │                           │
-  ▼                           │
-┌─────────────────────────┐   │
-│ find_sync_mapping()     │   │
-├─────────────────────────┤   │
-│ • Cross-correlation     │ ◄─┘
-│ • Time alignment        │
-│ • Mapping generation    │
+│ • Spike alignment       │ ──┐
+│ • Feature extraction    │  │
+│ • Time bin analysis     │  │
+│ • LDA classification    │  │
+└─────────────────────────┘  │
+  │                          │
+  ▼                          │
+┌─────────────────────────┐  │
+│ POPULATION ANALYSIS:    │  │
+│ • Cross-validation      │  │
+│ • Quality cell filtering│  │
+│ • Opponent identity     │  │
+│   decoding              │  │
+│ • Performance metrics   │ ◄┘
 └─────────────────────────┘
   │
   ▼
-OUTPUT: sync_mapping (ephys ↔ video time alignment)
+┌─────────────────────────┐
+│ ADVANCED VISUALIZATION: │
+├─────────────────────────┤
+│ • Accuracy distributions│
+│ • Confusion matrices    │
+│ • PETH plots           │
+│ • Best cell analysis   │
+│ • Summary dashboards   │
+└─────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                      6. QUALITY ASSESSMENT MODULE                                   │
+│                         ephys/plot_ephys_qa_stats.py                               │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+
+INPUT: KilosortData metrics and filtering results
+  │
+  ▼
+┌─────────────────────────┐
+│ QUALITY VISUALIZATIONS: │
+├─────────────────────────┤
+│ • Firing rate histograms│ ──┐
+│ • Presence ratio plots  │  │
+│ • ISI distributions     │  │
+│ • Quality threshold     │  │
+│   visualizations        │  │
+└─────────────────────────┘  │
+  │                          │
+  ▼                          │
+┌─────────────────────────┐  │
+│ INTERACTIVE FEATURES:   │  │
+│ • Parameter adjustment  │ ◄┘
+│ • Real-time filtering   │
+│ • Statistical summaries │
+└─────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                        7. SYNCHRONIZATION MODULE                                    │
+│                           ingestion/ephys_sync.py                                   │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+
+INPUT: DataStorageManager, DIO_channel, timestamps
+  │
+  ▼
+┌─────────────────────────┐
+│ DataSyncManager         │
+├─────────────────────────┤
+│ • Multi-modal sync      │ ──┐
+│ • Timestamp alignment   │  │
+│ • Cross-correlation     │  │
+│ • Time conversion       │  │
+└─────────────────────────┘  │
+  │                          │
+  ▼                          │
+┌─────────────────────────┐  │
+│ SYNC CAPABILITIES:      │  │
+│ • Ephys ↔ Video         │ ◄┘
+│ • Behavioral ↔ Neural   │
+│ • Multi-animal coords   │
+└─────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                          8. DATABASE MODULE                                         │
+│                            database/*.py                                            │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+
+INPUT: Analysis results, session metadata
+  │
+  ▼
+┌─────────────────────────┐
+│ DATABASE OPERATIONS:    │
+├─────────────────────────┤
+│ • Session storage       │ ──┐
+│ • Result archiving      │  │
+│ • Metadata indexing     │  │
+│ • Query interface       │  │
+└─────────────────────────┘  │
+  │                          │
+  ▼                          │
+┌─────────────────────────┐  │
+│ DATA MANAGEMENT:        │ ◄┘
+│ • SQLite backend       │
+│ • CLI interface        │
+│ • Integration APIs     │
+└─────────────────────────┘
 
 ═══════════════════════════════════════════════════════════════════════════════════════════════════════
-                                    DATA FLOW SUMMARY
+                                    INTEGRATED WORKFLOW
 ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                              INTEGRATED WORKFLOW                                    │
+│                              TYPICAL ANALYSIS PIPELINE                              │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 
-USER INPUTS (animal_id, session_id, flags)
+USER INPUTS (animal_id, session_id)
     │
     ▼
-PATH RESOLUTION (config → validated paths)
+DATA STORAGE MANAGER (centralized data discovery)
     │
-    ├─────────────────────┬─────────────────────┐
-    ▼                     ▼                     ▼
-EPHYS DATA              VIDEO DATA            SYNC DATA
-    │                     │                     │
-    ▼                     ▼                     │
-KilosortData           tracking_df,             │
-object                 animals_dict,            │
-    │                  timestamps               │
-    │                     │                     │
-    │                     ▼                     │
-    │               VISUALIZATIONS              │
-    │               (plots, statistics)         │
-    │                     │                     │
-    └─────────────────────┼─────────────────────┘
-                          ▼
-                   SYNCHRONIZED ANALYSIS
-                   (ephys ↔ video alignment)
+    ├─────────────────────┬─────────────────────┬─────────────────────┐
+    ▼                     ▼                     ▼                     ▼
+KILOSORT DATA          VIDEO TRACKING        BEHAVIORAL EVENTS     SYNC MANAGER
+(enhanced w/ QA)       (multi-animal)        (interactions)        (alignment)
+    │                     │                     │                     │
+    ▼                     ▼                     ▼                     │
+QUALITY FILTERING      TRAJECTORY PLOTS      EVENT ANALYSIS          │
+    │                     │                     │                     │
+    └─────────────────────┼─────────────────────┼─────────────────────┘
+                          ▼                     ▼
+                   SYNCHRONIZED NEURAL-BEHAVIORAL ANALYSIS
                           │
-                          ▼
-                    OUTPUT DIRECTORY
-                   ├── plots/
-                   │   ├── animal_paths.png
-                   │   ├── heatmaps.png
-                   │   └── comparisons.png
-                   └── data/
-                       ├── processed_data.*
-                       └── sync_mapping.*
+                          ├─────────────────┬─────────────────┐
+                          ▼                 ▼                 ▼
+                   DECODING ANALYSIS    VISUALIZATION     DATABASE STORAGE
+                   (LDA, cross-val)     (dashboards)      (results)
+                          │                 │                 │
+                          └─────────────────┼─────────────────┘
+                                            ▼
+                                    ANALYSIS OUTPUTS
+                                   ├── quality_plots/
+                                   │   ├── firing_patterns.png
+                                   │   └── cell_filtering.png
+                                   ├── behavioral_analysis/
+                                   │   ├── interaction_heatmaps.png
+                                   │   └── event_timelines.png
+                                   ├── neural_decoding/
+                                   │   ├── accuracy_distributions.png
+                                   │   ├── best_cells_peth.png
+                                   │   └── decoding_summary.png
+                                   └── results_database/
+                                       └── session_results.db
 
 ═══════════════════════════════════════════════════════════════════════════════════════════════════════
                                   KEY DATA STRUCTURES
 ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│ CONFIG DATA                                                                         │
+│ DATA STORAGE MANAGER                                                                │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
-│ • ephys: base path to electrophysiology data                                       │
-│ • video: base path to video files                                                  │
-│ • tracking: base path to tracking analysis results                                 │
+│ • kilosort_path: Path to ephys data                                               │
+│ • video_files: List of video file paths                                           │
+│ • tracking_files: List of tracking analysis results                               │
+│ • behavioral_event_files: List of event CSV files                                 │
+│ • dio_paths: Dict of DIO channel paths                                            │
+│ • metadata: Session information and validation results                            │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│ EPHYS DATA STRUCTURES                                                               │
+│ ENHANCED EPHYS DATA                                                                 │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
-│ • spike_times: numpy array of spike timestamps                                     │
-│ • spike_clusters: numpy array of cluster assignments                               │
-│ • cluster_info: pandas DataFrame with cluster metadata                             │
-│ • ks_ids: list of selected cluster IDs                                            │
-│ • allSpikeSI: list of spike sample indices per cluster                            │
-│ • channel/amplitude/firing_rate: cluster properties                                │
+│ • spike_times_by_cell: List[np.array] of spike times per cell                     │
+│ • ks_ids: Selected cluster IDs                                                    │
+│ • cluster_info: Enhanced metadata with quality metrics                            │
+│ • firing_rates: Hz per cell                                                       │
+│ • presence_ratios: Session coverage per cell                                      │
+│ • cv_isi: Coefficient of variation of inter-spike intervals                       │
+│ • quality_thresholds: Filtering parameters and results                            │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│ VIDEO DATA STRUCTURES                                                               │
+│ BEHAVIORAL EVENT DATA                                                               │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
-│ • tracking_df: raw DataFrame with all tracking data                                │
-│ • animals_dict: Dict[animal_name, DataFrame] parsed by animal                      │
-│ • timestamps: numpy array of video frame timestamps                                │
-│ • coordinate columns: center_x, center_y, bbox_*, area, perimeter                  │
+│ • events_df: DataFrame with initiator/victim/type/timestamps                      │
+│ • event_types: Available behavior classifications                                  │
+│ • animal_ids: Participating animals                                               │
+│ • ephys_timestamps: Synchronized neural timestamps                                 │
+│ • opponent_mappings: Role-based interaction analysis                              │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│ VISUALIZATION OUTPUTS                                                               │
+│ NEURAL DECODING RESULTS                                                             │
 ├─────────────────────────────────────────────────────────────────────────────────────┤
-│ • matplotlib Figure objects with animal trajectories                               │
-│ • Path statistics dictionaries (distance, speed, territory)                       │
-│ • Saved plot files in multiple formats (PNG/PDF/SVG)                              │
-│ • Interactive and static visualization options                                     │
+│ • cell_results: Dict[cluster_id, decoding_performance]                            │
+│ • population_accuracy: Cross-validated performance metrics                         │
+│ • confusion_matrices: Classification results per cell                             │
+│ • behavioral_summary: Event counts and opponent statistics                        │
+│ • best_cells: Top performing neural decoders                                      │
+│ • visualization_data: Plotting data for comprehensive analysis                    │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 
+═══════════════════════════════════════════════════════════════════════════════════════════════════════
+                               ANALYSIS CAPABILITIES MATRIX
+═══════════════════════════════════════════════════════════════════════════════════════════════════════
+
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│ SYNCHRONIZATION DATA                                                                │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│ • TSESync/TSBSync: ephys synchronization signals                                   │
-│ • sync_mapping: time alignment between ephys and video                             │
-│ • system_time_at_creation: absolute time reference                                 │
+│ FEATURE                    │ STATUS │ MODULES INVOLVED                              │
+├────────────────────────────┼────────┼──────────────────────────────────────────────────┤
+│ Automated Data Discovery   │   ✅   │ DataStorageManager                           │
+│ Ephys Quality Assessment   │   ✅   │ KilosortData, plot_ephys_qa_stats           │
+│ Multi-Animal Tracking      │   ✅   │ VideoTrackingData, plot_trajectory          │
+│ Behavioral Event Analysis  │   ✅   │ BehavioralEventsData                        │
+│ Multi-Modal Synchronization│   ✅   │ DataSyncManager, ephys_sync                 │
+│ Neural Decoding (LDA)      │   ✅   │ decode_opponent_identity                    │
+│ Population Analysis        │   ✅   │ decode_opponent_identity, visualization     │
+│ Interactive Visualization  │   ✅   │ All plotting modules                        │
+│ Database Integration       │   ✅   │ database_core, database_integration         │
+│ Command Line Interface     │   ✅   │ decode_opponent_identity CLI                │
+│ Jupyter Integration        │   ✅   │ test.ipynb, examples                        │
+│ Reproducible Workflows     │   ✅   │ DataStorageManager, parameterized analysis  │
 └─────────────────────────────────────────────────────────────────────────────────────┘

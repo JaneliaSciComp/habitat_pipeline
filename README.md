@@ -10,6 +10,7 @@ A modular, scalable software platform for processing and analyzing large-scale e
 from ingestion.data_paths import DataStorageManager
 from ingestion.kilosort_data_import import KilosortData
 from video.behavioral_events import BehavioralEventsData
+from ingestion.ephys_sync import DataSyncManager
 from ephys.decode_opponent_identity import decode_opponent_identity_population
 
 # Initialize data manager
@@ -22,6 +23,11 @@ print(f"Loaded {len(ks_data.ks_ids)} neural clusters")
 # Load behavioral data  
 behavior_data = BehavioralEventsData(data_manager)
 print(f"Loaded {len(behavior_data.events_df)} behavioral events")
+
+# Synchronize behavioral events with ephys timestamps
+sync_manager = DataSyncManager(data_manager, dio_channel=1)
+behavior_data.synchronize_with_ephys(sync_manager, create_new_columns=True)
+print("✓ Synchronized behavioral events with neural timestamps")
 
 # Run opponent identity decoding
 results = decode_opponent_identity_population(

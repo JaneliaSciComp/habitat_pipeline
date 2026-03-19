@@ -341,7 +341,7 @@ def get_tracking_files_by_date(session_id: str, config_path: Optional[str] = Non
             for potential_subfolder in tracking_base.iterdir():
                 if potential_subfolder.is_dir() and (session_id in potential_subfolder.name or session_date in potential_subfolder.name):
                     search_directory = potential_subfolder
-                    print(f"Found matching subfolder: {potential_subfolder.name}")
+                    # print(f"Found matching subfolder: {potential_subfolder.name}")
                     break
         except (PermissionError, OSError):
             # If we can't read the directory, fall back to searching the base directory
@@ -349,7 +349,7 @@ def get_tracking_files_by_date(session_id: str, config_path: Optional[str] = Non
     
     matching_tracking_files = []
     
-    print(f"Searching for tracking files in {search_directory} with date '{session_date}' and extensions {tracking_extensions}")
+    # print(f"Searching for tracking files in {search_directory} with date '{session_date}' and extensions {tracking_extensions}")
     try:
         # Search through files containing the session date in current directory and 1 level deep
         # Search in current directory
@@ -433,7 +433,7 @@ def get_event_files_by_date(session_id: str, config_path: Optional[str] = None,
                         if (session_id in potential_subfolder.name or 
                             session_date in potential_subfolder.name):
                             search_directories.append(potential_subfolder)
-                            print(f"Found matching events subfolder: {potential_subfolder.name}")
+                            # print(f"Found matching events subfolder: {potential_subfolder.name}")
                 
                 # If no matching subfolders found, search all subdirectories
                 if not search_directories:
@@ -467,8 +467,8 @@ def get_event_files_by_date(session_id: str, config_path: Optional[str] = None,
     
     if not matching_event_files:
         print(f"Warning: No behavioral event CSV files found for session {session_id} in {events_base}")
-    else:
-        print(f"Found {len(matching_event_files)} behavioral event file(s) for session {session_id}")
+    # else:
+        # print(f"Found {len(matching_event_files)} behavioral event file(s) for session {session_id}")
     
     return matching_event_files
 
@@ -710,8 +710,6 @@ class DataStorageManager:
             self._load_behavioral_events()
             self._load_sync_paths()
             self._update_metadata()
-            
-            print(f"Successfully loaded data paths:")
             self._print_availability_summary()
             
         except Exception as e:
@@ -725,7 +723,7 @@ class DataStorageManager:
             self.kilosort_path = get_kilosort_path(
                 self.animal_id, self.session_id, self.config_path
             )
-            print(f"  ✓ Kilosort path: {self.kilosort_path}")
+            # print(f"  ✓ Kilosort path: {self.kilosort_path}")
             
             # Load DIO paths for common channels
             self.dio_paths = {}
@@ -735,7 +733,7 @@ class DataStorageManager:
                         self.animal_id, self.session_id, channel, self.config_path
                     )
                     self.dio_paths[channel] = dio_path
-                    print(f"  ✓ DIO channel {channel}: {dio_path}")
+                    # print(f"  ✓ DIO channel {channel}: {dio_path}")
                 except (FileNotFoundError, ValueError):
                     # Channel doesn't exist, skip
                     pass
@@ -750,7 +748,7 @@ class DataStorageManager:
             self.video_files = get_video_files_by_date(
                 self.session_id, self.config_path, subfolder="social_videos"
             )
-            print(f"  ✓ Found {len(self.video_files)} video files")
+            # print(f"  ✓ Found {len(self.video_files)} video files")
             
         except Exception as e:
             print(f"  ✗ Error loading video paths: {e}")
@@ -762,7 +760,7 @@ class DataStorageManager:
             self.tracking_files = get_tracking_files_by_date(
                 self.session_id, self.config_path
             )
-            print(f"  ✓ Found {len(self.tracking_files)} tracking files")
+            # print(f"  ✓ Found {len(self.tracking_files)} tracking files")
             
         except Exception as e:
             print(f"  ✗ Error loading tracking paths: {e}")
@@ -774,7 +772,7 @@ class DataStorageManager:
             self.behavioral_event_files = get_event_files_by_date(
                 self.session_id, self.config_path
             )
-            print(f"  ✓ Found {len(self.behavioral_event_files)} behavioral event files")
+            # print(f"  ✓ Found {len(self.behavioral_event_files)} behavioral event files")
             
         except Exception as e:
             print(f"  ✗ Error loading behavioral event paths: {e}")
@@ -784,7 +782,7 @@ class DataStorageManager:
         """Load synchronization-related paths."""
         try:
             self.pulse_log_path = get_pulse_log_path(self.config_path)
-            print(f"  ✓ Pulse log: {self.pulse_log_path}")
+            # print(f"  ✓ Pulse log: {self.pulse_log_path}")
             
         except Exception as e:
             print(f"  ✗ Error loading sync paths: {e}")

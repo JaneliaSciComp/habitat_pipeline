@@ -262,7 +262,7 @@ def find_sync_mapping(TSBSync, TSESync, system_time_at_creation, search_window=3
     intervals_B = np.diff(TSB)
     intervals_E = np.diff(TSE)
     
-    print(f"Behavior intervals: {len(intervals_B)}, Ephys intervals: {len(intervals_E)}")
+    # print(f"Behavior intervals: {len(intervals_B)}, Ephys intervals: {len(intervals_E)}")
     
     def find_matching_sequence(intervals_ref, intervals_target, start_ref, direction=1):
         """
@@ -321,10 +321,10 @@ def find_sync_mapping(TSBSync, TSESync, system_time_at_creation, search_window=3
                     current_b_idx += 1
                     current_e_idx += 1
                 else:
-                    print(f"Extension stopped: interval tolerance exceeded. diff: {abs(interval_b - interval_e):.4f} > {interval_tolerance}")
+                    # print(f"Extension stopped: interval tolerance exceeded. diff: {abs(interval_b - interval_e):.4f} > {interval_tolerance}")
                     break
             
-            print(f"Final extended sequence length: {len(start_matches)}")
+            #print(f"Final extended sequence length: {len(start_matches)}")
             break
         start_b += 1
         
@@ -356,7 +356,7 @@ def find_sync_mapping(TSBSync, TSESync, system_time_at_creation, search_window=3
         'matched_ephys': matched_ephys,
         'matched_behavior': matched_behavior
     }
-    print("Interpolation slope", best_mapping["slope"])
+    # print("Interpolation slope", best_mapping["slope"])
 
     # Add conversion functions
     def ephys_to_behavior(t_ephys):
@@ -587,10 +587,10 @@ class DataSyncManager:
                 'system_time': self.system_time
             }
             
-            print(f"Successfully loaded sync data:")
-            print(f"  - Ephys sync events: {len(self.ephys_sync)}")
-            print(f"  - Behavior sync events: {len(self.behavior_sync)}")
-            print(f"  - System time: {self.system_time}")
+            # print(f"Successfully loaded sync data:")
+            # print(f"  - Ephys sync events: {len(self.ephys_sync)}")
+            # print(f"  - Behavior sync events: {len(self.behavior_sync)}")
+            # print(f"  - System time: {self.system_time}")
             
             return self.ephys_sync, self.behavior_sync, self.system_time
             
@@ -613,7 +613,7 @@ class DataSyncManager:
             raise ValueError("Sync data not loaded. Call load_sync_data() first.")
         
         try:
-            print(f"Creating sync mapping using '{method}' method")
+            # print(f"Creating sync mapping using '{method}' method")
             
             if method == 'interval':
                 # Use find_sync_mapping function
@@ -669,7 +669,7 @@ class DataSyncManager:
             self.metadata['mapping_method'] = method
             self.metadata['mapping_quality'] = self._extract_quality_metrics()
             
-            print(f"Successfully created {method} mapping")
+            # print(f"Successfully created {method} mapping")
             self._print_mapping_summary()
             
             return self.mapping

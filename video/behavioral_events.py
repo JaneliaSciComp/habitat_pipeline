@@ -120,7 +120,7 @@ class BehavioralEventsData:
             print("No valid files to load")
             return False
         
-        print(f"Loading {len(files_to_load)} behavioral event file(s)...")
+        # print(f"Loading {len(files_to_load)} behavioral event file(s)...")
         
         combined_data = []
         loaded_files = []
@@ -146,7 +146,7 @@ class BehavioralEventsData:
                 
                 combined_data.append(df)
                 loaded_files.append(file_path.name)
-                print(f"  ✓ Loaded {file_path.name}: {len(df)} events")
+                # print(f"  ✓ Loaded {file_path.name}: {len(df)} events")
                 
             except Exception as e:
                 print(f"  ✗ Error loading {file_path.name}: {e}")
@@ -684,7 +684,7 @@ class BehavioralEventsData:
             print("No 'ts_start' column found in behavioral events data")
             return False
         
-        print(f"Synchronizing {len(self.events_data)} behavioral events with ephys timestamps...")
+        # print(f"Synchronizing {len(self.events_data)} behavioral events with ephys timestamps...")
         
         # Convert ts_start timestamps
         try:
@@ -700,7 +700,7 @@ class BehavioralEventsData:
             start_times_seconds = valid_start_data['ts_start'] / 1e9
             ephys_start_times = []
             
-            print("Converting start timestamps...")
+            # print("Converting start timestamps...")
             for i, behav_time in enumerate(start_times_seconds):
                 try:
                     ephys_time = sync_manager.convert_behavior_to_ephys(behav_time)
@@ -729,7 +729,7 @@ class BehavioralEventsData:
                     end_times_seconds = valid_end_data['ts_end'] / 1e9
                     ephys_end_times = []
                     
-                    print("Converting end timestamps...")
+                    # print("Converting end timestamps...")
                     for i, behav_time in enumerate(end_times_seconds):
                         try:
                             ephys_time = sync_manager.convert_behavior_to_ephys(behav_time)
@@ -764,15 +764,15 @@ class BehavioralEventsData:
                 valid_ephys_end = (len([t for t in ephys_end_times if t is not None]) 
                                  if 'ts_end' in self.events_data.columns and len(ephys_end_times) > 0 else 0)
             
-            print(f"Synchronization complete:")
-            print(f"  ✓ Start timestamps: {valid_ephys_start}/{len(self.events_data)} converted")
-            if 'ts_end' in self.events_data.columns:
-                print(f"  ✓ End timestamps: {valid_ephys_end}/{len(self.events_data)} converted")
+            # print(f"Synchronization complete:")
+            # print(f"  ✓ Start timestamps: {valid_ephys_start}/{len(self.events_data)} converted")
+            # if 'ts_end' in self.events_data.columns:
+            #     print(f"  ✓ End timestamps: {valid_ephys_end}/{len(self.events_data)} converted")
             
-            if create_new_columns:
-                print(f"  ✓ New columns created: ts_start_ephys, ts_end_ephys")
-            else:
-                print(f"  ✓ Original timestamp columns updated")
+            # if create_new_columns:
+            #     print(f"  ✓ New columns created: ts_start_ephys, ts_end_ephys")
+            # else:
+            #     print(f"  ✓ Original timestamp columns updated")
             
             return True
             

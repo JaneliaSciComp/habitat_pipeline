@@ -1,4 +1,6 @@
 import os
+import sys
+import datetime
 from pathlib import Path
 import pickle
 from typing import Union
@@ -498,6 +500,290 @@ class KilosortData:
                 
                 for reason, count in sorted(failure_counts.items()):
                     print(f"  {reason}: {count} clusters")
+
+    def save_to_file(self, filename=None, exclude_large_arrays=False, compression=True, include_metadata=True):
+        """
+        Save the entire KilosortData object to a file in the KS folder.
+        
+        Parameters:
+        -----------
+        filename : str, optional
+            Name of the save file. If None, generates automatic name based on animal/session IDs
+        exclude_large_arrays : bool, default=False
+            If True, excludes large raw data arrays to save space (spike_times, spike_clusters, etc.)
+            This creates a lighter save file with processed results only
+        compression : bool, default=True
+            Whether to use pickle protocol with compression for smaller file size
+        include_metadata : bool, default=True
+            Whether to include additional metadata about the save operation
+            
+        Returns:
+        --------
+        str : Path to the saved file
+        
+        Example:
+        --------
+        # Save complete object
+        save_path = ks_data.save_to_file()
+        
+        # Save only processed results (smaller file)
+        save_path = ks_data.save_to_file(exclude_large_arrays=True)
+        
+        # Custom filename
+        save_path = ks_data.save_to_file("my_analysis_results.pkl")
+        """
+        import datetime
+        
+        # Determine save filename
+        if filename is None:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            if exclude_large_arrays:
+                filename = f"kilosort_processed_{self.animal_id}_{self.session_id}_{timestamp}.pkl"
+            else:
+                filename = f"kilosort_full_{self.animal_id}_{self.session_id}_{timestamp}.pkl"
+        
+        # Ensure filename has .pkl extension
+        if not filename.endswith('.pkl'):
+            filename += '.pkl'
+        
+        save_path = self.KSfolder / filename
+        
+        # Create a copy of the object for saving
+        save_obj = {}
+        
+        # Always include basic attributes
+        basic_attrs = [
+            'animal_id', 'session_id', 'ks_ids', 'channel', 'amplitude', 'fr', 'amp', 
+            'DV', 'XX', 'cell_numbers', 'to_load', 'spike_times_by_cell', 'metadata'
+        ]
+        
+        for attr in basic_attrs:
+            if hasattr(self, attr):
+                save_obj[attr] = getattr(self, attr)
+        
+        # Include cluster info and labels
+        save_obj['cluster_info'] = self.cluster_info
+        save_obj['ks_labels'] = self.ks_labels
+        
+        # Conditionally include large arrays
+        if not exclude_large_arrays:
+            large_attrs = ['spike_times', 'spike_clusters', 'channel_map']
+            for attr in large_attrs:
+                if hasattr(self, attr):
+                    save_obj[attr] = getattr(self, attr)
+        
+        # Include data manager reference (but not the full object to avoid circular references)
+        if self._use_data_manager and self.data_storage_manager is not None:
+            save_obj['data_storage_manager_info'] = {
+                'animal_id': self.data_storage_manager.animal_id,
+                'session_id': self.data_storage_manager.session_id,
+                'used_data_manager': True
+            }
+        else:
+            save_obj['data_storage_manager_info'] = {'used_data_manager': False}
+        
+        # Include path information
+        save_obj['KSfolder'] = str(self.KSfolder)
+        save_obj['data_dir'] = str(self.data_dir)
+        
+        # Include processing flags
+        save_obj['_use_data_manager'] = self._use_data_manager
+        save_obj['excluded_large_arrays'] = exclude_large_arrays
+        
+        # Add save metadata
+        if include_metadata:
+            save_obj['_save_metadata'] = {
+                'save_timestamp': datetime.datetime.now().isoformat(),
+                'save_path': str(save_path),
+                'exclude_large_arrays': exclude_large_arrays,
+                'compression_used': compression,
+                'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+                'numpy_version': np.__version__,
+                'pandas_version': pd.__version__,
+                'file_size_mb': None  # Will be filled after saving
+            }
+        
+        try:
+            # Save to file
+            protocol = pickle.HIGHEST_PROTOCOL if compression else 2
+            with open(save_path, 'wb') as f:
+                pickle.dump(save_obj, f, protocol=protocol)
+            
+            # Update file size in metadata
+            if include_metadata:
+                file_size_mb = save_path.stat().st_size / (1024 * 1024)
+                save_obj['_save_metadata']['file_size_mb'] = round(file_size_mb, 2)
+                
+                # Re-save with updated metadata
+                with open(save_path, 'wb') as f:
+                    pickle.dump(save_obj, f, protocol=protocol)
+            
+            print(f"✅ KilosortData saved successfully!")
+            print(f"   📁 File: {save_path}")
+            print(f"   📊 Size: {save_path.stat().st_size / (1024*1024):.2f} MB")
+            print(f"   🔧 Object type: {'Processed only' if exclude_large_arrays else 'Full dataset'}")
+            
+            if exclude_large_arrays:
+                print(f"   ⚠️  Large arrays excluded (spike_times, spike_clusters, channel_map)")
+                print(f"       Processed data and results preserved")
+            
+            return str(save_path)
+            
+        except Exception as e:
+            print(f"❌ Error saving KilosortData: {e}")
+            # Clean up partial file if it exists
+            if save_path.exists():
+                save_path.unlink()
+            raise
+    
+    @classmethod 
+    def load_from_file(cls, filepath, data_input=None):
+        """
+        Load a previously saved KilosortData object from file.
+        
+        Parameters:
+        -----------
+        filepath : str or Path
+            Path to the saved .pkl file
+        data_input : str, Path, or DataStorageManager, optional
+            If provided, creates a new KilosortData instance and updates it with saved data.
+            If None, creates a minimal object from saved data only.
+            
+        Returns:
+        --------
+        KilosortData : Loaded KilosortData instance
+        
+        Example:
+        --------
+        # Load saved object
+        ks_data = KilosortData.load_from_file("kilosort_full_631_20251216_20260320_143022.pkl")
+        
+        # Load and merge with fresh data (useful for processed-only saves)
+        ks_data = KilosortData.load_from_file("kilosort_processed_631_20251216.pkl", 
+                                            data_input=data_storage_manager)
+        """
+        filepath = Path(filepath)
+        
+        if not filepath.exists():
+            raise FileNotFoundError(f"Save file not found: {filepath}")
+        
+        try:
+            # Load saved data
+            with open(filepath, 'rb') as f:
+                saved_data = pickle.load(f)
+            
+            print(f"📂 Loading KilosortData from: {filepath}")
+            
+            # Check if large arrays were excluded
+            excluded_arrays = saved_data.get('excluded_large_arrays', False)
+            if excluded_arrays:
+                print("⚠️  This save file excluded large arrays")
+                if data_input is None:
+                    print("   Consider providing data_input to reload raw data")
+            
+            # Create instance
+            if data_input is not None:
+                # Create fresh instance and update with saved data
+                instance = cls(data_input)
+                print("🔄 Created fresh instance, applying saved processed data...")
+            else:
+                # Create minimal instance from saved data only
+                instance = cls.__new__(cls)  # Create without calling __init__
+                print("🔧 Creating minimal instance from saved data...")
+            
+            # Restore saved attributes
+            for attr, value in saved_data.items():
+                if not attr.startswith('_save_metadata') and attr != 'excluded_large_arrays':
+                    if attr == 'data_storage_manager_info':
+                        # Handle data manager info specially
+                        continue
+                    elif attr in ['KSfolder', 'data_dir']:
+                        # Convert back to Path objects
+                        setattr(instance, attr, Path(value))
+                    else:
+                        setattr(instance, attr, value)
+            
+            # Print load information
+            if '_save_metadata' in saved_data:
+                metadata = saved_data['_save_metadata']
+                print(f"📅 Original save: {metadata.get('save_timestamp', 'unknown')}")
+                print(f"💾 File size: {metadata.get('file_size_mb', 'unknown')} MB")
+            
+            print(f"✅ KilosortData loaded successfully!")
+            print(f"   🐭 Animal: {instance.animal_id}, Session: {instance.session_id}")
+            print(f"   🧠 Clusters: {len(instance.ks_ids) if hasattr(instance, 'ks_ids') else 'unknown'}")
+            
+            return instance
+            
+        except Exception as e:
+            print(f"❌ Error loading KilosortData: {e}")
+            raise
+    
+    def list_saved_files(self):
+        """
+        List all saved KilosortData files in the current KS folder.
+        
+        Returns:
+        --------
+        list : List of saved file paths with metadata
+        """
+        if not hasattr(self, 'KSfolder') or self.KSfolder is None:
+            print("❌ No KS folder available")
+            return []
+        
+        saved_files = list(self.KSfolder.glob("kilosort_*.pkl"))
+        
+        if not saved_files:
+            print(f"📁 No saved KilosortData files found in: {self.KSfolder}")
+            return []
+        
+        print(f"📂 Found {len(saved_files)} saved KilosortData files:")
+        
+        file_info = []
+        for filepath in sorted(saved_files):
+            try:
+                # Get basic file info
+                stat = filepath.stat()
+                size_mb = stat.st_size / (1024 * 1024)
+                modified = datetime.datetime.fromtimestamp(stat.st_mtime)
+                
+                # Try to read metadata from file
+                try:
+                    with open(filepath, 'rb') as f:
+                        data = pickle.load(f)
+                    metadata = data.get('_save_metadata', {})
+                    excluded_arrays = data.get('excluded_large_arrays', False)
+                    
+                    file_info.append({
+                        'path': filepath,
+                        'filename': filepath.name,
+                        'size_mb': round(size_mb, 2),
+                        'modified': modified,
+                        'type': 'processed' if excluded_arrays else 'full',
+                        'metadata': metadata
+                    })
+                except:
+                    # If can't read metadata, just use file info
+                    file_info.append({
+                        'path': filepath,
+                        'filename': filepath.name,
+                        'size_mb': round(size_mb, 2),
+                        'modified': modified,
+                        'type': 'unknown',
+                        'metadata': {}
+                    })
+                    
+            except Exception as e:
+                print(f"   ⚠️  Error reading {filepath.name}: {e}")
+                continue
+        
+        # Print file listing
+        for info in file_info:
+            type_icon = "🔧" if info['type'] == 'processed' else "💾" if info['type'] == 'full' else "❓"
+            print(f"   {type_icon} {info['filename']}")
+            print(f"      Size: {info['size_mb']:.2f} MB, Modified: {info['modified'].strftime('%Y-%m-%d %H:%M:%S')}")
+            
+        return file_info
 
     def save_processed_data(self, cache_dir=None):
         """Save processed data for faster subsequent loading"""

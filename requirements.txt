@@ -1,0 +1,36 @@
+# Habitat Pipeline - Python Dependencies
+# Core data processing and analysis dependencies for multi-animal neurobehavioral research
+
+# Core scientific computing
+numpy>=1.21.0
+pandas>=1.3.0
+scipy>=1.7.0
+
+# Machine learning and statistics
+scikit-learn>=1.0.0
+
+# Visualization and plotting
+matplotlib>=3.5.0
+seaborn>=0.11.0
+
+# File I/O and data formats
+h5py>=3.6.0
+
+# Jupyter notebook support (optional, for interactive analysis)
+jupyter>=1.0.0
+ipykernel>=6.0.0
+
+# Development and testing (optional)
+pytest>=6.0.0
+pytest-cov>=3.0.0
+
+# Database support (uses built-in sqlite3, but these provide enhanced functionality)
+# sqlalchemy>=1.4.0  # Uncomment if using advanced database features
+
+# Performance optimization (optional)
+# numba>=0.56.0      # Uncomment for JIT compilation speedups
+# cython>=0.29.0     # Uncomment for compiled extensions
+
+# Video processing (optional, if working with video files directly)
+# opencv-python>=4.5.0  # Uncomment if processing raw video
+# ffmpeg-python>=0.2.0  # Uncomment if video format conversion needed

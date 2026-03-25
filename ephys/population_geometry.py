@@ -82,7 +82,8 @@ class PopulationGeometryAnalyzer:
                                   time_bin_size: float = 0.1,
                                   alignment: str = 'start',
                                   normalize_method: str = 'zscore',
-                                  min_spikes_per_bin: int = 0) -> Dict:
+                                  min_spikes_per_bin: int = 0,
+                                  use_quality_cells: bool = True) -> Dict:
         """
         Construct population firing rate matrices aligned to behavioral events.
         
@@ -104,6 +105,8 @@ class PopulationGeometryAnalyzer:
             Normalization method ('zscore', 'baseline', 'none')
         min_spikes_per_bin : int, default=0
             Minimum spikes per bin for inclusion
+        use_quality_cells : bool, default=True
+            Whether to filter cells by quality metrics before analysis
             
         Returns:
         --------
@@ -120,6 +123,26 @@ class PopulationGeometryAnalyzer:
         else:
             raise ValueError(f"Unknown alignment: {alignment}")
         
+        # Handle quality cell filtering
+        if use_quality_cells:
+            # Check if filter results already exist
+            if hasattr(self.ks_data, 'filter_results') and self.ks_data.filter_results is not None:
+                filter_results = self.ks_data.filter_results
+            else:
+                filter_results = self.ks_data.filter_cells_by_firing_patterns()
+            
+            # Get indices of quality cells
+            selected_cell_indices = [i for i, cluster_id in enumerate(self.ks_data.ks_ids) 
+                                   if cluster_id in filter_results['passed_clusters']]
+            selected_cluster_ids = filter_results['passed_clusters']
+        else:
+            # Use all cells
+            selected_cell_indices = list(range(len(self.ks_data.ks_ids)))
+            selected_cluster_ids = self.ks_data.ks_ids
+        
+        if len(selected_cluster_ids) == 0:
+            raise ValueError("No cells selected for analysis (all cells failed quality criteria)")
+        
         # Create time bins
         n_bins = int((time_window[1] - time_window[0]) / time_bin_size)
         time_bins = np.linspace(time_window[0], time_window[1], n_bins + 1)
@@ -128,7 +151,7 @@ class PopulationGeometryAnalyzer:
         # Get unique conditions
         unique_labels = np.unique(event_labels)
         n_conditions = len(unique_labels)
-        n_cells = len(self.ks_data.ks_ids)
+        n_cells = len(selected_cluster_ids)
         
         # Initialize population matrices
         # Shape: [conditions, events_per_condition, cells, time_bins]
@@ -147,8 +170,8 @@ class PopulationGeometryAnalyzer:
             
             # Fill matrix for each event and cell
             for event_idx, align_time in enumerate(label_align_times):
-                for cell_idx, cell_id in enumerate(self.ks_data.ks_ids):
-                    spike_times = self.ks_data.spike_times_by_cell[cell_idx]
+                for matrix_cell_idx, (selected_idx, cell_id) in enumerate(zip(selected_cell_indices, selected_cluster_ids)):
+                    spike_times = self.ks_data.spike_times_by_cell[selected_idx]
                     
                     # Get spikes in window
                     window_start = align_time + time_window[0]
@@ -169,7 +192,7 @@ class PopulationGeometryAnalyzer:
                         # Convert to firing rate (spikes/second)
                         firing_rates = spike_counts / time_bin_size
                         
-                        population_data[label][event_idx, cell_idx, :] = firing_rates
+                        population_data[label][event_idx, matrix_cell_idx, :] = firing_rates
         
         # Apply normalization
         if normalize_method != 'none':
@@ -191,7 +214,8 @@ class PopulationGeometryAnalyzer:
                 'n_cells': n_cells,
                 'n_bins': n_bins,
                 'n_conditions': n_conditions,
-                'total_events': len(event_starts)
+                'total_events': len(event_starts),
+                'selected_cell_ids': selected_cluster_ids
             }
         }
         
@@ -389,4 +413,4 @@ class PopulationGeometryAnalyzer:
         
         return result
     
-
+ 

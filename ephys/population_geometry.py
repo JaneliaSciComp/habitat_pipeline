@@ -251,3 +251,142 @@ class PopulationGeometryAnalyzer:
         
         return normalized_data
     
+    def apply_dimensionality_reduction(self, 
+                                     population_matrix: Dict,
+                                     method: str = 'pca',
+                                     n_components: int = 3,
+                                     **method_kwargs) -> Dict:
+        """
+        Apply dimensionality reduction to population data.
+        
+        Parameters:
+        -----------
+        population_matrix : dict
+            Result from construct_population_matrix()
+        method : str, default='pca'
+            Reduction method ('pca', 'umap')
+        n_components : int, default=3
+            Number of dimensions to reduce to
+        **method_kwargs : 
+            Additional arguments for the reduction method
+            
+        Returns:
+        --------
+        dict : Reduced data with trajectories and metadata
+        """
+        
+        pop_data = population_matrix['population_data']
+        time_bins = population_matrix['time_bins']
+        unique_labels = population_matrix['unique_labels']
+        
+        # Prepare data for reduction
+        # Flatten across events and time, keep cells as features
+        all_data = []
+        all_labels = []
+        all_times = []
+        all_events = []
+        
+        for label in unique_labels:
+            data = pop_data[label]  # [events, cells, time_bins]
+            n_events, n_cells, n_time = data.shape
+            
+            # Reshape to [events * time_bins, cells]
+            reshaped = data.reshape(-1, n_cells)
+            all_data.append(reshaped)
+            
+            # Track labels, times, and events
+            label_array = np.repeat(label, n_events * n_time)
+            all_labels.extend(label_array)
+            
+            time_array = np.tile(time_bins, n_events)
+            all_times.extend(time_array)
+            
+            event_array = np.repeat(np.arange(n_events), n_time)
+            all_events.extend(event_array)
+        
+        # Combine all data
+        X = np.vstack(all_data)  # [total_timepoints, cells]
+        labels = np.array(all_labels)
+        times = np.array(all_times)
+        events = np.array(all_events)
+        
+        # Apply dimensionality reduction
+        if method.lower() == 'pca':
+            reducer = PCA(n_components=n_components, **method_kwargs)
+            X_reduced = reducer.fit_transform(X)
+            
+            # Calculate explained variance
+            explained_var = reducer.explained_variance_ratio_
+            cumulative_var = np.cumsum(explained_var)
+            
+            reduction_info = {
+                'explained_variance_ratio': explained_var,
+                'cumulative_variance': cumulative_var,
+                'components': reducer.components_,
+                'reducer': reducer
+            }
+        
+        elif method.lower() == 'umap':
+            if not UMAP_AVAILABLE:
+                raise ImportError("UMAP not available. Install with: pip install umap-learn")
+            
+            # Default UMAP parameters
+            umap_params = {
+                'n_neighbors': 15,
+                'min_dist': 0.1,
+                'metric': 'euclidean',
+                'random_state': 42
+            }
+            umap_params.update(method_kwargs)
+            
+            reducer = umap.UMAP(n_components=n_components, **umap_params)
+            X_reduced = reducer.fit_transform(X)
+            
+            reduction_info = {
+                'reducer': reducer,
+                'umap_params': umap_params
+            }
+            
+        
+        else:
+            raise ValueError(f"Unknown dimensionality reduction method: {method}")
+        
+        # Organize reduced data by condition and reshape back to trajectories
+        reduced_trajectories = {}
+        
+        start_idx = 0
+        for label in unique_labels:
+            n_events = population_matrix['event_counts'][label]
+            n_time = len(time_bins)
+            
+            end_idx = start_idx + (n_events * n_time)
+            label_reduced = X_reduced[start_idx:end_idx]
+            
+            # Reshape back to [events, time_bins, components]
+            trajectory = label_reduced.reshape(n_events, n_time, n_components)
+            reduced_trajectories[label] = trajectory
+            
+            start_idx = end_idx
+        
+        # Create result structure
+        result = {
+            'reduced_trajectories': reduced_trajectories,
+            'reduced_data_flat': X_reduced,
+            'labels_flat': labels,
+            'times_flat': times,
+            'events_flat': events,
+            'time_bins': time_bins,
+            'unique_labels': unique_labels,
+            'method': method,
+            'n_components': n_components,
+            'reduction_info': reduction_info,
+            'original_shape': X.shape,
+        }
+        
+        # Store for later use
+        reduction_key = f"{method}_{n_components}d"
+        self.reduced_data[reduction_key] = result
+        
+        return result
+    
+

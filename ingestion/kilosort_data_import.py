@@ -448,12 +448,14 @@ class KilosortData:
             'pass_rate': passed_count / total_clusters if total_clusters > 0 else 0.0
         }
         
-        return {
+        filter_results = {
             'passed_clusters': passed_clusters,
             'failed_clusters': failed_clusters,
             'metrics': metrics,
             'summary': summary
         }
+        self.filter_results = filter_results  # store results in the object for later reference
+        return filter_results
     
     def print_firing_pattern_summary(self, filter_results=None, **filter_kwargs):
         """

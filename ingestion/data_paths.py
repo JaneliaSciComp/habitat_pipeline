@@ -183,14 +183,14 @@ def get_pulse_log_path(config_path: Optional[str] = None) -> Path:
     # Load configuration
     config = _load_config(config_path)
     
-    # Get the video base path
-    if 'video' not in config:
-        raise KeyError("'video' key not found in configuration file")
+    # Get the ephys base path
+    if 'ephys' not in config:
+        raise KeyError("'ephys' key not found in configuration file")
     
-    video_base = Path(config['video'])
+    ephys_base = Path(config['ephys'])
     
     # Construct the pulse log path
-    pulse_log_path = video_base / "pulse_log.txt"
+    pulse_log_path = ephys_base / "pulse_log.txt"
     
     return pulse_log_path
 

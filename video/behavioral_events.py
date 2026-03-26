@@ -454,6 +454,92 @@ class BehavioralEventsData:
         
         return summary
     
+    def extract_opponent_labels(self, 
+                               animal_of_interest: str,
+                               behavior_type: str = None,
+                               min_events_per_class: int = 5) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Extract opponent identity labels from behavioral events for a specific animal.
+        
+        Parameters:
+        -----------
+        animal_of_interest : str
+            Animal identifier to focus on (e.g., '631' or 'rat631')
+        behavior_type : str, optional
+            Filter by specific behavior type (e.g., 'F' for fights)
+        min_events_per_class : int, optional
+            Minimum number of events required per opponent class (default: 5)
+            
+        Returns:
+        --------
+        Tuple[np.ndarray, np.ndarray, np.ndarray] : 
+            - event_start_times: Event start times
+            - event_end_times: Event end times  
+            - opponent_labels: Opponent identity labels
+        """
+        if self.events_data is None:
+            raise ValueError("No events data loaded. Call load_events() first.")
+        
+        df = self.events_data.copy()
+        
+        # Filter by behavior type if specified
+        if behavior_type is not None:
+            df = df[df['type'] == behavior_type]
+        
+        if len(df) == 0:
+            return np.array([]), np.array([]), np.array([])
+        
+        # Check if we have initiator and victim columns
+        if 'initiator' not in df.columns or 'victim' not in df.columns:
+            raise ValueError("Behavioral data must have 'initiator' and 'victim' columns")
+        
+        # Normalize animal_of_interest (ensure 'rat' prefix)
+        if not animal_of_interest.startswith('rat'):
+            animal_of_interest = f"rat{animal_of_interest}"
+        
+        # Filter events where animal of interest is either initiator or victim
+        animal_mask = (df['initiator'] == animal_of_interest) | (df['victim'] == animal_of_interest)
+        df = df[animal_mask]
+        
+        if len(df) == 0:
+            return np.array([]), np.array([]), np.array([])
+        
+        # Extract event times (ephys-synchronized timestamps already in seconds)
+        if 'ts_start_ephys' in df.columns:
+            event_start_times = df['ts_start_ephys'].values
+            event_end_times = df['ts_end_ephys'].values
+        else:
+            raise ValueError("No ephys-synchronized timestamp columns found in behavioral data")
+        
+        # Extract opponent labels from complementary column
+        opponent_labels = []
+        for _, row in df.iterrows():
+            if row['initiator'] == animal_of_interest:
+                # Animal is initiator, opponent is victim
+                opponent_labels.append(row['victim'])
+            else:
+                # Animal is victim, opponent is initiator
+                opponent_labels.append(row['initiator'])
+        
+        opponent_labels = np.array(opponent_labels)
+        
+        # Filter by minimum events per class
+        if min_events_per_class > 1:
+            # Count events per opponent class
+            unique_opponents, counts = np.unique(opponent_labels, return_counts=True)
+            valid_opponents = unique_opponents[counts >= min_events_per_class]
+            
+            if len(valid_opponents) == 0:
+                return np.array([]), np.array([]), np.array([])
+            
+            # Filter events to only include valid opponent classes
+            valid_mask = np.isin(opponent_labels, valid_opponents)
+            event_start_times = event_start_times[valid_mask]
+            event_end_times = event_end_times[valid_mask]
+            opponent_labels = opponent_labels[valid_mask]
+        
+        return event_start_times, event_end_times, opponent_labels
+    
     def get_event_statistics(self) -> Dict:
         """
         Generate statistics about the behavioral events.

@@ -71,7 +71,6 @@ class PopulationGeometryAnalyzer:
         # Analysis results storage
         self.population_matrices = {}
         self.reduced_data = {}
-        self.trajectories = {}
         self.analysis_metadata = {}
     
     def construct_population_matrix(self, 
@@ -81,7 +80,7 @@ class PopulationGeometryAnalyzer:
                                   time_window: Tuple[float, float] = (-2.0, 2.0),
                                   time_bin_size: float = 0.1,
                                   alignment: str = 'start',
-                                  normalize_method: str = 'zscore',
+                                  normalize_method: str = 'none',
                                   min_spikes_per_bin: int = 0,
                                   use_quality_cells: bool = True) -> Dict:
         """
@@ -101,7 +100,7 @@ class PopulationGeometryAnalyzer:
             Size of time bins (seconds)
         alignment : str, default='start'
             Alignment point ('start', 'end', 'center')
-        normalize_method : str, default='zscore'
+        normalize_method : str, default='none'
             Normalization method ('zscore', 'baseline', 'none')
         min_spikes_per_bin : int, default=0
             Minimum spikes per bin for inclusion
@@ -412,5 +411,294 @@ class PopulationGeometryAnalyzer:
         self.reduced_data[reduction_key] = result
         
         return result
+        
+    def plot_population_dynamics(self, 
+                               reduced_data: Dict,
+                               show_individual: bool = False,
+                               time_range: Optional[Tuple[float, float]] = None,
+                               figsize: Tuple[float, float] = (12, 8)) -> plt.Figure:
+        """
+        Plot 3D neural population trajectories from reduced dimensional data.
+        
+        Parameters:
+        -----------
+        reduced_data : dict
+            Result from apply_dimensionality_reduction()
+        show_individual : bool, default=False
+            Whether to show all individual trajectories (True) or just mean trajectories (False)
+        time_range : tuple, optional
+            Time range to plot (start, end) in seconds
+        figsize : tuple, default=(12, 8)
+            Figure size
+            
+        Returns:
+        --------
+        matplotlib.figure.Figure : Generated figure
+        """
+        
+        trajectories = reduced_data['reduced_trajectories']
+        time_bins = reduced_data['time_bins']
+        unique_labels = reduced_data['unique_labels']
+        
+        # Filter time range if specified
+        if time_range is not None:
+            time_mask = (time_bins >= time_range[0]) & (time_bins <= time_range[1])
+        else:
+            time_mask = slice(None)
+        
+        # Color scheme - one color per condition
+        colors = plt.cm.Set1(np.linspace(0, 1, len(unique_labels)))
+        
+        # Create 3D plot
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111, projection='3d')
+        
+        for i, label in enumerate(unique_labels):
+            traj = trajectories[label]  # [events, time_bins, components]
+            n_events = traj.shape[0]
+            
+            if show_individual:
+                # Plot all individual trajectories with same color per condition
+                for event_idx in range(n_events):
+                    trajectory = traj[event_idx][time_mask]  # [time_bins, components]
+                    
+                    # Use lighter alpha for individual trajectories
+                    alpha = 0.6 if n_events <= 5 else 0.3
+                    linewidth = 1.5 if n_events <= 5 else 1.0
+                    
+                    ax.plot(trajectory[:, 0], trajectory[:, 1], trajectory[:, 2],
+                           color=colors[i], alpha=alpha, linewidth=linewidth,
+                           label=f'{label}' if event_idx == 0 else "")
+                    
+                    # Mark start and end points for each trajectory
+                    ax.scatter(*trajectory[0], color=colors[i], s=30, marker='o', alpha=0.7)
+                    ax.scatter(*trajectory[-1], color=colors[i], s=30, marker='s', alpha=0.7)
+            else:
+                # Plot only mean trajectory per condition
+                mean_traj = np.mean(traj, axis=0)[time_mask]  # [time_bins, components]
+                
+                ax.plot(mean_traj[:, 0], mean_traj[:, 1], mean_traj[:, 2],
+                       color=colors[i], linewidth=3, label=f'{label} (n={n_events})')
+                
+                # Mark start and end points
+                ax.scatter(*mean_traj[0], color=colors[i], s=100, marker='o', alpha=0.8)
+                ax.scatter(*mean_traj[-1], color=colors[i], s=100, marker='s', alpha=0.8)
+        
+        # Set labels and title
+        method_name = reduced_data['method'].upper()
+        ax.set_xlabel(f'{method_name} Component 1')
+        ax.set_ylabel(f'{method_name} Component 2')
+        ax.set_zlabel(f'{method_name} Component 3')
+        
+        if show_individual:
+            ax.set_title('Neural Population Trajectories - All Individual Trials')
+        else:
+            ax.set_title('Neural Population Trajectories - Mean per Condition')
+        
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        print(f"✅ 3D trajectory visualization created!")
+        return fig
     
- 
+
+def run_population_analysis_pipeline(ks_data, 
+                                   behavior_data,
+                                   animal_of_interest: str,
+                                   behavior_type: str = 'EC',
+                                   time_window: Tuple[float, float] = (-2.0, 2.0),
+                                   time_bin_size: float = 0.5,
+                                   reduction_method: str = 'pca',
+                                   n_components: int = 3,
+                                   min_events_per_class: int = 10,
+                                   use_quality_cells: bool = True,
+                                   create_plots: bool = True,
+                                   save_results: bool = False,
+                                   save_path: Optional[str] = None) -> Dict:
+    """
+    Complete pipeline for population-level neural geometry analysis.
+    
+    Parameters:
+    -----------
+    ks_data : KilosortData
+        Processed electrophysiology data
+    behavior_data : BehavioralEventsData
+        Behavioral event data
+    animal_of_interest : str
+        Animal ID to analyze
+    behavior_type : str, default='EC'
+        Type of behavioral events to analyze
+    time_window : tuple, default=(-2.0, 2.0)
+        Time window around events (seconds)
+    time_bin_size : float, default=0.5
+        Size of time bins (seconds)  
+    reduction_method : str, default='pca'
+        Dimensionality reduction method ('pca', 'umap')
+    n_components : int, default=3
+        Number of dimensions for reduction
+    min_events_per_class : int, default=10
+        Minimum events per condition
+    use_quality_cells : bool, default=True
+        Whether to filter cells by quality metrics before analysis
+    create_plots : bool, default=True
+        Whether to create visualization plots
+    save_results : bool, default=False
+        Whether to save results to file
+    save_path : str, optional
+        Path to save results
+        
+    Returns:
+    --------
+    dict : Complete analysis results
+    """
+    
+    # Extract behavioral events with opponent labels
+    event_starts, event_ends, opponent_labels = behavior_data.extract_opponent_labels(
+        animal_of_interest=animal_of_interest,
+        behavior_type=behavior_type,
+        min_events_per_class=min_events_per_class
+    )
+    
+    if len(event_starts) == 0:
+        print("No behavioral events found!")
+        return {'status': 'failed', 'error': 'No events found'}
+    
+    # Initialize analyzer
+    analyzer = PopulationGeometryAnalyzer(ks_data, behavior_data)
+    
+    # Step 1: Construct population matrices
+    pop_matrix = analyzer.construct_population_matrix(
+        event_starts=event_starts,
+        event_ends=event_ends,
+        event_labels=opponent_labels,
+        time_window=time_window,
+        time_bin_size=time_bin_size,
+        alignment='start',
+        normalize_method='none',
+        use_quality_cells=use_quality_cells
+    )
+    
+    # Step 2: Apply dimensionality reduction
+    reduced_data = analyzer.apply_dimensionality_reduction(
+        pop_matrix,
+        method=reduction_method,
+        n_components=n_components
+    )
+    
+    # Step 3: Create visualizations
+    figures = {}
+    if create_plots:
+        # Create both mean and individual trajectory plots
+        try:
+            # Plot mean trajectories
+            fig_mean = analyzer.plot_population_dynamics(
+                reduced_data,
+                show_individual=False
+            )
+            figures['mean_trajectories'] = fig_mean
+            plt.show()
+            
+            # Plot individual trajectories
+            fig_individual = analyzer.plot_population_dynamics(
+                reduced_data,
+                show_individual=True
+            )
+            figures['individual_trajectories'] = fig_individual
+            plt.show()
+            
+        except Exception as e:
+            print(f"Error creating trajectory plots: {e}")
+    
+    # Step 4: Save results
+    if save_results:
+        if save_path is None:
+            save_path = f"population_analysis_{animal_of_interest}_{behavior_type}_{reduction_method}.pkl"
+        analyzer.save_analysis(save_path)
+    
+    # Compile results
+    results = {
+        'status': 'success',
+        'analyzer': analyzer,
+        'population_matrix': pop_matrix,
+        'reduced_data': reduced_data,
+        'figures': figures,
+        'parameters': {
+            'animal_of_interest': animal_of_interest,
+            'behavior_type': behavior_type,
+            'time_window': time_window,
+            'time_bin_size': time_bin_size,
+            'reduction_method': reduction_method,
+            'n_components': n_components,
+            'min_events_per_class': min_events_per_class
+        }
+    }
+    
+    return results
+
+
+if __name__ == "__main__":
+    """Command line interface for population analysis."""
+    import argparse
+    import sys
+    from pathlib import Path
+    
+    # Add parent directory to path
+    sys.path.append(str(Path(__file__).parent.parent))
+    
+    try:
+        from ingestion.data_paths import DataStorageManager
+        from ingestion.kilosort_data_import import KilosortData
+        from video.behavioral_events import BehavioralEventsData
+        from ingestion.ephys_sync import DataSyncManager
+    except ImportError as e:
+        print(f"Error importing required modules: {e}")
+        sys.exit(1)
+    
+    parser = argparse.ArgumentParser(description="Population-Level Neural Geometry Analysis")
+    parser.add_argument("--animal_id", required=True, help="Animal ID")
+    parser.add_argument("--session_id", required=True, help="Session ID")
+    parser.add_argument("--behavior_type", default="F", help="Behavior type (default: F)")
+    parser.add_argument("--reduction_method", default="pca", choices=["pca", "umap"], 
+                       help="Dimensionality reduction method")
+    parser.add_argument("--n_components", type=int, default=3, help="Number of components")
+    parser.add_argument("--time_window", nargs=2, type=float, default=[-2.0, 2.0],
+                       help="Time window around events")
+    parser.add_argument("--time_bin_size", type=float, default=0.1, help="Time bin size")
+    parser.add_argument("--use_quality_cells", action="store_true", default=True, help="Filter cells by quality metrics")
+    parser.add_argument("--save_results", action="store_true", help="Save results to file")
+    parser.add_argument("--save_path", help="Path to save results")
+    
+    args = parser.parse_args()
+    
+    print(f"Loading data for animal {args.animal_id}, session {args.session_id}...")
+    
+    # Load data
+    data_storage = DataStorageManager(args.animal_id, args.session_id, auto_load=True)
+    ks_data = KilosortData(data_storage)
+    behavior_data = BehavioralEventsData(data_storage)
+    
+    # Synchronize behavioral data with ephys
+    sync_manager = DataSyncManager(data_storage, dio_channel=1)
+    behavior_data.synchronize_with_ephys(sync_manager, create_new_columns=True)
+    
+    # Run analysis pipeline
+    results = run_population_analysis_pipeline(
+        ks_data=ks_data,
+        behavior_data=behavior_data,
+        animal_of_interest=f"rat{args.animal_id}",
+        behavior_type=args.behavior_type,
+        time_window=tuple(args.time_window),
+        time_bin_size=args.time_bin_size,
+        reduction_method=args.reduction_method,
+        n_components=args.n_components,
+        use_quality_cells=args.use_quality_cells,
+        create_plots=True,
+        save_results=args.save_results,
+        save_path=args.save_path
+    )
+    
+    if results['status'] == 'success':
+        print("Analysis completed successfully!")
+    else:
+        print(f"Analysis failed: {results.get('error', 'Unknown error')}")
+        sys.exit(1)

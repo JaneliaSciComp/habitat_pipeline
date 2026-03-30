@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from scipy import stats
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Union
 import warnings
@@ -501,6 +502,266 @@ class PopulationGeometryAnalyzer:
         print(f"✅ 3D trajectory visualization created!")
         return fig
     
+    def plot_pca_summary(self, 
+                        reduced_data: Dict,
+                        pop_data: Dict,
+                        figsize: Tuple[float, float] = (16, 12)) -> plt.Figure:
+        """
+        Create comprehensive PCA summary plots including covariance matrix, 
+        component weights, and variance explained.
+        
+        Parameters:
+        -----------
+        reduced_data : dict
+            Result from apply_dimensionality_reduction() with method='pca'
+        pop_data : dict
+            Original population data from construct_population_matrix()['population_data']
+        figsize : tuple, default=(16, 12)
+            Figure size
+            
+        Returns:
+        --------
+        matplotlib.figure.Figure : Generated figure with PCA summary
+        """
+        
+        if reduced_data['method'].lower() != 'pca':
+            raise ValueError("This method only works with PCA reduced data")
+        
+        reduction_info = reduced_data['reduction_info']
+        
+        # Create 2x2 subplot layout
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=figsize)
+        
+        # 1. Covariance matrix heatmap (top-left)
+        # Use original population data directly for accurate covariance calculation
+        all_data = []
+        for label in pop_data.keys():
+            data = pop_data[label]  # [events, cells, time_bins]
+            # Reshape to [events*time_bins, cells] for covariance calculation
+            reshaped = data.reshape(-1, data.shape[1])
+            all_data.append(reshaped)
+        
+        # Combine all data and compute covariance
+        combined_data = np.vstack(all_data)  # [total_timepoints, cells]
+        cov_matrix = np.cov(combined_data.T)  # [cells, cells]
+        
+        # Plot covariance matrix
+        im1 = ax1.imshow(cov_matrix, cmap='viridis', aspect='auto')
+        ax1.set_title('Original Data Covariance Matrix', fontsize=14, fontweight='bold')
+        ax1.set_xlabel('Neuron Index')
+        ax1.set_ylabel('Neuron Index')
+        
+        # Add colorbar for covariance matrix
+        cbar1 = plt.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
+        cbar1.set_label('Covariance', rotation=270, labelpad=15)
+        
+        # 2. PCA component weights heatmap (top-right)
+        components = reduction_info['components']
+        n_components_to_show = min(10, components.shape[0])  # Show up to 10 components
+        
+        im2 = ax2.imshow(components[:n_components_to_show], 
+                        cmap='RdBu_r', aspect='auto', vmin=-np.abs(components).max(), 
+                        vmax=np.abs(components).max())
+        ax2.set_title(f'PCA Component Weights (First {n_components_to_show} PCs)', 
+                     fontsize=14, fontweight='bold')
+        ax2.set_xlabel('Neuron Index')
+        ax2.set_ylabel('Principal Component')
+        ax2.set_yticks(range(n_components_to_show))
+        ax2.set_yticklabels([f'PC{i+1}' for i in range(n_components_to_show)])
+        
+        # Add colorbar for component weights
+        cbar2 = plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
+        cbar2.set_label('Component Loading', rotation=270, labelpad=15)
+        
+        # 3. Individual variance explained (bottom-left)
+        explained_var = reduction_info['explained_variance_ratio']
+        n_vars_to_show = min(15, len(explained_var))  # Show up to 15 components
+        
+        bars = ax3.bar(range(1, n_vars_to_show + 1), explained_var[:n_vars_to_show] * 100,
+                      color='steelblue', alpha=0.7, edgecolor='black', linewidth=0.5)
+        
+        ax3.set_title('Individual Variance Explained', fontsize=14, fontweight='bold')
+        ax3.set_xlabel('Principal Component')
+        ax3.set_ylabel('Variance Explained (%)')
+        ax3.grid(True, alpha=0.3, axis='y')
+        
+        # Add value labels on bars
+        for i, bar in enumerate(bars):
+            height = bar.get_height()
+            if height > 1:  # Only label bars > 1%
+                ax3.text(bar.get_x() + bar.get_width()/2., height + 0.1,
+                        f'{height:.1f}%', ha='center', va='bottom', fontsize=9)
+        
+        # 4. Cumulative variance explained (bottom-right)
+        cumulative_var = reduction_info['cumulative_variance']
+        n_cum_to_show = min(20, len(cumulative_var))  # Show up to 20 components
+        
+        line = ax4.plot(range(1, n_cum_to_show + 1), cumulative_var[:n_cum_to_show] * 100,
+                       'o-', color='darkred', linewidth=2, markersize=4, markerfacecolor='red')
+        
+        ax4.set_title('Cumulative Variance Explained', fontsize=14, fontweight='bold')
+        ax4.set_xlabel('Number of Principal Components')
+        ax4.set_ylabel('Cumulative Variance Explained (%)')
+        ax4.grid(True, alpha=0.3)
+        
+        # Add horizontal reference lines
+        for threshold in [80, 90, 95]:
+            ax4.axhline(y=threshold, color='gray', linestyle='--', alpha=0.5)
+            ax4.text(1, threshold + 1, f'{threshold}%', fontsize=9, color='gray')
+        
+        # Find and annotate key milestones
+        if len(cumulative_var) > 0:
+            # Find components for 80%, 90%, 95% variance
+            for threshold in [0.8, 0.9, 0.95]:
+                idx = np.where(cumulative_var >= threshold)[0]
+                if len(idx) > 0:
+                    first_idx = idx[0] + 1  # +1 because we use 1-based indexing
+                    if first_idx <= n_cum_to_show:
+                        ax4.scatter(first_idx, threshold * 100, color='orange', s=60, zorder=10)
+                        ax4.annotate(f'PC{first_idx}', 
+                                   (first_idx, threshold * 100),
+                                   xytext=(5, 5), textcoords='offset points',
+                                   fontsize=9, fontweight='bold')
+        
+        # Add overall title and summary statistics
+        n_neurons = components.shape[1]
+        total_var_3pc = cumulative_var[2] * 100 if len(cumulative_var) >= 3 else 0
+        
+        fig.suptitle(f'PCA Analysis Summary\n'
+                    f'{n_neurons} neurons, {len(explained_var)} components, '
+                    f'First 3 PCs explain {total_var_3pc:.1f}% variance', 
+                    fontsize=16, fontweight='bold', y=0.95)
+        
+        plt.tight_layout(rect=[0, 0.03, 1, 0.92])  # Make room for suptitle
+        
+        # Find components needed for different variance thresholds
+        for threshold_pct, threshold_val in [(80, 0.8), (90, 0.9), (95, 0.95)]:
+            idx = np.where(cumulative_var >= threshold_val)[0]
+            if len(idx) > 0:
+                print(f"{threshold_pct}% variance in {idx[0] + 1} components")
+        
+        return fig
+    
+    def plot_normalized_population_matrix(self, pop_data: Dict[str, np.ndarray], 
+                                        figsize: Tuple[float, float] = (14, 10)) -> plt.Figure:
+        """
+        Plot flattened population matrix with each cell normalized as z-score.
+        
+        This method creates a heatmap visualization of the neural population activity
+        where each cell's firing rate is z-score normalized across all events and time bins.
+        
+        Parameters:
+        -----------
+        pop_data : Dict[str, np.ndarray]
+            Population data dictionary with keys as behavior labels and values as
+            3D arrays (n_events, n_cells, n_time_bins)
+        figsize : Tuple[float, float], optional
+            Figure size (width, height). Default is (14, 10)
+            
+        Returns:
+        --------
+        plt.Figure
+            The matplotlib figure object
+        """
+        
+        # Collect all data and flatten for each cell
+        all_data = []
+        cell_labels = []
+        event_labels = []
+        time_labels = []
+        
+        for label in pop_data.keys():
+            data = pop_data[label]  # (n_events, n_cells, n_time_bins)
+            all_data.append(data)
+            
+        # Concatenate all data across events and conditions
+        full_data = np.concatenate(all_data, axis=0)  # (total_events, n_cells, n_time_bins)
+        n_total_events, n_cells, n_time_bins = full_data.shape
+                
+        # Flatten data for each cell and apply z-score normalization
+        normalized_matrix = np.zeros((n_cells, n_total_events * n_time_bins))
+        
+        for cell_idx in range(n_cells):
+            # Get all activity for this cell across events and time
+            cell_data = full_data[:, cell_idx, :].flatten()  # (n_total_events * n_time_bins,)
+            
+            # Apply z-score normalization
+            if np.std(cell_data) > 0:
+                normalized_matrix[cell_idx, :] = stats.zscore(cell_data)
+            else:
+                normalized_matrix[cell_idx, :] = cell_data  # Keep as is if no variance
+        
+        # Create figure
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+        
+        # Create heatmap
+        im = ax.imshow(normalized_matrix, 
+                      aspect='auto', 
+                      cmap='RdBu_r', 
+                      vmin=-3, vmax=3,  # Reasonable z-score range
+                      interpolation='nearest')
+        
+        # Customize appearance
+        ax.set_xlabel('Time Points (Events × Time Bins)', fontsize=12)
+        ax.set_ylabel('Cells', fontsize=12)
+        ax.set_title('Population Matrix: Z-Score Normalized Neural Activity\n'
+                    f'({n_cells} cells × {n_total_events} events × {n_time_bins} time bins)', 
+                    fontsize=14, fontweight='bold', pad=20)
+        
+        # Add colorbar
+        cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cbar.set_label('Z-Score', rotation=270, labelpad=20, fontsize=12)
+        
+        # Add subtle grid lines to separate events
+        for event_idx in range(1, n_total_events):
+            ax.axvline(x=event_idx * n_time_bins - 0.5, 
+                      color='gray', alpha=0.3, linewidth=0.5)
+        
+        # Add event markers on x-axis
+        if n_total_events <= 20:  # Only show ticks if not too many events
+            event_centers = [(i * n_time_bins + n_time_bins/2 - 0.5) for i in range(n_total_events)]
+            ax.set_xticks(event_centers[::max(1, len(event_centers)//10)])
+            ax.set_xticklabels([f'E{i+1}' for i in range(0, n_total_events, 
+                               max(1, n_total_events//10))], fontsize=10)
+        else:
+            # For many events, just show sparse labels
+            n_ticks = min(10, n_total_events)
+            tick_positions = np.linspace(0, n_total_events * n_time_bins - 1, n_ticks)
+            ax.set_xticks(tick_positions)
+            ax.set_xticklabels([f'E{int(pos/n_time_bins)+1}' 
+                               for pos in tick_positions], fontsize=10)
+        
+        # Show every nth cell label or sparse labels for many cells
+        if n_cells <= 50:
+            ax.set_yticks(range(0, n_cells, max(1, n_cells//20)))
+            ax.set_yticklabels([f'C{i+1}' for i in range(0, n_cells, max(1, n_cells//20))], 
+                              fontsize=10)
+        else:
+            # For many cells, show sparse labels
+            n_y_ticks = min(20, n_cells)
+            y_positions = np.linspace(0, n_cells-1, n_y_ticks).astype(int)
+            ax.set_yticks(y_positions)
+            ax.set_yticklabels([f'C{pos+1}' for pos in y_positions], fontsize=10)
+        
+        # Add statistics text
+        mean_activity = np.mean(normalized_matrix)
+        std_activity = np.std(normalized_matrix)
+        max_activity = np.max(normalized_matrix)
+        min_activity = np.min(normalized_matrix)
+        
+        stats_text = (f'Activity Statistics:\n'
+                     f'Mean: {mean_activity:.3f}\n'
+                     f'Std: {std_activity:.3f}\n'
+                     f'Range: [{min_activity:.2f}, {max_activity:.2f}]')
+        
+        ax.text(0.98, 0.98, stats_text, transform=ax.transAxes, 
+               fontsize=10, verticalalignment='top', horizontalalignment='right',
+               bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        
+        plt.tight_layout()
+        
+        return fig
+
 
 def run_population_analysis_pipeline(ks_data, 
                                    behavior_data,

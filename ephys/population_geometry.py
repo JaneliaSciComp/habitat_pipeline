@@ -314,8 +314,10 @@ class PopulationGeometryAnalyzer:
             data = pop_data[label]  # [events, cells, time_bins]
             n_events, n_cells, n_time = data.shape
             
-            # Reshape to [events * time_bins, cells]
-            reshaped = data.reshape(-1, n_cells)
+            # Transpose to [events, time_bins, cells] then reshape to [events * time_bins, cells]
+            # This preserves the (event, time) pairing for each observation
+            transposed = data.transpose(0, 2, 1)  # [events, time_bins, cells]
+            reshaped = transposed.reshape(-1, n_cells)  # [events * time_bins, cells]
             all_data.append(reshaped)
             
             # Track labels, times, and events
@@ -537,23 +539,25 @@ class PopulationGeometryAnalyzer:
         all_data = []
         for label in pop_data.keys():
             data = pop_data[label]  # [events, cells, time_bins]
-            # Reshape to [events*time_bins, cells] for covariance calculation
-            reshaped = data.reshape(-1, data.shape[1])
+            # Transpose to [events, time_bins, cells] then reshape to [events*time_bins, cells]
+            # This preserves the (event, time) pairing for covariance calculation
+            transposed = data.transpose(0, 2, 1)  # [events, time_bins, cells]
+            reshaped = transposed.reshape(-1, data.shape[1])  # [events*time_bins, cells]
             all_data.append(reshaped)
         
-        # Combine all data and compute covariance
+        # Combine all data and compute correlation matrix
         combined_data = np.vstack(all_data)  # [total_timepoints, cells]
-        cov_matrix = np.cov(combined_data.T)  # [cells, cells]
+        corr_matrix = np.corrcoef(combined_data.T)  # [cells, cells]
         
-        # Plot covariance matrix
-        im1 = ax1.imshow(cov_matrix, cmap='viridis', aspect='auto')
-        ax1.set_title('Original Data Covariance Matrix', fontsize=14, fontweight='bold')
+        # Plot correlation matrix
+        im1 = ax1.imshow(corr_matrix, cmap='RdBu_r', aspect='auto', vmin=-1, vmax=1)
+        ax1.set_title('Cross Correlation Matrix', fontsize=14, fontweight='bold')
         ax1.set_xlabel('Neuron Index')
         ax1.set_ylabel('Neuron Index')
         
-        # Add colorbar for covariance matrix
+        # Add colorbar for correlation matrix
         cbar1 = plt.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
-        cbar1.set_label('Covariance', rotation=270, labelpad=15)
+        cbar1.set_label('Correlation Coefficient', rotation=270, labelpad=15)
         
         # 2. PCA component weights heatmap (top-right)
         components = reduction_info['components']
@@ -561,7 +565,7 @@ class PopulationGeometryAnalyzer:
         
         im2 = ax2.imshow(components[:n_components_to_show], 
                         cmap='RdBu_r', aspect='auto', vmin=-np.abs(components).max(), 
-                        vmax=np.abs(components).max())
+                        vmax=np.abs(components).max(), interpolation='none')
         ax2.set_title(f'PCA Component Weights (First {n_components_to_show} PCs)', 
                      fontsize=14, fontweight='bold')
         ax2.set_xlabel('Neuron Index')

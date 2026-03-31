@@ -474,8 +474,8 @@ class PopulationGeometryAnalyzer:
                            label=f'{label}' if event_idx == 0 else "")
                     
                     # Mark start and end points for each trajectory
-                    ax.scatter(*trajectory[0], color=colors[i], s=30, marker='o', alpha=0.7)
-                    ax.scatter(*trajectory[-1], color=colors[i], s=30, marker='s', alpha=0.7)
+                    ax.scatter(*trajectory[0,:3], color=colors[i], s=30, marker='o', alpha=0.7)
+                    ax.scatter(*trajectory[-1,:3], color=colors[i], s=30, marker='s', alpha=0.7)
             else:
                 # Plot only mean trajectory per condition
                 mean_traj = np.mean(traj, axis=0)[time_mask]  # [time_bins, components]
@@ -484,8 +484,8 @@ class PopulationGeometryAnalyzer:
                        color=colors[i], linewidth=3, label=f'{label} (n={n_events})')
                 
                 # Mark start and end points
-                ax.scatter(*mean_traj[0], color=colors[i], s=100, marker='o', alpha=0.8)
-                ax.scatter(*mean_traj[-1], color=colors[i], s=100, marker='s', alpha=0.8)
+                ax.scatter(*mean_traj[0,:3], color=colors[i], s=100, marker='o', alpha=0.8)
+                ax.scatter(*mean_traj[-1,:3], color=colors[i], s=100, marker='s', alpha=0.8)
         
         # Set labels and title
         method_name = reduced_data['method'].upper()
@@ -501,7 +501,6 @@ class PopulationGeometryAnalyzer:
         ax.legend()
         ax.grid(True, alpha=0.3)
         
-        print(f"✅ 3D trajectory visualization created!")
         return fig
     
     def plot_pca_summary(self, 

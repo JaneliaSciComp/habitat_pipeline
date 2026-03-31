@@ -163,6 +163,9 @@ class BehavioralEventsData:
         self._update_metadata(loaded_files)
         
         print(f"Successfully loaded {len(combined_data)} file(s) with {len(self.events_data)} total events")
+        if 'type' in self.events_data.columns:
+            behavior_types = self.events_data['type'].value_counts()
+            print(f"✓ Available behavior types: {dict(behavior_types)}")
         return True
     
     def _update_metadata(self, loaded_files: List[str]):
@@ -537,6 +540,9 @@ class BehavioralEventsData:
             event_start_times = event_start_times[valid_mask]
             event_end_times = event_end_times[valid_mask]
             opponent_labels = opponent_labels[valid_mask]
+
+        print(f"✓ Found {len(event_start_times)} {behavior_type} events with opponent labels")
+        print(f"✓ Unique opponents: {np.unique(opponent_labels)}")
         
         return event_start_times, event_end_times, opponent_labels
     

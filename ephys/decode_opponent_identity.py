@@ -244,9 +244,6 @@ def decode_opponent_identity_single_cell(spike_times: np.ndarray,
         }
 
 
-
-
-
 def decode_opponent_identity_population(ks_data,
                                       behavior_data,
                                       animal_of_interest: str,
@@ -290,11 +287,11 @@ def decode_opponent_identity_population(ks_data,
     --------
     Dict : Population decoding results
     """
-    print(f"Starting opponent identity decoding analysis...")
-    print(f"Behavior type: {behavior_type}")
-    print(f"Alignment: {alignment}")
-    print(f"Time window: {time_window}")
-    print(f"Time bin size: {time_bin_size}")
+    # print(f"Starting opponent identity decoding analysis...")
+    # print(f"Behavior type: {behavior_type}")
+    # print(f"Alignment: {alignment}")
+    # print(f"Time window: {time_window}")
+    # print(f"Time bin size: {time_bin_size}")
     
     # Extract behavioral events and opponent labels
     try:
@@ -417,7 +414,6 @@ def decode_opponent_identity_population(ks_data,
     }
     
     return population_results
-
 
 # Visualization functions
 

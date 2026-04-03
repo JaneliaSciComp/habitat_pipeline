@@ -127,7 +127,7 @@ class KilosortData:
         if not spike_times_path.exists() or not spike_clusters_path.exists():
             raise FileNotFoundError("Spike times or clusters file not found in the specified directory.")
 
-        print("Loading spike data...")
+        print("Loading spike data...", end="\r", flush=True)
         self.spike_times = np.load(spike_times_path) - 31 # to align with the middle of the template
         self.spike_clusters = np.load(spike_clusters_path)
         self.channel_map = np.load(channel_map_path) if channel_map_path.exists() else None
@@ -143,7 +143,7 @@ class KilosortData:
 
     def select_clusters(self):
         """Select specific clusters to load based on provided cluster IDs."""
-        print("Selecting clusters...")
+        # print("Selecting clusters...", end="\r", flush=True)
         if self.cluster_info is None:
             ci = self.ks_labels
         else:
@@ -163,7 +163,7 @@ class KilosortData:
         """Extract properties like channel, amplitude, firing rate for selected clusters."""
         channel_map = self.channel_map
         to_load = self.to_load
-        print("Extracting cluster properties...")
+        print("Extracting cluster properties...", end="\r", flush=True)
         if self.cluster_info is None:
             print("The session is not curated! Using KS labels.")
             ci = self.ks_labels
@@ -258,7 +258,7 @@ class KilosortData:
     
     def get_cluster_spikes_fast(self):
         """Return a list of numpy arrays, each containing spike sample indices for a cluster."""
-        print("Grouping spikes by cluster...")
+        print("Grouping spikes by cluster...", end="\r", flush=True)
         sample_indices = self.read_timestamps()
         spike_times = sample_indices[self.spike_times].astype(float) / SAMPLE_RATE  # convert to seconds
         spike_clusters = self.spike_clusters

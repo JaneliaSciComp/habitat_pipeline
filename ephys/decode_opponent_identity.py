@@ -342,7 +342,7 @@ def decode_opponent_identity_population(ks_data,
         return {'error': 'No cells selected', 'status': 'failed'}
     
     # Decode for each selected cell
-    print(f"Decoding opponent identity for {len(selected_cluster_ids)} cells...")
+    # print(f"Decoding opponent identity for {len(selected_cluster_ids)} cells...")
     
     cell_results = {}
     successful_cells = 0

@@ -740,7 +740,7 @@ def plot_voronoi_territories(tracking_dict: Dict[str, pd.DataFrame],
             n_animal_seeds = np.sum(point_labels == animal_idx)
             total_occupancy = np.sum(occupancy_maps[animal_name])
             high_occ_bins = np.sum(occupancy_maps[animal_name] >= min_occupancy)
-            print(f"  {animal_name}: {n_animal_seeds} seed points, {high_occ_bins} high-occupancy bins, {total_occupancy:.0f} total frames")
+            # print(f"  {animal_name}: {n_animal_seeds} seed points, {high_occ_bins} high-occupancy bins, {total_occupancy:.0f} total frames")
     
     return fig
 
@@ -1035,13 +1035,13 @@ def plot_proximity_network(tracking_dict: Dict[str, pd.DataFrame],
     print(f"  Significant interactions: {len(interaction_details)}")
     print(f"  Network density: {nx.density(G):.3f}")
     
-    if interaction_details:
-        print("\nDetailed Interactions:")
-        for (animal1, animal2), details in interaction_details.items():
-            print(f"  {animal1} ↔ {animal2}:")
-            print(f"    Proximity time: {details['proximity_frames']} / {details['total_frames']} frames ({details['interaction_strength']*100:.1f}%)")
-            print(f"    Avg distance: {details['avg_distance']:.1f} pixels")
-            print(f"    Min distance: {details['min_distance']:.1f} pixels")
+    # if interaction_details:
+    #     print("\nDetailed Interactions:")
+    #     for (animal1, animal2), details in interaction_details.items():
+            # print(f"  {animal1} ↔ {animal2}:")
+            # print(f"    Proximity time: {details['proximity_frames']} / {details['total_frames']} frames ({details['interaction_strength']*100:.1f}%)")
+            # print(f"    Avg distance: {details['avg_distance']:.1f} pixels")
+            # print(f"    Min distance: {details['min_distance']:.1f} pixels")
     
     return fig
 

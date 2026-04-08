@@ -34,7 +34,10 @@ def _load_config(config_path: Optional[str] = None) -> dict:
         current_dir = Path(__file__).parent
         config_path = current_dir.parent / "config" / "default_paths.json"
     else:
-        config_path = Path(config_path)
+        # First try the config/ directory using just the filename, then fall back to the path as-is
+        config_dir = Path(__file__).parent.parent / "config"
+        candidate = config_dir / Path(config_path).name
+        config_path = candidate if candidate.exists() else Path(config_path)
         
     # Read the configuration file
     try:
@@ -48,7 +51,7 @@ def _load_config(config_path: Optional[str] = None) -> dict:
     return config
 
 
-def get_kilosort_path(animal_id: str, session_id: str, config_path: Optional[str] = None) -> Path:
+def get_kilosort_path(animal_id: str, session_id: str, config_path: Optional[str] = None) -> Union[Path, List[Path]]:
     """
     Construct the path to a Kilosort folder based on animal_id and session_id.
     
@@ -62,12 +65,12 @@ def get_kilosort_path(animal_id: str, session_id: str, config_path: Optional[str
         config_path: Optional path to config file. If None, uses default location.
         
     Returns:
-        Path: Complete path to the kilosort4 directory
+        Path: Complete path to the kilosort4 directory, or a list of paths if multiple sessions match.
         
     Raises:
         FileNotFoundError: If the config file is not found or no matching directories found
         KeyError: If 'ephys' key is not found in the config file
-        ValueError: If multiple matches are found for the same partial string
+        ValueError: If multiple animal directories are found within a single session
         
     Example:
         >>> path = get_kilosort_path("613", "20251210")
@@ -86,28 +89,29 @@ def get_kilosort_path(animal_id: str, session_id: str, config_path: Optional[str
     session_matches = _find_matching_directories(ephys_base, session_id, ".rec")
     if not session_matches:
         raise FileNotFoundError(f"No session directory found matching '{session_id}' in {ephys_base}")
-    if len(session_matches) > 1:
-        raise ValueError(f"Multiple session directories found matching '{session_id}': {session_matches}")
     
-    session_dir = session_matches[0]
-    full_session_id = session_dir.name.replace('.rec', '')
+    kilosort_paths = []
+    for session_dir in session_matches:
+        full_session_id = session_dir.name.replace('.rec', '')
+        
+        # Find matching animal directory within the session directory
+        animal_matches = _find_matching_directories(session_dir, animal_id)
+        if not animal_matches:
+            if len(session_matches) == 1:
+                raise FileNotFoundError(f"No animal directory found matching '{animal_id}' in {session_dir}")
+            continue
+        if len(animal_matches) > 1:
+            raise ValueError(f"Multiple animal directories found matching '{animal_id}': {animal_matches}")
+        
+        animal_dir = animal_matches[0]
+        kilosort_paths.append(animal_dir / f"{full_session_id}_merged.kilosort" / "kilosort4")
     
-    # Find matching animal directory within the session directory
-    animal_matches = _find_matching_directories(session_dir, animal_id)
-    if not animal_matches:
-        raise FileNotFoundError(f"No animal directory found matching '{animal_id}' in {session_dir}")
-    if len(animal_matches) > 1:
-        raise ValueError(f"Multiple animal directories found matching '{animal_id}': {animal_matches}")
+    if not kilosort_paths:
+        raise FileNotFoundError(f"No animal directory found matching '{animal_id}' in any of the matched sessions")
     
-    animal_dir = animal_matches[0]
-    full_animal_id = animal_dir.name
-    
-    # Construct the kilosort path
-    kilosort_path = animal_dir / f"{full_session_id}_merged.kilosort" / "kilosort4"
-    
-    return kilosort_path
+    return kilosort_paths[0] if len(kilosort_paths) == 1 else kilosort_paths
 
-def get_dio_path(animal_id: str, session_id: str, dio_channel: int = 1, config_path: Optional[str] = None) -> Path:
+def get_dio_path(animal_id: str, session_id: str, dio_channel: int = 1, config_path: Optional[str] = None) -> Union[Path, List[Path]]:
     """
     Construct the path to a DIO file based on animal_id, session_id, and DIO channel.
     
@@ -122,12 +126,12 @@ def get_dio_path(animal_id: str, session_id: str, dio_channel: int = 1, config_p
         config_path: Optional path to config file. If None, uses default location.
         
     Returns:
-        Path: Complete path to the DIO file
+        Path: Complete path to the DIO file, or a list of paths if multiple sessions match.
         
     Raises:
         FileNotFoundError: If the config file is not found or no matching directories found
         KeyError: If 'ephys' key is not found in the config file
-        ValueError: If multiple matches are found for the same partial string
+        ValueError: If multiple animal directories are found within a single session
         
     Example:
         >>> path = get_dio_path("613", "20251210", 1)
@@ -146,26 +150,28 @@ def get_dio_path(animal_id: str, session_id: str, dio_channel: int = 1, config_p
     session_matches = _find_matching_directories(ephys_base, session_id, ".rec")
     if not session_matches:
         raise FileNotFoundError(f"No session directory found matching '{session_id}' in {ephys_base}")
-    if len(session_matches) > 1:
-        raise ValueError(f"Multiple session directories found matching '{session_id}': {session_matches}")
     
-    session_dir = session_matches[0]
-    full_session_id = session_dir.name.replace('.rec', '')
-    
-    # Find matching animal directory within the session directory
-    animal_matches = _find_matching_directories(session_dir, animal_id)
-    if not animal_matches:
-        raise FileNotFoundError(f"No animal directory found matching '{animal_id}' in {session_dir}")
-    if len(animal_matches) > 1:
-        raise ValueError(f"Multiple animal directories found matching '{animal_id}': {animal_matches}")
-    
-    animal_dir = animal_matches[0]
-    
-    # Construct the DIO path with channel number
+    dio_paths = []
     dio_channel_str = f"Controller_Din{dio_channel}"
-    dio_path = animal_dir / f"{full_session_id}_merged.DIO" / f"{full_session_id}_merged.dio_{dio_channel_str}.dat"
+    for session_dir in session_matches:
+        full_session_id = session_dir.name.replace('.rec', '')
+        
+        # Find matching animal directory within the session directory
+        animal_matches = _find_matching_directories(session_dir, animal_id)
+        if not animal_matches:
+            if len(session_matches) == 1:
+                raise FileNotFoundError(f"No animal directory found matching '{animal_id}' in {session_dir}")
+            continue
+        if len(animal_matches) > 1:
+            raise ValueError(f"Multiple animal directories found matching '{animal_id}': {animal_matches}")
+        
+        animal_dir = animal_matches[0]
+        dio_paths.append(animal_dir / f"{full_session_id}_merged.DIO" / f"{full_session_id}_merged.dio_{dio_channel_str}.dat")
     
-    return dio_path
+    if not dio_paths:
+        raise FileNotFoundError(f"No animal directory found matching '{animal_id}' in any of the matched sessions")
+    
+    return dio_paths[0] if len(dio_paths) == 1 else dio_paths
 
 def get_pulse_log_path(config_path: Optional[str] = None) -> Path:
     """
@@ -433,7 +439,7 @@ def get_event_files_by_date(session_id: str, config_path: Optional[str] = None,
                         if (session_id in potential_subfolder.name or 
                             session_date in potential_subfolder.name):
                             search_directories.append(potential_subfolder)
-                            # print(f"Found matching events subfolder: {potential_subfolder.name}")
+                            print(f"Found matching events subfolder: {potential_subfolder.name}")
                 
                 # If no matching subfolders found, search all subdirectories
                 if not search_directories:

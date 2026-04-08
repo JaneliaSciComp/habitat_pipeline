@@ -14,7 +14,7 @@ SAMPLE_RATE = 30000.0
 
 
 class KilosortData:
-    def __init__(self, data_input: Union[str, Path, "DataStorageManager"]):
+    def __init__(self, data_input: Union[str, Path, "DataStorageManager"], session_index: int = 0):
         """
         Initialize KilosortData with either a data directory path or DataStorageManager.
         
@@ -22,6 +22,10 @@ class KilosortData:
         -----------
         data_input : Union[str, Path, DataStorageManager]
             Either a path to the kilosort data directory or a DataStorageManager instance
+        session_index : int, default=0
+            When the DataStorageManager returns multiple kilosort paths (e.g. multiple sessions
+            sharing the same date), selects which path to use by index.  Ignored when
+            data_input is a plain path.
         """
         # Handle different input types
         if hasattr(data_input, 'get_kilosort_path'):
@@ -30,6 +34,19 @@ class KilosortData:
             kilosort_path = data_input.get_kilosort_path()
             if kilosort_path is None:
                 raise ValueError("DataStorageManager does not have a valid Kilosort path")
+            # Handle list of paths returned when multiple sessions match
+            if isinstance(kilosort_path, list):
+                if session_index >= len(kilosort_path):
+                    raise IndexError(
+                        f"session_index={session_index} is out of range: "
+                        f"{len(kilosort_path)} kilosort path(s) found: {kilosort_path}"
+                    )
+                if len(kilosort_path) > 1:
+                    print(
+                        f"Multiple sessions found ({len(kilosort_path)}). "
+                        f"Using index {session_index}: {kilosort_path[session_index]}"
+                    )
+                kilosort_path = kilosort_path[session_index]
             self.data_dir = Path(kilosort_path)
             self.animal_id = data_input.animal_id
             self.session_id = data_input.session_id

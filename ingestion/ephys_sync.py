@@ -5,13 +5,14 @@ from ingestion.data_paths import get_dio_path, get_pulse_log_path, DataStorageMa
 
 SAMPLE_RATE = 30000.0  # Hz
 
-def load_ephys_sync(data_manager, dio_channel=1):
+def load_ephys_sync(data_manager, dio_channel=1, session_index=0):
     """
     Load and process ephys synchronization data using DataPathManager.
 
     Parameters:
     - data_manager: DataPathManager instance containing session paths
     - dio_channel: int, DIO channel number to load (default is 1)
+    - session_index: int, index to select from list when multiple DIO paths match (default is 0)
 
     Returns:
     - TSESync: np.ndarray, timestamps of synchronization events
@@ -22,6 +23,13 @@ def load_ephys_sync(data_manager, dio_channel=1):
     dio_path = data_manager.get_dio_path(channel=dio_channel)
     if dio_path is None:
         raise FileNotFoundError(f"DIO channel {dio_channel} not available in DataPathManager")
+    
+    if isinstance(dio_path, list):
+        if session_index >= len(dio_path):
+            raise IndexError(f"session_index {session_index} out of range for {len(dio_path)} DIO paths")
+        if len(dio_path) > 1:
+            print(f"Multiple DIO paths found, using session_index={session_index}: {dio_path[session_index]}")
+        dio_path = dio_path[session_index]
     
     # Load DIO data
     from ingestion.trodes_to_python import readTrodesExtractedDataFile
@@ -523,18 +531,20 @@ class DataSyncManager:
         metadata: Dictionary containing sync session metadata
     """
     
-    def __init__(self, data_manager: DataStorageManager, dio_channel: int = 1, 
-                 auto_load: bool = True):
+    def __init__(self, data_manager: DataStorageManager, dio_channel: int = 1,
+                 session_index: int = 0, auto_load: bool = True):
         """
         Initialize DataSyncManager.
         
         Args:
             data_manager: DataStorageManager instance containing session paths
             dio_channel: DIO channel number for sync (default: 1)
+            session_index: Index to select from list when multiple DIO paths match (default: 0)
             auto_load: If True, automatically load sync data and create mapping
         """
         self.data_manager = data_manager
         self.dio_channel = dio_channel
+        self.session_index = session_index
         
         # Extract identifiers from data_manager for compatibility
         self.animal_id = data_manager.animal_id
@@ -574,7 +584,7 @@ class DataSyncManager:
             
             # Use existing load_ephys_sync function with DataPathManager
             self.ephys_sync, self.behavior_sync, self.system_time = load_ephys_sync(
-                self.data_manager, self.dio_channel
+                self.data_manager, self.dio_channel, self.session_index
             )
             
             # Update metadata

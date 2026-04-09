@@ -135,7 +135,8 @@ def decode_opponent_identity_single_cell(spike_times: np.ndarray,
                                        time_window: Tuple[float, float] = (-1.0, 2.0),
                                        time_bin_size: float = 0.5,
                                        cv_folds: int = 5,
-                                       min_events_per_class: int = 5) -> Dict:
+                                       min_events_per_class: int = 5,
+                                       selected_opponents: Optional[List[str]] = None) -> Dict:
     """
     Decode opponent identity from single cell activity using cross-validated LDA.
     
@@ -157,11 +158,19 @@ def decode_opponent_identity_single_cell(spike_times: np.ndarray,
         Number of cross-validation folds
     min_events_per_class : int, default=5
         Minimum events required per class for decoding
+    selected_opponents : list of str, optional
+        If provided, only events matching these opponent labels are used for decoding.
         
     Returns:
     --------
     Dict : Decoding results including accuracy, confusion matrix, etc.
     """
+    # Filter to selected opponents if specified
+    if selected_opponents is not None:
+        mask = np.isin(opponent_labels, selected_opponents)
+        event_times = event_times[mask]
+        opponent_labels = opponent_labels[mask]
+
     # Check if we have enough events per class
     unique_labels, counts = np.unique(opponent_labels, return_counts=True)
     if len(unique_labels) < 2 or np.min(counts) < min_events_per_class:
@@ -254,7 +263,8 @@ def decode_opponent_identity_population(ks_data,
                                       time_window: Tuple[float, float] = (-1.0, 2.0),
                                       time_bin_size: float = 0.5,
                                       cv_folds: int = 5,
-                                      min_events_per_class: int = 5) -> Dict:
+                                      min_events_per_class: int = 5,
+                                      selected_opponents: Optional[List[str]] = None) -> Dict:
     """
     Decode opponent identity across population of cells using cross-validated LDA.
     
@@ -282,6 +292,8 @@ def decode_opponent_identity_population(ks_data,
         Number of cross-validation folds
     min_events_per_class : int, default=5
         Minimum events required per class for decoding
+    selected_opponents : list of str, optional
+        If provided, only events matching these opponent labels are used for decoding.
         
     Returns:
     --------
@@ -363,7 +375,8 @@ def decode_opponent_identity_population(ks_data,
             time_window=time_window,
             time_bin_size=time_bin_size,
             cv_folds=cv_folds,
-            min_events_per_class=min_events_per_class
+            min_events_per_class=min_events_per_class,
+            selected_opponents=selected_opponents
         )
         
         cell_results[cluster_id] = result

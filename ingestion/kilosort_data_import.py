@@ -154,7 +154,7 @@ class KilosortData:
             cluster_info = cluster_info.sort_values(by=["depth","cluster_id"], ascending=[False, True]).reset_index(drop=True)
             self.cluster_info = cluster_info
         else:
-            print("Cluster info file not found. Using KS labels.")
+            print("Cluster info file not found. The session is not curated. Using KS labels.")
             self.cluster_info = None
         self.ks_labels = pd.read_csv(self.KSfolder / 'cluster_KSLabel.tsv',sep = '\t')
 
@@ -182,7 +182,6 @@ class KilosortData:
         to_load = self.to_load
         print("Extracting cluster properties...", end="\r", flush=True)
         if self.cluster_info is None:
-            print("The session is not curated! Using KS labels.")
             ci = self.ks_labels
             ks_ids = ci["cluster_id"].tolist()
             ks_ids = [ks_ids[i] for i, load in enumerate(to_load) if load]

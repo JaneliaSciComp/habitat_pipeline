@@ -722,13 +722,13 @@ class DataSyncManager:
         if not self.mapping:
             return
         
-        print("=== Sync Mapping Summary ===")
+        # print("=== Sync Mapping Summary ===")
         
         if 'r_squared' in self.mapping:
-            print(f"Method: Linear regression")
-            print(f"R²: {self.mapping['r_squared']:.6f}")
-            print(f"Matches: {self.mapping['n_matches']}")
-            print(f"Slope: {self.mapping['slope']:.8f}")
+            # print(f"Method: Linear regression")
+            # print(f"R²: {self.mapping['r_squared']:.6f}")
+            # print(f"Matches: {self.mapping['n_matches']}")
+            print(f"Clock rate ratio: {self.mapping['slope']:.8f}")
             
         if 'correlation' in self.mapping:
             print(f"Method: New algorithm")

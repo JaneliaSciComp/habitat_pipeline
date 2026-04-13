@@ -63,7 +63,15 @@ class KilosortData:
         # Extract IDs from path only if not using DataStorageManager
         if not self._use_data_manager:
             self.extract_ids_from_path()
-            
+
+        # Check for cached pkl files before processing raw data
+        if self.KSfolder is not None:
+            cached = self._find_cached_file()
+            if cached is not None:
+                self._load_cached(cached)
+                return
+
+        # No cache found — load and process raw data
         self.load_spike_data()
         self.select_clusters()
         self.extract_cluster_properties()
@@ -75,6 +83,33 @@ class KilosortData:
             'n_clusters': len(self.ks_ids),
             'n_spikes': len(self.spike_times),
         }
+
+    def _find_cached_file(self):
+        """Find the most recent cached pkl file in the KS folder, preferring full over processed."""
+        if self.KSfolder is None:
+            return None
+        cached_files = sorted(self.KSfolder.glob("kilosort_*.pkl"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if not cached_files:
+            return None
+        # Prefer full saves over processed-only saves
+        full_files = [f for f in cached_files if f.name.startswith("kilosort_full_")]
+        return full_files[0] if full_files else cached_files[0]
+
+    def _load_cached(self, filepath):
+        """Restore attributes from a cached pkl file."""
+        filepath = Path(filepath)
+        with open(filepath, 'rb') as f:
+            saved_data = pickle.load(f)
+        print(f"Loaded cached KilosortData from: {filepath.name}")
+        for attr, value in saved_data.items():
+            if attr.startswith('_save_metadata') or attr == 'excluded_large_arrays':
+                continue
+            if attr == 'data_storage_manager_info':
+                continue
+            if attr in ('KSfolder', 'data_dir'):
+                setattr(self, attr, Path(value))
+            else:
+                setattr(self, attr, value)
 
     def locate_KS_folder(self):
         # Check if data_dir already ends with "kilosort4"
@@ -664,8 +699,9 @@ class KilosortData:
         filepath : str or Path
             Path to the saved .pkl file
         data_input : str, Path, or DataStorageManager, optional
-            If provided, creates a new KilosortData instance and updates it with saved data.
-            If None, creates a minimal object from saved data only.
+            If provided, uses it to set data_storage_manager and path context
+            without re-processing raw data.  If None, creates a minimal object
+            from saved data only.
             
         Returns:
         --------
@@ -676,7 +712,7 @@ class KilosortData:
         # Load saved object
         ks_data = KilosortData.load_from_file("kilosort_full_631_20251216_20260320_143022.pkl")
         
-        # Load and merge with fresh data (useful for processed-only saves)
+        # Load with DataStorageManager context
         ks_data = KilosortData.load_from_file("kilosort_processed_631_20251216.pkl", 
                                             data_input=data_storage_manager)
         """
@@ -686,55 +722,39 @@ class KilosortData:
             raise FileNotFoundError(f"Save file not found: {filepath}")
         
         try:
-            # Load saved data
-            with open(filepath, 'rb') as f:
-                saved_data = pickle.load(f)
+            # Create minimal instance without calling __init__
+            instance = cls.__new__(cls)
+            instance.data_storage_manager = None
+            instance._use_data_manager = False
             
-            print(f"📂 Loading KilosortData from: {filepath}")
+            # Set up data_storage_manager context if provided
+            if data_input is not None:
+                if hasattr(data_input, 'get_kilosort_path'):
+                    instance.data_storage_manager = data_input
+                    instance._use_data_manager = True
+
+            # Restore saved attributes
+            instance._load_cached(filepath)
             
             # Check if large arrays were excluded
+            with open(filepath, 'rb') as f:
+                saved_data = pickle.load(f)
             excluded_arrays = saved_data.get('excluded_large_arrays', False)
             if excluded_arrays:
-                print("⚠️  This save file excluded large arrays")
-                if data_input is None:
-                    print("   Consider providing data_input to reload raw data")
-            
-            # Create instance
-            if data_input is not None:
-                # Create fresh instance and update with saved data
-                instance = cls(data_input)
-                print("🔄 Created fresh instance, applying saved processed data...")
-            else:
-                # Create minimal instance from saved data only
-                instance = cls.__new__(cls)  # Create without calling __init__
-                print("🔧 Creating minimal instance from saved data...")
-            
-            # Restore saved attributes
-            for attr, value in saved_data.items():
-                if not attr.startswith('_save_metadata') and attr != 'excluded_large_arrays':
-                    if attr == 'data_storage_manager_info':
-                        # Handle data manager info specially
-                        continue
-                    elif attr in ['KSfolder', 'data_dir']:
-                        # Convert back to Path objects
-                        setattr(instance, attr, Path(value))
-                    else:
-                        setattr(instance, attr, value)
-            
+                print("Note: This save file excluded large arrays (spike_times, spike_clusters, channel_map)")
+
             # Print load information
             if '_save_metadata' in saved_data:
-                metadata = saved_data['_save_metadata']
-                print(f"📅 Original save: {metadata.get('save_timestamp', 'unknown')}")
-                print(f"💾 File size: {metadata.get('file_size_mb', 'unknown')} MB")
+                meta = saved_data['_save_metadata']
+                print(f"   Saved: {meta.get('save_timestamp', 'unknown')}")
             
-            print(f"✅ KilosortData loaded successfully!")
-            print(f"   🐭 Animal: {instance.animal_id}, Session: {instance.session_id}")
-            print(f"   🧠 Clusters: {len(instance.ks_ids) if hasattr(instance, 'ks_ids') else 'unknown'}")
+            print(f"   Animal: {instance.animal_id}, Session: {instance.session_id}")
+            print(f"   Clusters: {len(instance.ks_ids) if hasattr(instance, 'ks_ids') else 'unknown'}")
             
             return instance
             
         except Exception as e:
-            print(f"❌ Error loading KilosortData: {e}")
+            print(f"Error loading KilosortData: {e}")
             raise
     
     def list_saved_files(self):
@@ -752,10 +772,10 @@ class KilosortData:
         saved_files = list(self.KSfolder.glob("kilosort_*.pkl"))
         
         if not saved_files:
-            print(f"📁 No saved KilosortData files found in: {self.KSfolder}")
+            print(f"No saved KilosortData files found in: {self.KSfolder}")
             return []
         
-        print(f"📂 Found {len(saved_files)} saved KilosortData files:")
+        print(f"Found {len(saved_files)} saved KilosortData files:")
         
         file_info = []
         for filepath in sorted(saved_files):

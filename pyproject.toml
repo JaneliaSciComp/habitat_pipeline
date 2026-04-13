@@ -29,14 +29,17 @@ dev = [
 ]
 all = [
     "pytest>=6.0.0",
-    "black>=22.0.0", 
+    "black>=22.0.0",
     "jupyter>=1.0.0",
     "opencv-python>=4.5.0",
     "sqlalchemy>=1.4.0",
+]
+gui = [
+    "streamlit>=1.32.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/JaneliaSciComp/habitat_pipeline"
 
 [tool.setuptools.packages.find]
-include = ["ingestion*", "video*", "ephys*", "database*"]
+include = ["ingestion*", "video*", "ephys*", "database*", "gui*"]

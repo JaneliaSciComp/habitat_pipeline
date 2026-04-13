@@ -503,6 +503,110 @@ class PopulationGeometryAnalyzer:
         
         return fig
     
+    def plot_population_dynamics_interactive(self,
+                                           reduced_data: Dict,
+                                           show_individual: bool = False,
+                                           time_range: Optional[Tuple[float, float]] = None):
+        """
+        Interactive 3D plot of neural population trajectories using plotly.
+        
+        Parameters:
+        -----------
+        reduced_data : dict
+            Result from apply_dimensionality_reduction()
+        show_individual : bool, default=False
+            Whether to show all individual trajectories (True) or just mean trajectories (False)
+        time_range : tuple, optional
+            Time range to plot (start, end) in seconds
+            
+        Returns:
+        --------
+        plotly.graph_objects.Figure : Interactive 3D figure
+        """
+        import plotly.graph_objects as go
+        
+        trajectories = reduced_data['reduced_trajectories']
+        time_bins = reduced_data['time_bins']
+        unique_labels = reduced_data['unique_labels']
+        method_name = reduced_data['method'].upper()
+        
+        # Filter time range if specified
+        if time_range is not None:
+            time_mask = (time_bins >= time_range[0]) & (time_bins <= time_range[1])
+        else:
+            time_mask = slice(None)
+        
+        # Color palette
+        import plotly.express as px
+        palette = px.colors.qualitative.Set1
+        
+        fig = go.Figure()
+        
+        for i, label in enumerate(unique_labels):
+            color = palette[i % len(palette)]
+            traj = trajectories[label]  # [events, time_bins, components]
+            n_events = traj.shape[0]
+            
+            if show_individual:
+                for event_idx in range(n_events):
+                    t = traj[event_idx][time_mask]
+                    fig.add_trace(go.Scatter3d(
+                        x=t[:, 0], y=t[:, 1], z=t[:, 2],
+                        mode='lines',
+                        line=dict(color=color, width=3),
+                        opacity=0.5,
+                        name=str(label),
+                        legendgroup=str(label),
+                        showlegend=(event_idx == 0),
+                    ))
+                    # Start marker
+                    fig.add_trace(go.Scatter3d(
+                        x=[t[0, 0]], y=[t[0, 1]], z=[t[0, 2]],
+                        mode='markers',
+                        marker=dict(color=color, size=4, symbol='circle'),
+                        showlegend=False, legendgroup=str(label),
+                    ))
+            else:
+                mean_traj = np.mean(traj, axis=0)[time_mask]
+                fig.add_trace(go.Scatter3d(
+                    x=mean_traj[:, 0], y=mean_traj[:, 1], z=mean_traj[:, 2],
+                    mode='lines',
+                    line=dict(color=color, width=5),
+                    name=f'{label} (n={n_events})',
+                ))
+                # Start / end markers
+                fig.add_trace(go.Scatter3d(
+                    x=[mean_traj[0, 0]], y=[mean_traj[0, 1]], z=[mean_traj[0, 2]],
+                    mode='markers',
+                    marker=dict(color=color, size=6, symbol='circle'),
+                    name=f'{label} start', showlegend=False,
+                ))
+                fig.add_trace(go.Scatter3d(
+                    x=[mean_traj[-1, 0]], y=[mean_traj[-1, 1]], z=[mean_traj[-1, 2]],
+                    mode='markers',
+                    marker=dict(color=color, size=6, symbol='square'),
+                    name=f'{label} end', showlegend=False,
+                ))
+        
+        title = 'Neural Population Trajectories'
+        if show_individual:
+            title += ' - All Individual Trials'
+        else:
+            title += ' - Mean per Condition'
+        
+        fig.update_layout(
+            title=title,
+            scene=dict(
+                xaxis_title=f'{method_name} Component 1',
+                yaxis_title=f'{method_name} Component 2',
+                zaxis_title=f'{method_name} Component 3',
+            ),
+            width=900,
+            height=700,
+        )
+        
+        return fig
+
     def plot_pca_summary(self, 
                         reduced_data: Dict,
                         pop_data: Dict,

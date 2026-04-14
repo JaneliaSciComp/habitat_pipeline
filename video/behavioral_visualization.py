@@ -14,6 +14,7 @@ from typing import Optional, Tuple, Union, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from video.behavioral_events import BehavioralEventsData
+    from video.tracking_import import VideoTrackingData
 
 
 def plot_rat_interaction_heatmap(events: "BehavioralEventsData",
@@ -334,5 +335,142 @@ def plot_behavioral_event_timeline(events: "BehavioralEventsData",
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         print(f"Timeline plot saved to: {save_path}")
+
+    plt.show()
+
+
+def plot_events_on_trajectory(events: "BehavioralEventsData",
+                              tracking: "VideoTrackingData",
+                              animal_id: str,
+                              event_type: Optional[str] = None,
+                              figsize: Tuple[int, int] = (10, 10),
+                              marker_size: int = 80,
+                              save_path: Optional[Union[str, Path]] = None) -> None:
+    """
+    Plot an animal's trajectory with behavioral event markers colored by opponent.
+
+    Each event involving *animal_id* is placed at the animal's tracked position
+    at the time of the event start.  Marker color encodes the opponent identity.
+
+    Args:
+        events: BehavioralEventsData instance (must be loaded)
+        tracking: VideoTrackingData instance with timestamps loaded
+        animal_id: Animal identifier (e.g., '631' or 'rat631')
+        event_type: Optional behavior type abbreviation to filter (e.g., 'F')
+        figsize: Figure size as (width, height)
+        marker_size: Scatter marker size for event points
+        save_path: Optional path to save the plot
+    """
+    if events.events_data is None:
+        print("No events data loaded.")
+        return
+
+    # Normalize animal_id
+    if not animal_id.startswith('rat'):
+        animal_id_full = f"rat{animal_id}"
+    else:
+        animal_id_full = animal_id
+
+    # --- Resolve tracking object name ---
+    object_names = tracking.get_object_names()
+    # Try exact match, then partial match on the numeric part
+    track_name = None
+    numeric_part = animal_id_full.replace('rat', '')
+    for name in object_names:
+        if name == animal_id_full or name == numeric_part:
+            track_name = name
+            break
+    if track_name is None:
+        # Fuzzy: look for the numeric id anywhere in the object name
+        for name in object_names:
+            if numeric_part in name:
+                track_name = name
+                break
+    if track_name is None:
+        print(f"Could not find tracking object for '{animal_id}'. "
+              f"Available: {object_names}")
+        return
+
+    # Get trajectory
+    trajectory = tracking.get_object_trajectory(track_name)
+    if trajectory is None or 'timestamps' not in trajectory.columns:
+        print("Trajectory or timestamps not available for this animal.")
+        return
+
+    ts = trajectory['timestamps'].values
+    x = trajectory['center_x'].values
+    y = trajectory['center_y'].values
+
+    # --- Get events for this animal ---
+    rat_events = events.get_events_by_rat(animal_id_full, 'any')
+    if rat_events is None or rat_events.empty:
+        print(f"No events found for {animal_id_full}")
+        return
+
+    if event_type is not None and 'type' in rat_events.columns:
+        rat_events = rat_events[rat_events['type'] == event_type]
+        if rat_events.empty:
+            print(f"No '{event_type}' events found for {animal_id_full}")
+            return
+
+    # Determine timestamp column (prefer raw Linux timestamps for matching tracking)
+    if 'ts_start' in rat_events.columns:
+        event_ts = rat_events['ts_start'].values
+    elif 'ts_start_ephys' in rat_events.columns:
+        event_ts = rat_events['ts_start_ephys'].values
+    else:
+        print("No timestamp columns found in events data.")
+        return
+
+    # Identify opponent for each event
+    opponents = []
+    for _, row in rat_events.iterrows():
+        if row.get('initiator') == animal_id_full:
+            opponents.append(row.get('victim', 'unknown'))
+        else:
+            opponents.append(row.get('initiator', 'unknown'))
+    opponents = np.array(opponents)
+
+    # Map event timestamps to nearest tracking frame
+    idx_nearest = np.searchsorted(ts, event_ts, side='left')
+    idx_nearest = np.clip(idx_nearest, 0, len(ts) - 1)
+    # Refine: check if previous index is closer
+    prev_idx = np.clip(idx_nearest - 1, 0, len(ts) - 1)
+    closer_prev = np.abs(ts[prev_idx] - event_ts) < np.abs(ts[idx_nearest] - event_ts)
+    idx_nearest[closer_prev] = prev_idx[closer_prev]
+
+    event_x = x[idx_nearest]
+    event_y = y[idx_nearest]
+
+    # --- Plot ---
+    unique_opponents = sorted(set(opponents))
+    palette = plt.get_cmap('tab10')
+    opp_colors = {opp: palette(i % 10) for i, opp in enumerate(unique_opponents)}
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Trajectory
+    ax.plot(x, y, color='gray', linewidth=0.5, alpha=0.4, zorder=1)
+
+    # Event markers
+    for opp in unique_opponents:
+        mask = opponents == opp
+        ax.scatter(event_x[mask], event_y[mask],
+                   s=marker_size, color=opp_colors[opp],
+                   label=opp, edgecolors='black', linewidths=0.5,
+                   zorder=3, alpha=0.85)
+
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    type_label = f" ({events.decode_behavior_type(event_type)})" if event_type else ""
+    ax.set_title(f'{animal_id_full} trajectory with behavioral events{type_label}\n'
+                 f'Session: {events.data_manager.session_id}')
+    ax.legend(title='Opponent', bbox_to_anchor=(1.01, 1), loc='upper left')
+    ax.set_aspect('equal')
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Plot saved to: {save_path}")
 
     plt.show()

@@ -16,6 +16,7 @@ import warnings
 
 # Import DataStorageManager for session management
 from ingestion.data_paths import DataStorageManager
+from ingestion.ephys_sync import DataSyncManager
 
 
 def load_tracking_data(data_manager: DataStorageManager, file_index: int = 0) -> pd.DataFrame:
@@ -467,6 +468,55 @@ class VideoTrackingData:
         print(f"Switching to tracking file: {self.file_path}")
         self._load_data(load_ts)
     
+    def synchronize_with_ephys(self, sync_manager: 'DataSyncManager') -> bool:
+        """
+        Convert tracking timestamps from behavioral time to ephys time using DataSyncManager.
+        
+        Creates a new attribute ``ephys_timestamps`` (numpy array, same length as
+        ``self.timestamps``) containing the converted values.  Frames whose
+        conversion fails are set to NaN.
+        
+        Args:
+            sync_manager: DataSyncManager instance for time synchronization
+            
+        Returns:
+            True if synchronization was successful, False otherwise
+        """
+        if self.timestamps is None or len(self.timestamps) == 0:
+            print("No timestamps loaded. Reload with load_ts=True.")
+            return False
+
+        n = len(self.timestamps)
+
+        # Convert from nanoseconds to seconds
+        timestamps_sec = self.timestamps / 1e9
+
+        ephys_ts = np.empty(n, dtype=np.float64)
+        failed = 0
+
+        for i in range(n):
+            try:
+                ephys_ts[i] = sync_manager.convert_behavior_to_ephys(timestamps_sec[i])
+            except Exception:
+                ephys_ts[i] = np.nan
+                failed += 1
+
+        self.ephys_timestamps = ephys_ts
+
+        # Also inject into each parsed object's trajectory DataFrame
+        for obj_name, obj_df in self.parsed_data.items():
+            if len(obj_df) <= n:
+                obj_df['ephys_timestamps'] = ephys_ts[:len(obj_df)]
+
+        self.metadata['synchronized_with_ephys'] = True
+        self.metadata['ephys_sync_timestamp'] = datetime.now().isoformat()
+        self.metadata['ephys_sync_failed'] = int(failed)
+
+        converted = n - failed
+        print(f"Synchronization complete: {converted}/{n} timestamps converted"
+              + (f" ({failed} failed)" if failed else ""))
+        return True
+
     def has_data_manager(self) -> bool:
         """Check if this instance is using a DataStorageManager."""
         return True  # Always true since we only accept DataStorageManager

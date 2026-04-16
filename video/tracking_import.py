@@ -330,14 +330,31 @@ class VideoTrackingData:
         """
         Get tracking data for a specific object.
         
+        Supports partial matching: if *object_name* is not an exact key,
+        returns the data for the first key that contains *object_name* as a
+        substring (or vice-versa).
+        
         Args:
-            object_name: Name of the object to retrieve
+            object_name: Name (or partial name) of the object to retrieve
             
         Returns:
             DataFrame containing tracking data for the specified object,
             or None if the object is not found
         """
-        return self.parsed_data.get(object_name)
+        # Exact match first
+        if object_name in self.parsed_data:
+            return self.parsed_data[object_name]
+
+        # Partial match: object_name is substring of a key or key is substring of object_name
+        matches = [k for k in self.parsed_data.keys() if object_name in k or k in object_name]
+        if len(matches) == 1:
+            # print(f"Partial match found for '{object_name}': '{matches[0]}'. Returning this object.")
+            return self.parsed_data[matches[0]]
+        if len(matches) > 1:
+            print(f"Ambiguous object name '{object_name}', matched: {matches}. Returning first match.")
+            return self.parsed_data[matches[0]]
+
+        return None
     
     def get_object_names(self) -> List[str]:
         """Get list of all tracked object names."""

@@ -870,6 +870,206 @@ class PopulationGeometryAnalyzer:
         return fig
 
 
+# ---------------------------------------------------------------------------
+# Continuous PCA trajectory with event overlay
+# ---------------------------------------------------------------------------
+
+def plot_pca_trajectory_with_events(
+    ks_data,
+    behavior_data,
+    animal_of_interest: str,
+    behavior_types: Optional[List[str]] = None,
+    bin_size: float = 0.5,
+    n_components: int = 3,
+    filtered_only: bool = True,
+    start_time: Optional[float] = None,
+    end_time: Optional[float] = None,
+    min_events_per_class: int = 1,
+    marker_size: int = 6,
+    line_width: float = 1.0,
+    line_alpha: float = 0.3,
+):
+    """
+    Bin the full recording into a firing-rate matrix (filtered cells),
+    run PCA, and plot the 3-D trajectory with event markers colour-coded
+    by opponent animal.
+
+    Parameters
+    ----------
+    ks_data : KilosortData
+        Must have ``spike_times_by_cell`` populated.
+    behavior_data : BehavioralEventsData
+        Must already be synchronised with ephys (``ts_start_ephys`` present).
+    animal_of_interest : str
+        The implanted animal (e.g. ``"rat631"`` or ``"631"``).
+    behavior_types : list of str, optional
+        Behaviour-type abbreviations to include (e.g. ``["F", "C"]``).
+        ``None`` → all available types.
+    bin_size : float
+        Temporal bin width in seconds.
+    n_components : int
+        Number of PCA components (≥3 for 3-D plot).
+    filtered_only : bool
+        Use only quality-filtered cells.
+    start_time, end_time : float, optional
+        Restrict the time range.
+    min_events_per_class : int
+        Minimum events per opponent to include that opponent.
+    marker_size : int
+        Size of event markers.
+    line_width : float
+        Width of the background trajectory line.
+    line_alpha : float
+        Opacity of the background trajectory line.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        Interactive 3-D figure.
+    dict
+        Result dictionary with keys ``pca_model``, ``scores``,
+        ``bin_centers``, ``explained_variance``, ``event_info``.
+    """
+    import plotly.graph_objects as go
+    import plotly.express as px
+    from ephys.rastermap_viz import bin_spikes_matrix
+
+    # --- 1. Build firing-rate matrix (n_cells × n_bins) ---
+    spks, bin_centers = bin_spikes_matrix(
+        ks_data, bin_size=bin_size,
+        start_time=start_time, end_time=end_time,
+        filtered_only=filtered_only,
+    )
+    n_cells, n_bins = spks.shape
+    print(f"Firing-rate matrix: {n_cells} cells × {n_bins} bins "
+          f"({bin_centers[0]:.1f}–{bin_centers[-1]:.1f} s)")
+
+    # --- 2. Z-score and PCA ---
+    X = zscore(spks, axis=1)          # z-score each cell across time
+    X = np.nan_to_num(X, 0.0)        # zero-variance cells → 0
+    pca = PCA(n_components=min(n_components, n_cells))
+    scores = pca.fit_transform(X.T)   # (n_bins, n_components)
+
+    ev = pca.explained_variance_ratio_
+    print(f"PCA explained variance: "
+          + ", ".join(f"PC{i+1}={v:.1%}" for i, v in enumerate(ev)))
+
+    # --- 3. Gather events ---
+    if not animal_of_interest.startswith('rat'):
+        animal_of_interest = f"rat{animal_of_interest}"
+
+    if behavior_types is None:
+        behavior_types = behavior_data.get_available_event_types(return_format='abbreviations')
+
+    all_event_starts = []
+    all_event_ends = []
+    all_opponents = []
+    all_btypes = []
+
+    for bt in behavior_types:
+        try:
+            starts, ends, opponents = behavior_data.extract_opponent_labels(
+                animal_of_interest, behavior_type=bt,
+                min_events_per_class=min_events_per_class,
+            )
+        except Exception:
+            continue
+        if len(starts) == 0:
+            continue
+        all_event_starts.append(starts)
+        all_event_ends.append(ends)
+        all_opponents.append(opponents)
+        all_btypes.append(np.full(len(starts), bt))
+
+    if all_event_starts:
+        ev_starts = np.concatenate(all_event_starts)
+        ev_ends = np.concatenate(all_event_ends)
+        ev_opponents = np.concatenate(all_opponents)
+        ev_btypes = np.concatenate(all_btypes)
+    else:
+        ev_starts = np.array([])
+        ev_ends = np.array([])
+        ev_opponents = np.array([])
+        ev_btypes = np.array([])
+
+    # Map each event to the nearest time-bin index
+    event_bin_idx = np.searchsorted(bin_centers, ev_starts).clip(0, n_bins - 1)
+
+    # Decode behavior abbreviation for hover text
+    btype_map = behavior_data.get_behavior_type_mapping()
+
+    # --- 4. Build interactive plotly figure ---
+    palette = px.colors.qualitative.Set1
+    unique_opponents = np.unique(ev_opponents) if len(ev_opponents) > 0 else []
+    opp_color = {opp: palette[i % len(palette)] for i, opp in enumerate(unique_opponents)}
+
+    fig = go.Figure()
+
+    # Background trajectory – colour-coded by time
+    fig.add_trace(go.Scatter3d(
+        x=scores[:, 0], y=scores[:, 1], z=scores[:, 2],
+        mode='lines',
+        line=dict(color=bin_centers, colorscale='Viridis',
+                  width=line_width, showscale=True,
+                  colorbar=dict(title='Time (s)', x=1.05, len=0.6)),
+        opacity=line_alpha,
+        name='Trajectory',
+        hovertemplate='t=%{customdata:.1f}s<extra></extra>',
+        customdata=bin_centers,
+    ))
+
+    # Event markers — one trace per opponent for legend grouping
+    for opp in unique_opponents:
+        mask = ev_opponents == opp
+        idx = event_bin_idx[mask]
+        btypes_here = ev_btypes[mask]
+        hover = [
+            f"t={bin_centers[bi]:.1f}s<br>"
+            f"{btype_map.get(b, b)} vs {opp}"
+            for bi, b in zip(idx, btypes_here)
+        ]
+        fig.add_trace(go.Scatter3d(
+            x=scores[idx, 0],
+            y=scores[idx, 1],
+            z=scores[idx, 2],
+            mode='markers',
+            marker=dict(size=marker_size, color=opp_color[opp],
+                        line=dict(width=0.5, color='black')),
+            name=opp,
+            hovertext=hover,
+            hoverinfo='text',
+        ))
+
+    fig.update_layout(
+        title=(f'PCA trajectory – {animal_of_interest}  '
+               f'({n_cells} cells, bin={bin_size}s)'),
+        scene=dict(
+            xaxis_title=f'PC1 ({ev[0]:.1%})',
+            yaxis_title=f'PC2 ({ev[1]:.1%})',
+            zaxis_title=f'PC3 ({ev[2]:.1%})' if len(ev) >= 3 else 'PC3',
+        ),
+        width=950, height=750,
+        legend=dict(title='Opponent'),
+    )
+
+    result = {
+        'pca_model': pca,
+        'scores': scores,
+        'bin_centers': bin_centers,
+        'explained_variance': ev,
+        'n_cells': n_cells,
+        'event_info': {
+            'starts': ev_starts,
+            'ends': ev_ends,
+            'opponents': ev_opponents,
+            'behavior_types': ev_btypes,
+            'bin_indices': event_bin_idx,
+        },
+    }
+
+    return fig, result
+
+
 def run_population_analysis_pipeline(ks_data, 
                                    behavior_data,
                                    animal_of_interest: str,

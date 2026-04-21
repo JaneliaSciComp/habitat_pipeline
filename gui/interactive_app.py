@@ -77,7 +77,9 @@ def _fit_rastermap(fr_matrix):
 
 
 def _build_pop_data(events, ks_data, behavior_type, animal_id, pca_bin, min_events, t0, t1):
-    """Fit PCA on the full continuous recording (quality cells, z-scored).
+    """Fit PCA on the full continuous recording (quality cells, raw FR).
+
+    Opponent colors use the same PALETTE + all_rats index as the timeline plot.
 
     Returns dict with keys:
       scores        : ndarray (n_bins, 3)  — full trajectory in PC space
@@ -85,30 +87,25 @@ def _build_pop_data(events, ks_data, behavior_type, animal_id, pca_bin, min_even
       var_explained : ndarray (3,)
       ev_starts     : ndarray of event ts_start_ephys
       ev_opponents  : ndarray of opponent labels (str)
-      ev_btypes     : ndarray of behavior-type abbreviations
-      opp_colors    : dict {opponent: hex_color}
+      opp_colors    : dict {opponent: hex_color}  — same mapping as timeline
       btype_map     : dict {abbrev: full_name}
     or None on failure.
     """
-    import plotly.express as px
-    from scipy.stats import zscore as _zscore
-
-    # Full recording firing-rate matrix (quality-filtered cells)
+    # Full recording firing-rate matrix (quality-filtered cells, raw FR — no z-score)
     spks, bin_centers = bin_spikes_matrix(
         ks_data, bin_size=pca_bin, start_time=t0, end_time=t1, filtered_only=True,
     )
-    n_cells, n_bins = spks.shape
+    n_cells, _ = spks.shape
     if n_cells < 3:
         return None
 
-    # Z-score each cell across time, replace NaN (zero-variance cells) with 0
-    X = np.nan_to_num(_zscore(spks, axis=1), nan=0.0)
+    X = np.nan_to_num(zscore(spks, axis=1), nan=0.0)
     pca = PCA(n_components=3)
     scores = pca.fit_transform(X.T)   # (n_bins, 3)
 
     # Gather events of the selected behavior type
     try:
-        ev_starts, ev_ends, ev_labels = events.extract_opponent_labels(
+        ev_starts, _, ev_labels = events.extract_opponent_labels(
             animal_of_interest=animal_id,
             behavior_type=behavior_type,
             min_events_per_class=min_events,
@@ -116,9 +113,13 @@ def _build_pop_data(events, ks_data, behavior_type, animal_id, pca_bin, min_even
     except Exception:
         ev_starts = ev_labels = np.array([])
 
-    palette = px.colors.qualitative.Set1
-    unique_opps = np.unique(ev_labels) if len(ev_labels) > 0 else []
-    opp_colors = {opp: palette[i % len(palette)] for i, opp in enumerate(unique_opps)}
+    # Opponent colors: same logic as _make_timeline
+    # all_rats = sorted union of initiators + victims in the filtered events df
+    df = events.events_data
+    df_filt = df[(df["type"] == behavior_type) &
+                 ((df["initiator"] == animal_id) | (df["victim"] == animal_id))]
+    all_rats = sorted(set(df_filt["initiator"].tolist() + df_filt["victim"].tolist()))
+    opp_colors = {r: PALETTE[all_rats.index(r) % 10] for r in all_rats}
 
     return {
         "scores": scores,
@@ -165,7 +166,7 @@ def _make_pca_plotly(pop_data_full, t_view_start, t_view_end):
                 showscale=True,
                 colorbar=dict(title="Time (s)", x=1.05, len=0.6),
             ),
-            opacity=0.4,
+            opacity=0.15,
             name="Trajectory",
             hovertemplate="t=%{customdata:.1f}s<extra></extra>",
             customdata=view_times,
@@ -258,16 +259,16 @@ class HabitatApp:
         self.btype_sel = pn.widgets.Select(
             name="Behavior type",
             options=BTYPE_LABELS,
-            value=BTYPE_LABELS[0],
+            value=BTYPE_LABELS[13], # Encounter
         )
         self.min_events_sl = pn.widgets.IntSlider(
-            name="Min events / opponent", value=3, start=1, end=30
+            name="Min events / opponent", value=10, start=1, end=50
         )
         self.pca_bin_sl = pn.widgets.FloatSlider(
-            name="PCA bin size (s)", value=0.2, start=0.05, end=1.0, step=0.05
+            name="PCA bin size (s)", value=0.5, start=0.1, end=2.0, step=0.1
         )
         self.raster_bin_sl = pn.widgets.FloatSlider(
-            name="Rastermap bin size (s)", value=0.1, start=0.02, end=1.0, step=0.02
+            name="Rastermap bin size (s)", value=1.0, start=0.1, end=2.0, step=0.1
         )
 
         self.cohort_sel.param.watch(self._update_sessions, "value")
@@ -275,7 +276,7 @@ class HabitatApp:
         self.load_btn.on_click(self._on_load)
         self.btype_sel.param.watch(self._on_behavior_change, "value")
         self.min_events_sl.param.watch(self._on_behavior_change, "value")
-
+        self.pca_bin_sl.param.watch(self._on_behavior_change, "value")
         self._update_sessions()
         pn.state.add_periodic_callback(self._check_range_update, period=600)
 

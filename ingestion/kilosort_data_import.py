@@ -14,7 +14,7 @@ SAMPLE_RATE = 30000.0
 
 
 class KilosortData:
-    def __init__(self, data_input: Union[str, Path, "DataStorageManager"], session_index: int = 0):
+    def __init__(self, data_input: Union[str, Path, "DataStorageManager"], session_index: int = 0, force_reload: bool = False):
         """
         Initialize KilosortData with either a data directory path or DataStorageManager.
         
@@ -26,6 +26,8 @@ class KilosortData:
             When the DataStorageManager returns multiple kilosort paths (e.g. multiple sessions
             sharing the same date), selects which path to use by index.  Ignored when
             data_input is a plain path.
+        force_reload : bool, default=False
+            If True, skip cached pkl files and load raw data from scratch.
         """
         # Handle different input types
         if hasattr(data_input, 'get_kilosort_path'):
@@ -65,7 +67,7 @@ class KilosortData:
             self.extract_ids_from_path()
 
         # Check for cached pkl files before processing raw data
-        if self.KSfolder is not None:
+        if not force_reload and self.KSfolder is not None:
             cached = self._find_cached_file()
             if cached is not None:
                 self._load_cached(cached)

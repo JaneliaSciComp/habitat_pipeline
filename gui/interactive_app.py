@@ -12,9 +12,11 @@ from bokeh.models import (
 )
 from bokeh.palettes import Category10, Inferno256
 from bokeh.plotting import figure
+from scipy.stats import zscore
 from sklearn.decomposition import PCA
 
 from ephys.decode_opponent_identity import align_spikes_to_events, extract_firing_rate_features
+from ephys.rastermap_viz import bin_spikes_matrix
 from ingestion.data_paths import DataStorageManager, get_animals_and_sessions
 from ingestion.ephys_sync import DataSyncManager
 from ingestion.kilosort_data_import import KilosortData
@@ -74,9 +76,37 @@ def _fit_rastermap(fr_matrix):
     return img
 
 
-def _build_pop_data(events, ks_data, behavior_type, animal_id, pca_tw, pca_bin, min_events):
-    """Build per-event firing-rate matrices for events involving animal_id.
-    Returns dict {pop_data, event_starts, time_bins} or None."""
+def _build_pop_data(events, ks_data, behavior_type, animal_id, pca_bin, min_events, t0, t1):
+    """Fit PCA on the full continuous recording (quality cells, z-scored).
+
+    Returns dict with keys:
+      scores        : ndarray (n_bins, 3)  — full trajectory in PC space
+      bin_centers   : ndarray (n_bins,)   — time of each bin center (s)
+      var_explained : ndarray (3,)
+      ev_starts     : ndarray of event ts_start_ephys
+      ev_opponents  : ndarray of opponent labels (str)
+      ev_btypes     : ndarray of behavior-type abbreviations
+      opp_colors    : dict {opponent: hex_color}
+      btype_map     : dict {abbrev: full_name}
+    or None on failure.
+    """
+    import plotly.express as px
+    from scipy.stats import zscore as _zscore
+
+    # Full recording firing-rate matrix (quality-filtered cells)
+    spks, bin_centers = bin_spikes_matrix(
+        ks_data, bin_size=pca_bin, start_time=t0, end_time=t1, filtered_only=True,
+    )
+    n_cells, n_bins = spks.shape
+    if n_cells < 3:
+        return None
+
+    # Z-score each cell across time, replace NaN (zero-variance cells) with 0
+    X = np.nan_to_num(_zscore(spks, axis=1), nan=0.0)
+    pca = PCA(n_components=3)
+    scores = pca.fit_transform(X.T)   # (n_bins, 3)
+
+    # Gather events of the selected behavior type
     try:
         ev_starts, ev_ends, ev_labels = events.extract_opponent_labels(
             animal_of_interest=animal_id,
@@ -84,80 +114,96 @@ def _build_pop_data(events, ks_data, behavior_type, animal_id, pca_tw, pca_bin, 
             min_events_per_class=min_events,
         )
     except Exception:
-        return None
-    if len(ev_starts) == 0:
-        return None
+        ev_starts = ev_labels = np.array([])
 
-    edges = np.arange(pca_tw[0], pca_tw[1] + pca_bin, pca_bin)
-    n_bins = len(edges) - 1
-    time_bins = edges[:-1] + pca_bin / 2
-    n_cells = len(ks_data.ks_ids)
-    pop_data, event_starts = {}, {}
-
-    for label in np.unique(ev_labels):
-        mask = ev_labels == label
-        starts = ev_starts[mask]
-        event_starts[label] = starts
-        mat = np.zeros((len(starts), n_cells, n_bins), dtype=np.float32)
-        for ci, spikes in enumerate(ks_data.spike_times_by_cell):
-            aligned = align_spikes_to_events(spikes, starts, pca_tw)
-            fr = extract_firing_rate_features(aligned, pca_tw, pca_bin)
-            nc = min(n_bins, fr.shape[1])
-            mat[:, ci, :nc] = fr[:, :nc]
-        pop_data[label] = mat
-
-    return {"pop_data": pop_data, "event_starts": event_starts, "time_bins": time_bins}
-
-
-def _make_pca_plotly(pop_data_full, event_starts_by_label, t_view_start, t_view_end):
-    import plotly.graph_objects as go
-    import plotly.express as px
     palette = px.colors.qualitative.Set1
-    X_list, valid_labels, subset_data = [], [], {}
+    unique_opps = np.unique(ev_labels) if len(ev_labels) > 0 else []
+    opp_colors = {opp: palette[i % len(palette)] for i, opp in enumerate(unique_opps)}
 
-    for label, matrix in pop_data_full.items():
-        starts = event_starts_by_label[label]
-        mask = (starts >= t_view_start) & (starts <= t_view_end)
-        if mask.sum() < 2:
-            continue
-        sub = matrix[mask]
-        n_sel, n_cells, n_bins = sub.shape
-        subset_data[label] = sub
-        valid_labels.append(label)
-        X_list.append(sub.transpose(0, 2, 1).reshape(n_sel * n_bins, n_cells))
+    return {
+        "scores": scores,
+        "bin_centers": bin_centers,
+        "var_explained": pca.explained_variance_ratio_,
+        "ev_starts": ev_starts,
+        "ev_opponents": ev_labels,
+        "btype_map": BehavioralEventsData.BEHAVIOR_TYPES,
+        "opp_colors": opp_colors,
+        "behavior_type": behavior_type,
+    }
+
+
+def _make_pca_plotly(pop_data_full, t_view_start, t_view_end):
+    """Full continuous PCA trajectory with event markers filtered to the current view.
+
+    Background: thin line colored by time (viridis) clipped to [t_view_start, t_view_end].
+    Foreground: one marker-trace per opponent, showing only events in the view window.
+    """
+    import plotly.graph_objects as go
+
+    scores = pop_data_full["scores"]
+    bin_centers = pop_data_full["bin_centers"]
+    var = pop_data_full["var_explained"] * 100
+    ev_starts = pop_data_full["ev_starts"]
+    ev_opponents = pop_data_full["ev_opponents"]
+    opp_colors = pop_data_full["opp_colors"]
+    btype_map = pop_data_full["btype_map"]
+    behavior_type = pop_data_full["behavior_type"]
 
     fig = go.Figure()
-    if len(X_list) < 2:
+
+    # ── Background trajectory clipped to view ──────────────────────────────────
+    view_mask = (bin_centers >= t_view_start) & (bin_centers <= t_view_end)
+    view_scores = scores[view_mask]
+    view_times = bin_centers[view_mask]
+
+    if len(view_scores) >= 2:
+        fig.add_trace(go.Scatter3d(
+            x=view_scores[:, 0], y=view_scores[:, 1], z=view_scores[:, 2],
+            mode="lines",
+            line=dict(
+                color=view_times, colorscale="Viridis", width=3,
+                showscale=True,
+                colorbar=dict(title="Time (s)", x=1.05, len=0.6),
+            ),
+            opacity=0.4,
+            name="Trajectory",
+            hovertemplate="t=%{customdata:.1f}s<extra></extra>",
+            customdata=view_times,
+        ))
+
+    # ── Event markers for events in the view window ────────────────────────────
+    n_events_shown = 0
+    if len(ev_starts) > 0:
+        ev_mask = (ev_starts >= t_view_start) & (ev_starts <= t_view_end)
+        ev_bin_idx = np.searchsorted(bin_centers, ev_starts[ev_mask]).clip(0, len(bin_centers) - 1)
+        ev_opps_view = ev_opponents[ev_mask]
+        ev_ts_view = ev_starts[ev_mask]
+
+        for opp in np.unique(ev_opps_view):
+            opp_mask = ev_opps_view == opp
+            idx = ev_bin_idx[opp_mask]
+            color = opp_colors.get(opp, "grey")
+            hover = [
+                f"t={ev_ts_view[opp_mask][j]:.1f}s<br>"
+                f"{btype_map.get(behavior_type, behavior_type)} vs {opp}"
+                for j in range(opp_mask.sum())
+            ]
+            fig.add_trace(go.Scatter3d(
+                x=scores[idx, 0], y=scores[idx, 1], z=scores[idx, 2],
+                mode="markers",
+                marker=dict(size=6, color=color, line=dict(width=0.5, color="black")),
+                name=opp,
+                hovertext=hover,
+                hoverinfo="text",
+            ))
+            n_events_shown += opp_mask.sum()
+
+    if len(view_scores) < 2 and n_events_shown == 0:
         fig.add_annotation(
-            text="Not enough events in view for PCA (need ≥2 events per opponent).",
-            xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False, font=dict(size=13),
+            text="No data in current view.",
+            xref="paper", yref="paper", x=0.5, y=0.5,
+            showarrow=False, font=dict(size=13),
         )
-        fig.update_layout(height=380, margin=dict(l=0, r=0, t=30, b=0))
-        return fig
-
-    X = np.vstack(X_list)
-    pca = PCA(n_components=3)
-    X_red = pca.fit_transform(X)
-    var = pca.explained_variance_ratio_ * 100
-
-    idx = 0
-    for i, label in enumerate(valid_labels):
-        sub = subset_data[label]
-        n_sel, n_cells, n_bins = sub.shape
-        n_pts = n_sel * n_bins
-        mean_traj = X_red[idx:idx + n_pts].reshape(n_sel, n_bins, 3).mean(axis=0)
-        color = palette[i % len(palette)]
-        fig.add_trace(go.Scatter3d(
-            x=mean_traj[:, 0], y=mean_traj[:, 1], z=mean_traj[:, 2],
-            mode="lines+markers", name=str(label),
-            line=dict(color=color, width=5), marker=dict(size=3, color=color),
-        ))
-        fig.add_trace(go.Scatter3d(
-            x=[mean_traj[0, 0]], y=[mean_traj[0, 1]], z=[mean_traj[0, 2]],
-            mode="markers", showlegend=False,
-            marker=dict(size=9, color=color, symbol="diamond"),
-        ))
-        idx += n_pts
 
     fig.update_layout(
         scene=dict(
@@ -165,8 +211,13 @@ def _make_pca_plotly(pop_data_full, event_starts_by_label, t_view_start, t_view_
             yaxis_title=f"PC2 ({var[1]:.1f}%)",
             zaxis_title=f"PC3 ({var[2]:.1f}%)",
         ),
-        title=f"Mean population trajectories — {sum(len(v) for v in subset_data.values())} events in view",
-        height=420, legend=dict(x=0.01, y=0.99), margin=dict(l=0, r=0, t=40, b=0),
+        title=(
+            f"PCA trajectory — {n_events_shown} events in view"
+            f"  [{t_view_start:.0f}–{t_view_end:.0f} s]"
+        ),
+        height=460,
+        legend=dict(title="Opponent", x=0.01, y=0.99),
+        margin=dict(l=0, r=0, t=40, b=0),
     )
     return fig
 
@@ -211,12 +262,6 @@ class HabitatApp:
         )
         self.min_events_sl = pn.widgets.IntSlider(
             name="Min events / opponent", value=3, start=1, end=30
-        )
-        self.pca_tw_start = pn.widgets.FloatSlider(
-            name="PCA window start (s)", value=-1.0, start=-10.0, end=0.0, step=0.25
-        )
-        self.pca_tw_end = pn.widgets.FloatSlider(
-            name="PCA window end (s)", value=2.0, start=0.0, end=10.0, step=0.25
         )
         self.pca_bin_sl = pn.widgets.FloatSlider(
             name="PCA bin size (s)", value=0.2, start=0.05, end=1.0, step=0.05
@@ -318,7 +363,6 @@ class HabitatApp:
     def _refresh_behavior(self):
         animal_id = self.animal_sel.value
         btype = _label_to_abbrev(self.btype_sel.value)
-        pca_tw = (self.pca_tw_start.value, self.pca_tw_end.value)
 
         # Preserve current zoom; fall back to full range on first load
         if self._x_range is not None:
@@ -329,7 +373,8 @@ class HabitatApp:
 
         self._full_pop = _build_pop_data(
             self._events, self._ks_data, btype, animal_id,
-            pca_tw, self.pca_bin_sl.value, self.min_events_sl.value,
+            self.pca_bin_sl.value, self.min_events_sl.value,
+            self._t0, self._t1,
         )
 
         # ── Build Bokeh figures ────────────────────────────────────────────────
@@ -455,11 +500,7 @@ class HabitatApp:
             )
             fig.update_layout(height=380, margin=dict(l=0, r=0, t=30, b=0))
             return fig
-        return _make_pca_plotly(
-            self._full_pop["pop_data"],
-            self._full_pop["event_starts"],
-            t_start, t_end,
-        )
+        return _make_pca_plotly(self._full_pop, t_start, t_end)
 
     # ── Periodic callback: update PCA when zoom/pan changes ───────────────────
 
@@ -493,8 +534,6 @@ class HabitatApp:
             self.min_events_sl,
             pn.layout.Divider(),
             "## PCA",
-            self.pca_tw_start,
-            self.pca_tw_end,
             self.pca_bin_sl,
             pn.layout.Divider(),
             "## Rastermap",

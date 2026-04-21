@@ -25,6 +25,11 @@ from video.behavioral_events import BehavioralEventsData
 pn.extension("plotly")
 
 PALETTE = Category10[10]
+
+# ── Per-process data cache (survives theme-toggle page reloads) ────────────────
+
+def _cache_key(cohort: str, session_id: str, animal_id: str) -> str:
+    return f"habitat_data__{cohort}__{session_id}__{animal_id}"
 CONFIG_OPTIONS = {
     "Cohort 7 (default)": None,
     "Cohort 5": "cohort5_paths.json",
@@ -113,11 +118,16 @@ def _build_pop_data(events, ks_data, behavior_type, animal_id, pca_bin, min_even
     except Exception:
         ev_starts = ev_labels = np.array([])
 
-    # Opponent colors: same logic as _make_timeline
-    # all_rats = sorted union of initiators + victims in the filtered events df
+    # Opponent colors: exact same logic as _make_timeline (including min_events filter)
     df = events.events_data
     df_filt = df[(df["type"] == behavior_type) &
-                 ((df["initiator"] == animal_id) | (df["victim"] == animal_id))]
+                 ((df["initiator"] == animal_id) | (df["victim"] == animal_id))].copy()
+    df_filt["opponent"] = df_filt.apply(
+        lambda r: r["victim"] if r["initiator"] == animal_id else r["initiator"], axis=1
+    )
+    opp_counts = df_filt["opponent"].value_counts()
+    valid_opps = opp_counts[opp_counts >= min_events].index
+    df_filt = df_filt[df_filt["opponent"].isin(valid_opps)]
     all_rats = sorted(set(df_filt["initiator"].tolist() + df_filt["victim"].tolist()))
     opp_colors = {r: PALETTE[all_rats.index(r) % 10] for r in all_rats}
 
@@ -206,7 +216,9 @@ def _make_pca_plotly(pop_data_full, t_view_start, t_view_end):
             showarrow=False, font=dict(size=13),
         )
 
+    plotly_template = "plotly_dark" if pn.config.theme == "dark" else "plotly"
     fig.update_layout(
+        template=plotly_template,
         scene=dict(
             xaxis_title=f"PC1 ({var[0]:.1f}%)",
             yaxis_title=f"PC2 ({var[1]:.1f}%)",
@@ -279,6 +291,7 @@ class HabitatApp:
         self.pca_bin_sl.param.watch(self._on_behavior_change, "value")
         self._update_sessions()
         pn.state.add_periodic_callback(self._check_range_update, period=600)
+        self._try_restore_from_cache()
 
     # ── Session / animal dropdowns ─────────────────────────────────────────────
 
@@ -308,6 +321,51 @@ class HabitatApp:
         self.animal_sel.options = animals
         if animals:
             self.animal_sel.value = animals[0]
+
+    # ── Cache restore (theme-toggle page reloads) ──────────────────────────────
+
+    def _try_restore_from_cache(self):
+        state = pn.state.cache.get("habitat_last_state")
+        if state is None:
+            return
+
+        cohort = state["cohort"]
+        session_id = state["session"]
+        animal_id = state["animal"]
+
+        # Restore dropdowns (cohort → sessions → animals cascade automatically via watches)
+        if cohort in self.cohort_sel.options and self.cohort_sel.value != cohort:
+            self.cohort_sel.value = cohort  # triggers _update_sessions
+
+        if session_id in self.session_sel.options:
+            self.session_sel.value = session_id  # triggers _update_animals
+
+        if animal_id in self.animal_sel.options:
+            self.animal_sel.value = animal_id
+
+        # Restore behavior/param widgets (safe: _on_behavior_change returns early if no data)
+        if state.get("btype_label") in BTYPE_LABELS:
+            self.btype_sel.value = state["btype_label"]
+        if state.get("min_events") is not None:
+            self.min_events_sl.value = state["min_events"]
+        if state.get("pca_bin") is not None:
+            self.pca_bin_sl.value = state["pca_bin"]
+        if state.get("raster_bin") is not None:
+            self.raster_bin_sl.value = state["raster_bin"]
+
+        # Restore heavy data objects
+        data = pn.state.cache.get(_cache_key(cohort, session_id, animal_id))
+        if data is None:
+            return
+
+        self._ks_data = data["ks_data"]
+        self._events = data["events"]
+        self._raster_img = data["raster_img"]
+        self._t0 = data["t0"]
+        self._t1 = data["t1"]
+        self._last_x_range = [self._t0, self._t1]
+
+        self._refresh_behavior()
 
     # ── Load: spike data + rastermap only ─────────────────────────────────────
 
@@ -356,6 +414,24 @@ class HabitatApp:
         self._x_range = None
         self._last_x_range = [self._t0, self._t1]
 
+        # Persist loaded data so theme-toggle page reloads don't require a re-load
+        pn.state.cache[_cache_key(self.cohort_sel.value, session_id, animal_id)] = {
+            "ks_data": self._ks_data,
+            "events": self._events,
+            "raster_img": self._raster_img,
+            "t0": self._t0,
+            "t1": self._t1,
+        }
+        pn.state.cache["habitat_last_state"] = {
+            "cohort": self.cohort_sel.value,
+            "session": session_id,
+            "animal": animal_id,
+            "btype_label": self.btype_sel.value,
+            "min_events": self.min_events_sl.value,
+            "pca_bin": self.pca_bin_sl.value,
+            "raster_bin": self.raster_bin_sl.value,
+        }
+
         self._refresh_behavior()
         self._loading = False
 
@@ -380,7 +456,7 @@ class HabitatApp:
 
         # ── Build Bokeh figures ────────────────────────────────────────────────
         # Timeline: owns the Range1d
-        p_tl = self._make_timeline(btype, animal_id, cur_start, cur_end)
+        p_tl = self._make_timeline(btype, animal_id, cur_start, cur_end, self.min_events_sl.value)
         # Rastermap: shares the timeline's x_range (canonical Bokeh linking approach)
         p_rm = self._make_rastermap(p_tl.x_range)
         # Store reference for the periodic PCA-update callback
@@ -400,21 +476,26 @@ class HabitatApp:
 
     # ── Figure builders ────────────────────────────────────────────────────────
 
-    def _make_timeline(self, btype, animal_id, cur_start, cur_end):
+    def _make_timeline(self, btype, animal_id, cur_start, cur_end, min_events):
         df = self._events.events_data.copy()
         df = df[df["type"] == btype]
         df = df[(df["initiator"] == animal_id) | (df["victim"] == animal_id)]
         df = df.dropna(subset=["ts_start_ephys", "initiator", "victim"]).reset_index(drop=True)
+
+        # Count events per opponent; drop opponents below min_events threshold
+        def get_opp(row):
+            return row["victim"] if row["initiator"] == animal_id else row["initiator"]
+        df["opponent"] = df.apply(get_opp, axis=1)
+        opp_counts = df["opponent"].value_counts()
+        valid_opps = opp_counts[opp_counts >= min_events].index
+        df = df[df["opponent"].isin(valid_opps)].reset_index(drop=True)
 
         all_rats = sorted(set(df["initiator"].tolist() + df["victim"].tolist()))
         rat_to_y = {r: i for i, r in enumerate(all_rats)}
         df["y_init"] = df["initiator"].map(rat_to_y).fillna(0).astype(float)
         df["y_vic"] = df["victim"].map(rat_to_y).fillna(0).astype(float)
 
-        def opponent_color(row):
-            opp = row["victim"] if row["initiator"] == animal_id else row["initiator"]
-            return PALETTE[all_rats.index(opp) % 10]
-        df["color"] = df.apply(opponent_color, axis=1)
+        df["color"] = df["opponent"].apply(lambda opp: PALETTE[all_rats.index(opp) % 10])
 
         src = ColumnDataSource(
             df[["ts_start_ephys", "type", "initiator", "victim", "y_init", "y_vic", "color"]]
@@ -517,6 +598,12 @@ class HabitatApp:
     def _on_behavior_change(self, *args):
         if self._ks_data is None or self._events is None:
             return
+        # Keep cached widget state in sync so theme-toggle restores current settings
+        state = pn.state.cache.get("habitat_last_state")
+        if state is not None:
+            state["btype_label"] = self.btype_sel.value
+            state["min_events"] = self.min_events_sl.value
+            state["pca_bin"] = self.pca_bin_sl.value
         self._refresh_behavior()
 
     # ── Layout ─────────────────────────────────────────────────────────────────

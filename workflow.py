@@ -154,15 +154,12 @@ def process_kilosort_data(animal_id: str, session_id: str, config_path: Optional
     try:
         # Get Kilosort path using our path management function
         print(f"Looking for Kilosort data for animal '{animal_id}', session '{session_id}'...")
-        kilosort_path = data_path.get_kilosort_path(animal_id, session_id, config_path)
-        
+        kilosort_paths = data_path.get_kilosort_path(animal_id, session_id, config_path)
+        kilosort_path = kilosort_paths[0]
+
         # Verify the path exists and has required files
-        is_valid, message = data_path.verify_kilosort_path(
-            kilosort_path, check_files=True, return_message=True
-        )
-        
-        if not is_valid:
-            raise FileNotFoundError(f"Kilosort validation failed: {message}")
+        if not data_path.verify_kilosort_path(kilosort_path, check_files=True):
+            raise FileNotFoundError(f"Kilosort validation failed for: {kilosort_path}")
         
         print(f"✓ Found Kilosort data at: {kilosort_path}")
         

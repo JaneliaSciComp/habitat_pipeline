@@ -275,7 +275,7 @@ def load_and_analyze_data(animal_id, session_id, save_plots=False, output_dir=No
     
     # Load data
     try:
-        kilosort_path = get_kilosort_path(animal_id, session_id)
+        kilosort_path = get_kilosort_path(animal_id, session_id)[0]
         ks_data = KilosortData(kilosort_path)
         print(f"Successfully loaded {len(ks_data.ks_ids)} clusters")
     except Exception as e:

@@ -986,7 +986,7 @@ def main():
     
     try:
         # Load ephys data
-        kilosort_path = get_kilosort_path(args.animal_id, args.session_id)
+        kilosort_path = get_kilosort_path(args.animal_id, args.session_id)[0]
         ks_data = KilosortData(kilosort_path)
         print(f"Loaded {len(ks_data.ks_ids)} ephys clusters")
         

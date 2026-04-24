@@ -189,7 +189,7 @@ class KilosortData:
         self,
         bin_size_sec: float = 1.0,
         t_start: Optional[float] = None,
-        t_stop: Optional[float] = None,
+        t_end: Optional[float] = None,
         filtered_only: bool = True,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Bin spike times into a firing-rate matrix (n_cells x n_bins).
@@ -200,8 +200,8 @@ class KilosortData:
             Width of each time bin in seconds.
         t_start : float, optional
             Start time in seconds. Defaults to the earliest spike.
-        t_stop : float, optional
-            Stop time in seconds. Defaults to the latest spike.
+        t_end : float, optional
+            End time in seconds. Defaults to the latest spike.
         filtered_only : bool
             If True (default), use only cells that pass
             ``filter_cells_by_firing_patterns()``.  Runs it with default
@@ -225,12 +225,12 @@ class KilosortData:
             t_start = min(
                 (st[0] for st in spike_times_list if len(st) > 0), default=0.0
             )
-        if t_stop is None:
-            t_stop = max(
+        if t_end is None:
+            t_end = max(
                 (st[-1] for st in spike_times_list if len(st) > 0), default=t_start + 1.0
             )
 
-        bin_edges = np.arange(t_start, t_stop + bin_size_sec, bin_size_sec)
+        bin_edges = np.arange(t_start, t_end + bin_size_sec, bin_size_sec)
         n_bins = len(bin_edges) - 1
         n_cells = len(spike_times_list)
 
@@ -514,12 +514,14 @@ def _select_clusters(cluster_info, ks_labels):
     mask = pd.Series(False, index=ci.index)
     curated_cells = None
 
-    if "KSLabel" in ci.columns:
-        mask = mask | (ci["KSLabel"].astype(str).str.lower() == "good")
     if "group" in ci.columns:
         mask = mask | (ci["group"].astype(str).str.lower() == "good")
         ci2 = ci.loc[mask, ["group"]]
         curated_cells = (ci2["group"].astype(str).str.lower() == "good").to_numpy(dtype=bool)
+
+    elif "KSLabel" in ci.columns:
+        mask = mask | (ci["KSLabel"].astype(str).str.lower() == "good")
+    
 
     return mask.to_numpy(dtype=bool), curated_cells
 

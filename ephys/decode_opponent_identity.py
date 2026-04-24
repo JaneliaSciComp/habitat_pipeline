@@ -15,17 +15,17 @@ The main workflow:
 
 Usage:
     from ephys.decode_opponent_identity import decode_opponent_identity_population
-    from ingestion.kilosort_data_import import KilosortData
+    from ingestion.kilosort_data_import import load_kilosort_data
     from video.behavioral_events import BehavioralEventsData
     from ingestion.data_paths import DataStorageManager
-    
+
     # Method 1: Using DataStorageManager (recommended)
     data_manager = DataStorageManager("631", "20251216", auto_load=True)
-    ks_data = KilosortData(data_manager)
+    ks_data = load_kilosort_data(data_manager)
     behavior_data = BehavioralEventsData(data_manager)
-    
-    # Method 2: Using paths (backward compatibility)
-    ks_data = KilosortData(kilosort_path)
+
+    # Method 2: Using paths
+    ks_data = load_kilosort_data(kilosort_path)
     behavior_data = BehavioralEventsData(data_manager)
     
     # Decode opponent identity
@@ -973,21 +973,22 @@ def main():
     sys.path.append(str(Path(__file__).parent.parent))
     
     try:
-        from ingestion.kilosort_data_import import KilosortData
+        from ingestion.kilosort_data_import import load_kilosort_data
         from ingestion.data_paths import get_kilosort_path
         from video.behavioral_events import BehavioralEventsData
         from ingestion.data_paths import DataStorageManager
     except ImportError as e:
         print(f"Import error: {e}")
         return 1
-    
+
     # Load data
     print(f"Loading data for animal {args.animal_id}, session {args.session_id}")
-    
+
     try:
         # Load ephys data
         kilosort_path = get_kilosort_path(args.animal_id, args.session_id)[0]
-        ks_data = KilosortData(kilosort_path)
+        ks_data = load_kilosort_data(kilosort_path)
+
         print(f"Loaded {len(ks_data.ks_ids)} ephys clusters")
         
         # Load behavioral data

@@ -19,7 +19,7 @@ from ephys.decode_opponent_identity import align_spikes_to_events, extract_firin
 from ephys.rastermap_viz import bin_spikes_matrix
 from ingestion.data_paths import DataStorageManager, get_animals_and_sessions
 from ingestion.ephys_sync import DataSyncManager
-from ingestion.kilosort_data_import import KilosortData
+from ingestion.kilosort_data_import import load_kilosort_data
 from video.behavioral_events import BehavioralEventsData
 
 pn.extension("plotly")
@@ -380,7 +380,7 @@ class HabitatApp:
         self._content[:] = [pn.pane.Alert("Loading spike data…", alert_type="warning")]
         try:
             dsm = DataStorageManager(animal_id, session_id, config_path=cfg, auto_load=True)
-            self._ks_data = KilosortData(dsm)
+            self._ks_data = load_kilosort_data(dsm)
             self._events = BehavioralEventsData(dsm, auto_load=True)
             sync = DataSyncManager(dsm, dio_channel=1, auto_load=True)
             self._events.synchronize_with_ephys(sync, create_new_columns=True)

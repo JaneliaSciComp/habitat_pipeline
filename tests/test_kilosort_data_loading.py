@@ -15,7 +15,7 @@ from pathlib import Path
 import tempfile
 import shutil
 
-from ingestion.kilosort_data_import import KilosortData
+from ingestion.kilosort_data_import import KilosortData, load_kilosort_data
 from tests.conftest import assert_spike_data_valid
 
 
@@ -77,7 +77,7 @@ class TestKilosortDataLoading:
         timestamps.tofile(temp_kilosort_dir / 'test.timestamps.dat')
         
         with pytest.raises(FileNotFoundError, match="Spike times or clusters file not found"):
-            KilosortData(data_input=kilosort_dir)
+            load_kilosort_data(kilosort_dir)
     
     def test_missing_spike_clusters_file(self, temp_kilosort_dir):
         """Test error when spike_clusters.npy is missing."""
@@ -97,7 +97,7 @@ class TestKilosortDataLoading:
         timestamps.tofile(temp_kilosort_dir / 'test.timestamps.dat')
         
         with pytest.raises(FileNotFoundError, match="Spike times or clusters file not found"):
-            KilosortData(data_input=kilosort_dir)
+            load_kilosort_data(kilosort_dir)
     
     def test_nonexistent_data_path(self):
         """Test error for non-existent directory."""
@@ -106,7 +106,7 @@ class TestKilosortDataLoading:
         # The actual implementation will try to locate_KS_folder and set self.KSfolder to None
         # This should cause an error when trying to load spike data
         with pytest.raises((FileNotFoundError, AttributeError)):
-            KilosortData(data_input=fake_path)
+            load_kilosort_data(fake_path)
     
     def test_spike_times_sample_indices(self, complete_kilosort_data):
         """Test that spike times are stored as sample indices (actual implementation behavior)."""
@@ -167,7 +167,7 @@ dat_path = '/path/to/data.dat'
         
         # Create a new KilosortData instance to test params loading
         kilosort_dir = temp_kilosort_dir / 'kilosort4'
-        ks_data = KilosortData(data_input=kilosort_dir)
+        ks_data = load_kilosort_data(kilosort_dir)
         
     def test_repr_string(self, complete_kilosort_data):
         """Test __repr__ method returns informative string."""

@@ -168,7 +168,7 @@ def process_kilosort_data(animal_id: str, session_id: str, config_path: Optional
         if kilosort_data is not None:
             try:
                 print("Loading Kilosort data...")
-                kilosort_data_obj = kilosort_data.KilosortData(kilosort_path)
+                kilosort_data_obj = kilosort_data.load_kilosort_data(kilosort_path)
                 print(f"✓ Loaded Kilosort data: {kilosort_data_obj}")
                 
                 if verbose:

@@ -1,7 +1,7 @@
 import streamlit as st
 
 from ingestion.data_paths import DataStorageManager
-from ingestion.kilosort_data_import import KilosortData
+from ingestion.kilosort_data_import import load_kilosort_data
 from video.behavioral_events import BehavioralEventsData
 from ingestion.ephys_sync import DataSyncManager
 
@@ -13,7 +13,7 @@ def get_data_storage(animal_id: str, session_id: str, config_path):
 
 @st.cache_resource(show_spinner="Loading spike data (may take a minute)...")
 def get_ks_data(animal_id: str, session_id: str, config_path):
-    return KilosortData(get_data_storage(animal_id, session_id, config_path))
+    return load_kilosort_data(get_data_storage(animal_id, session_id, config_path))
 
 
 @st.cache_resource(show_spinner="Loading behavioral events...")

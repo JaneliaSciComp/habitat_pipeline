@@ -10,7 +10,7 @@ import tempfile
 import shutil
 from typing import Dict, Tuple, Any
 
-from ingestion.kilosort_data_import import KilosortData
+from ingestion.kilosort_data_import import KilosortData, load_kilosort_data
 
 
 @pytest.fixture
@@ -221,7 +221,7 @@ def complete_kilosort_data(temp_kilosort_dir) -> Tuple[KilosortData, Dict[str, A
     
     # Pass the kilosort4 directory directly to match expected structure
     kilosort4_dir = temp_kilosort_dir / 'kilosort4'
-    ks_data = KilosortData(data_input=kilosort4_dir)
+    ks_data = load_kilosort_data(kilosort4_dir)
     
     return ks_data, mock_data
 
@@ -237,7 +237,7 @@ def minimal_kilosort_data(temp_kilosort_dir) -> Tuple[KilosortData, Dict[str, An
     
     # Pass the kilosort4 directory directly to match expected structure  
     kilosort4_dir = temp_kilosort_dir / 'kilosort4'
-    ks_data = KilosortData(data_input=kilosort4_dir)
+    ks_data = load_kilosort_data(kilosort4_dir)
     
     return ks_data, mock_data
 
@@ -259,7 +259,7 @@ def cluster_info_kilosort_data(temp_kilosort_dir) -> Tuple[KilosortData, Dict[st
     
     # Pass the kilosort4 directory directly to match expected structure  
     kilosort4_dir = temp_kilosort_dir / 'kilosort4'
-    ks_data = KilosortData(data_input=kilosort4_dir)
+    ks_data = load_kilosort_data(kilosort4_dir)
     
     return ks_data, mock_data
 

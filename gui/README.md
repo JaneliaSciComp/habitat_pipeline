@@ -1,26 +1,40 @@
 # Habitat Pipeline GUI
 
-A Streamlit web app for exploring RatCity electrophysiology and behavioral data. Select a cohort, session, and animal, then browse analyses across four tabs.
+Two complementary web apps for exploring RatCity electrophysiology and behavioral data:
+
+| App | File | Framework | Best for |
+|---|---|---|---|
+| Static explorer | `gui/app.py` | Streamlit | Browsing all analyses across tabs |
+| Interactive explorer | `gui/interactive_app.py` | Panel + Bokeh + Plotly | Linked timeline ↔ Rastermap ↔ PCA |
 
 ## Setup
 
-Install the GUI dependency if you haven't already:
+Install the GUI dependencies if you haven't already:
 
 ```bash
 pip install -e ".[gui]"
+pip install rastermap  # required for the interactive app
 ```
 
 ## Running
 
-Always run from the **project root** (not from inside `gui/`):
+Always run from the **project root** (not from inside `gui/`).
 
+**Static explorer (Streamlit):**
 ```bash
 streamlit run gui/app.py
 ```
+Opens at `http://localhost:8501`.
 
-The app opens in your browser at `http://localhost:8501`.
+**Interactive explorer (Panel):**
+```bash
+panel serve gui/interactive_app.py --show
+```
+Opens at `http://localhost:5006/interactive_app`.
 
-## Usage
+---
+
+## Static Explorer (`gui/app.py`)
 
 ### 1. Select a session
 Use the sidebar to choose:
@@ -89,7 +103,58 @@ Plot views:
 - **PCA Summary** — explained variance + component projections
 - **Normalized Population Matrix** — heatmap of population activity
 
+---
+
+## Interactive Explorer (`gui/interactive_app.py`)
+
+Three vertically-linked panels that update together as you navigate the recording.
+
+### 1. Load a session
+
+Use the **Session** section of the sidebar to pick a cohort, session date, and animal, then press **Load Session**. This loads spike data, fits Rastermap on quality-filtered cells, and synchronises behavioral events to the ephys clock. Loading takes roughly 1–2 minutes; all subsequent interactions are instant.
+
+The loaded data is held in a process-level cache. Toggling the dark/light theme reloads the page but restores the session automatically — no need to press Load Session again.
+
+### 2. Configure behavioral filters
+
+| Parameter | Description |
+|---|---|
+| Behavior type | Event type to display (e.g. EC — Encounter) |
+| Min events / opponent | Opponents with fewer events than this are hidden from the timeline and PCA |
+| PCA bin size (s) | Temporal bin width used to build the firing-rate matrix for PCA |
+| Rastermap bin size (s) | Temporal bin width used to build the Rastermap image |
+
+Changing behavior type or min-events updates the timeline and PCA immediately — no reload required.
+
+### 3. Three linked panels
+
+#### Behavioral event timeline (top)
+Bokeh plot showing all events of the selected type that involve the chosen animal, plotted in ephys time (seconds). Each opponent gets a distinct color.
+
+- **y-axis** — rat ID (initiator = filled dot, victim = hollow dot)
+- **Zoom/pan** — use the horizontal wheel-zoom or x-pan tools; zooming here filters which events appear on the PCA plot below
+- Only opponents meeting the **Min events** threshold are shown
+
+#### Rastermap (middle)
+Firing-rate heatmap of quality-filtered cells sorted by activity similarity (via Rastermap). The x-axis is locked to the same range as the timeline — zooming either panel zooms both simultaneously.
+
+#### PCA trajectory (bottom, Plotly 3D)
+Full-session population trajectory in the top-3 PCA components, computed on raw z-scored firing rates of quality cells.
+
+- **Background line** — entire session trajectory colored by time (Viridis colorscale), shown at low opacity
+- **Colored dots** — events within the current timeline view window, one color per opponent (matching the timeline)
+- **Updates automatically** every ~600 ms when the timeline zoom/pan changes
+
+The PCA space is fixed (fit once on the full recording); panning the timeline just filters which event dots are visible — the axes never shift.
+
+### 4. Theme
+Use the theme toggle (top-right) to switch between light and dark mode. The Plotly PCA panel adapts its background automatically.
+
+---
+
 ## Caching
+
+### Static explorer
 
 | Data | How it's cached |
 |---|---|
@@ -99,3 +164,11 @@ Plot views:
 | Population geometry results | Disk pickle in `.gui_cache/` |
 
 The `.gui_cache/` directory is created automatically and is excluded from git. To force a recompute, delete the relevant `.pkl` file from `.gui_cache/` and press Run again.
+
+### Interactive explorer
+
+| Data | How it's cached |
+|---|---|
+| Spike data, Rastermap image, behavioral events | `pn.state.cache` (process-level, in memory) |
+
+The process-level cache survives page reloads (e.g. theme toggle) but is cleared when the Panel server process is restarted. To force a fresh load, restart the server and press **Load Session** again.

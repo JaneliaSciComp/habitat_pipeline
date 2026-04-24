@@ -16,69 +16,6 @@ if TYPE_CHECKING:
     from video.behavioral_events import BehavioralEventsData
 
 
-def bin_spikes_matrix(ks_data: "KilosortData",
-                      bin_size: float = 0.5,
-                      start_time: Optional[float] = None,
-                      end_time: Optional[float] = None,
-                      filtered_only: bool = True) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Convert per-cell spike times into a neurons × time-bins firing-rate matrix.
-
-    Parameters
-    ----------
-    ks_data : KilosortData
-        Must have ``spike_times_by_cell`` populated.
-    bin_size : float
-        Bin width in seconds (default 500 ms).
-    start_time : float, optional
-        Start of the time range.  Defaults to the earliest spike.
-    end_time : float, optional
-        End of the time range.  Defaults to the latest spike.
-    filtered_only : bool
-        If True, include only cells that passed
-        ``filter_cells_by_firing_patterns()``.  If ``filter_results``
-        is not yet populated, runs it with default parameters
-        automatically.
-
-    Returns
-    -------
-    spks : np.ndarray, shape (n_cells, n_bins)
-        Firing-rate matrix (spikes / s).
-    bin_centers : np.ndarray, shape (n_bins,)
-        Time of each bin center in seconds.
-    """
-    spike_times_list = ks_data.spike_times_by_cell
-
-    if filtered_only:
-        if not hasattr(ks_data, 'filter_results') or ks_data.filter_results is None:
-            ks_data.filter_cells_by_firing_patterns()
-        passed_ids = set(ks_data.filter_results['passed_clusters'])
-        mask = [i for i, cid in enumerate(ks_data.ks_ids) if cid in passed_ids]
-        spike_times_list = [spike_times_list[i] for i in mask]
-
-    if start_time is None:
-        start_time = min(
-            (st[0] for st in spike_times_list if len(st) > 0), default=0.0
-        )
-    if end_time is None:
-        end_time = max(
-            (st[-1] for st in spike_times_list if len(st) > 0), default=1.0
-        )
-
-    bin_edges = np.arange(start_time, end_time + bin_size, bin_size)
-    n_bins = len(bin_edges) - 1
-    n_cells = len(spike_times_list)
-
-    spks = np.zeros((n_cells, n_bins), dtype=np.float32)
-    for i, st in enumerate(spike_times_list):
-        if len(st) > 0:
-            counts, _ = np.histogram(st, bins=bin_edges)
-            spks[i] = counts / bin_size  # convert to Hz
-
-    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-    return spks, bin_centers
-
-
 def run_rastermap(spks: np.ndarray,
                   n_PCs: int = 200,
                   n_clusters: int = 100,
@@ -166,7 +103,9 @@ def plot_rastermap(ks_data: "KilosortData",
         The fitted model (for further inspection / re-use).
     """
     # 1. Bin spikes
-    spks, bin_centers = bin_spikes_matrix(ks_data, bin_size, start_time, end_time)
+    spks, bin_centers = ks_data.bin_spike_times(
+        bin_size_sec=bin_size, t_start=start_time, t_end=end_time
+    )
 
     # 2. Fit rastermap
     model = run_rastermap(
@@ -260,7 +199,9 @@ def plot_rastermap_interactive(ks_data: "KilosortData",
     import plotly.graph_objects as go
 
     # 1. Bin spikes
-    spks, bin_centers = bin_spikes_matrix(ks_data, bin_size, start_time, end_time)
+    spks, bin_centers = ks_data.bin_spike_times(
+        bin_size_sec=bin_size, t_start=start_time, t_end=end_time
+    )
 
     # 2. Fit rastermap
     model = run_rastermap(

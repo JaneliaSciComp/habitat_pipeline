@@ -932,12 +932,12 @@ def plot_pca_trajectory_with_events(
     """
     import plotly.graph_objects as go
     import plotly.express as px
-    from ephys.rastermap_viz import bin_spikes_matrix
 
     # --- 1. Build firing-rate matrix (n_cells × n_bins) ---
-    spks, bin_centers = bin_spikes_matrix(
-        ks_data, bin_size=bin_size,
-        start_time=start_time, end_time=end_time,
+    spks, bin_centers = ks_data.bin_spike_times(
+        bin_size_sec=bin_size,
+        t_start=start_time,
+        t_end=end_time,
         filtered_only=filtered_only,
     )
     n_cells, n_bins = spks.shape

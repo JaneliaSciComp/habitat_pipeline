@@ -175,6 +175,74 @@ class KilosortData:
         }
         return self.filter_results
 
+    def get_filtered_cells_spike_times(self, **filter_kwargs) -> List[np.ndarray]:
+        """Return spike times (seconds) for clusters that pass filter_cells_by_firing_patterns."""
+        results = self.filter_cells_by_firing_patterns(**filter_kwargs)
+        passed = set(results['passed_clusters'])
+        return [
+            self.spike_times_by_cell[i]
+            for i, cid in enumerate(self.ks_ids)
+            if cid in passed
+        ]
+
+    def bin_spike_times(
+        self,
+        bin_size_sec: float = 1.0,
+        t_start: Optional[float] = None,
+        t_stop: Optional[float] = None,
+        filtered_only: bool = True,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Bin spike times into a firing-rate matrix (n_cells x n_bins).
+
+        Parameters
+        ----------
+        bin_size_sec : float
+            Width of each time bin in seconds.
+        t_start : float, optional
+            Start time in seconds. Defaults to the earliest spike.
+        t_stop : float, optional
+            Stop time in seconds. Defaults to the latest spike.
+        filtered_only : bool
+            If True (default), use only cells that pass
+            ``filter_cells_by_firing_patterns()``.  Runs it with default
+            parameters if ``filter_results`` is not yet populated.
+
+        Returns
+        -------
+        matrix : np.ndarray, shape (n_cells, n_bins)
+            Firing-rate matrix in Hz (spike count / bin_size_sec).
+        bin_centers : np.ndarray, shape (n_bins,)
+            Time of each bin centre in seconds.
+        """
+        if filtered_only:
+            if self.filter_results is None:
+                self.filter_cells_by_firing_patterns()
+            spike_times_list = self.get_filtered_cells_spike_times()
+        else:
+            spike_times_list = self.spike_times_by_cell
+
+        if t_start is None:
+            t_start = min(
+                (st[0] for st in spike_times_list if len(st) > 0), default=0.0
+            )
+        if t_stop is None:
+            t_stop = max(
+                (st[-1] for st in spike_times_list if len(st) > 0), default=t_start + 1.0
+            )
+
+        bin_edges = np.arange(t_start, t_stop + bin_size_sec, bin_size_sec)
+        n_bins = len(bin_edges) - 1
+        n_cells = len(spike_times_list)
+
+        matrix = np.zeros((n_cells, n_bins), dtype=np.float64)
+        for i, st in enumerate(spike_times_list):
+            if len(st) > 0:
+                counts, _ = np.histogram(st, bins=bin_edges)
+                matrix[i] = counts / bin_size_sec
+
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+        return matrix, bin_centers
+
     def print_firing_pattern_summary(self, filter_results: Optional[Dict] = None, **filter_kwargs):
         """Print a human-readable summary of quality metrics."""
         if filter_results is None:

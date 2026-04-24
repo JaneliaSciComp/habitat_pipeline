@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
-from ingestion.kilosort_data_import import KilosortData
+from ingestion.kilosort_data_import import KilosortData, load_kilosort_data, save_kilosort_data, load_kilosort_from_file
 from tests.conftest import create_mock_kilosort_files
 
 
@@ -33,7 +33,7 @@ class TestEdgeCases:
         # This will likely cause an error in actual implementation
         # but we test that it handles it reasonably
         try:
-            ks_data = KilosortData(data_input=kilosort_dir)  # Use kilosort4 dir
+            ks_data = load_kilosort_data(kilosort_dir)  # Use kilosort4 dir
             # If it loads, verify it handles empty data
             assert len(ks_data.spike_times) == 0
             assert len(ks_data.spike_clusters) == 0
@@ -56,7 +56,7 @@ class TestEdgeCases:
         ks_labels = pd.DataFrame({'cluster_id': [0], 'KSLabel': ['good']})
         ks_labels.to_csv(kilosort_dir / 'cluster_KSLabel.tsv', sep='\t', index=False)
         
-        ks_data = KilosortData(data_input=kilosort_dir)
+        ks_data = load_kilosort_data(kilosort_dir)
         
         # Verify single spike handling
         assert len(ks_data.spike_times) == 1
@@ -85,7 +85,7 @@ class TestEdgeCases:
         ks_labels = pd.DataFrame({'cluster_id': [0], 'KSLabel': ['good']})
         ks_labels.to_csv(kilosort_dir / 'cluster_KSLabel.tsv', sep='\t', index=False)
         
-        ks_data = KilosortData(data_input=kilosort_dir)
+        ks_data = load_kilosort_data(kilosort_dir)
         
         # Should handle high firing rates
         firing_rates = ks_data.get_firing_rates()
@@ -125,7 +125,7 @@ class TestEdgeCases:
         })
         ks_labels.to_csv(kilosort_dir / 'cluster_KSLabel.tsv', sep='\t', index=False)
         
-        ks_data = KilosortData(data_input=kilosort_dir)
+        ks_data = load_kilosort_data(kilosort_dir)
         
         # Should handle sparse data
         assert len(ks_data.ks_ids) >= 10  # Should have many clusters
@@ -149,7 +149,7 @@ class TestRealisticDataWorkflows:
         
         # Load data
         kilosort_dir = temp_kilosort_dir / 'kilosort4'
-        ks_data = KilosortData(data_input=kilosort_dir)
+        ks_data = load_kilosort_data(kilosort_dir)
         
         # Test analysis pipeline using actual methods
         # 1. Get firing rates
@@ -177,18 +177,16 @@ class TestRealisticDataWorkflows:
         
         print(f"✅ Complete analysis pipeline successful!")
     
-    def test_save_load_workflow(self, complete_kilosort_data):
+    def test_save_load_workflow(self, complete_kilosort_data, temp_kilosort_dir):
         """Test save and load workflow."""
         ks_data, _ = complete_kilosort_data
-        
-        # Test save functionality
-        save_path = ks_data.save_to_file("test_workflow.pkl")
+        ks_folder = temp_kilosort_dir / 'kilosort4'
+
+        save_path = save_kilosort_data(ks_data, ks_folder, filename="test_workflow.pkl")
         assert Path(save_path).exists()
-        
-        # Test load functionality
-        loaded_data = KilosortData.load_from_file(save_path)
-        
-        # Verify key attributes preserved
+
+        loaded_data = load_kilosort_from_file(save_path)
+
         assert loaded_data.animal_id == ks_data.animal_id
         assert loaded_data.session_id == ks_data.session_id
         assert len(loaded_data.ks_ids) == len(ks_data.ks_ids)
@@ -206,7 +204,7 @@ class TestRealisticDataWorkflows:
             create_mock_kilosort_files(session_dir, include_optional=True, include_cluster_info=True)
             
             kilosort_dir = session_dir / 'kilosort4'
-            ks_data = KilosortData(data_input=kilosort_dir)
+            ks_data = load_kilosort_data(kilosort_dir)
             sessions.append(ks_data)
         
         # Compare firing rates across sessions
@@ -253,7 +251,7 @@ class TestRealisticDataWorkflows:
         print(f"Created large dataset with {len(spike_times)} spikes, {n_clusters} clusters")
         
         # Load and test
-        ks_data = KilosortData(data_input=kilosort_dir)
+        ks_data = load_kilosort_data(kilosort_dir)
         
         # Test that basic operations work with larger data
         firing_rates = ks_data.get_firing_rates()
@@ -284,7 +282,7 @@ class TestDataValidation:
         
         # The actual implementation should handle this gracefully or error appropriately
         try:
-            ks_data = KilosortData(data_input=kilosort_dir)
+            ks_data = load_kilosort_data(kilosort_dir)
             # If it loads, check that the lengths are handled somehow
             assert hasattr(ks_data, 'spike_times')
             assert hasattr(ks_data, 'spike_clusters')
@@ -310,7 +308,7 @@ class TestDataValidation:
         ks_labels.to_csv(kilosort_dir / 'cluster_KSLabel.tsv', sep='\t', index=False)
         
         try:
-            ks_data = KilosortData(data_input=kilosort_dir)
+            ks_data = load_kilosort_data(kilosort_dir)
             # If it loads, verify basic functionality
             assert len(ks_data.ks_ids) >= 1
             firing_rates = ks_data.get_firing_rates() 
@@ -337,7 +335,7 @@ class TestDataValidation:
         ks_labels.to_csv(kilosort_dir / 'cluster_KSLabel.tsv', sep='\t', index=False)
         
         try:
-            ks_data = KilosortData(data_input=kilosort_dir)
+            ks_data = load_kilosort_data(kilosort_dir)
             # If it loads, verify basic functionality
             assert len(ks_data.ks_ids) >= 1
             # Note: actual implementation may or may not sort internally
@@ -351,7 +349,7 @@ class TestDataValidation:
         create_mock_kilosort_files(temp_kilosort_dir, include_optional=True, include_cluster_info=True)
         
         kilosort_dir = temp_kilosort_dir / 'kilosort4'
-        ks_data = KilosortData(data_input=kilosort_dir)
+        ks_data = load_kilosort_data(kilosort_dir)
         
         # Test that we can access basic cluster properties
         assert len(ks_data.ks_ids) > 0

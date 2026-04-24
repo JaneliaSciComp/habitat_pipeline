@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
-from ingestion.kilosort_data_import import KilosortData
+from ingestion.kilosort_data_import import KilosortData, save_kilosort_data, load_kilosort_from_file
 
 
 class TestFiringRateCalculations:
@@ -157,30 +157,28 @@ class TestSaveLoad:
     """Test save and load functionality."""
     
     def test_save_and_load_full(self, complete_kilosort_data, temp_kilosort_dir):
-        """Test saving and loading complete object.""" 
+        """Test saving and loading complete object."""
         ks_data, _ = complete_kilosort_data
-        
-        # Save the object
-        save_path = ks_data.save_to_file("test_save.pkl")
-        
+        ks_folder = temp_kilosort_dir / 'kilosort4'
+
+        save_path = save_kilosort_data(ks_data, ks_folder, filename="test_save.pkl")
+
         assert Path(save_path).exists()
-        
-        # Load the object back
-        loaded_ks_data = KilosortData.load_from_file(save_path)
-        
+
+        loaded_ks_data = load_kilosort_from_file(save_path)
+
         assert loaded_ks_data.animal_id == ks_data.animal_id
         assert loaded_ks_data.session_id == ks_data.session_id
         assert len(loaded_ks_data.ks_ids) == len(ks_data.ks_ids)
-    
-    def test_save_processed_only(self, complete_kilosort_data):
+
+    def test_save_processed_only(self, complete_kilosort_data, temp_kilosort_dir):
         """Test saving processed data only."""
         ks_data, _ = complete_kilosort_data
-        
-        # Save processed data only
-        save_path = ks_data.save_to_file("test_processed.pkl", exclude_large_arrays=True)
-        
+        ks_folder = temp_kilosort_dir / 'kilosort4'
+
+        save_path = save_kilosort_data(ks_data, ks_folder, filename="test_processed.pkl", exclude_large_arrays=True)
+
         assert Path(save_path).exists()
-        
-        # Verify file is smaller (processed only)
+
         stats = Path(save_path).stat()
         assert stats.st_size > 0

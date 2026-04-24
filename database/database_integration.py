@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from .database_core import HabitatDatabase, ExperimentSession, DataFile
-from ingestion.kilosort_data_import import KilosortData
+from ingestion.kilosort_data_import import load_kilosort_data
 from video.tracking_import import load_tracking_data, parse_tracking
 
 
@@ -31,7 +31,7 @@ class PipelineIntegration:
             self.db.add_data_file(session_id, 'ephys', kilosort_path)
             
             # Load and validate data
-            ks_data = KilosortData(kilosort_path)
+            ks_data = load_kilosort_data(kilosort_path)
             
             # Update session with metadata
             with self.db.get_db_session() as session:
@@ -104,7 +104,7 @@ class PipelineIntegration:
         if 'ephys' in data_files:
             ephys_file = data_files['ephys'][0]  # Take first file
             try:
-                session_data['ephys'] = KilosortData(ephys_file.file_path)
+                session_data['ephys'] = load_kilosort_data(ephys_file.file_path)
             except Exception as e:
                 print(f"Error loading ephys data: {e}")
                 session_data['ephys'] = None

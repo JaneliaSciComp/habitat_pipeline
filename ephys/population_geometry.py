@@ -125,22 +125,11 @@ class PopulationGeometryAnalyzer:
         
         # Handle quality cell filtering
         if use_quality_cells:
-            # Check if filter results already exist
-            if hasattr(self.ks_data, 'filter_results') and self.ks_data.filter_results is not None:
-                filter_results = self.ks_data.filter_results
-            else:
-                filter_results = self.ks_data.filter_cells_by_firing_patterns()
-            
-            # Get indices of quality cells
-            selected_cell_indices = [i for i, cluster_id in enumerate(self.ks_data.ks_ids) 
-                                   if cluster_id in filter_results['passed_clusters']]
-            selected_cluster_ids = filter_results['passed_clusters']
+            spike_times_list = self.ks_data.get_filtered_cells_spike_times()
         else:
-            # Use all cells
-            selected_cell_indices = list(range(len(self.ks_data.ks_ids)))
-            selected_cluster_ids = self.ks_data.ks_ids
-        
-        if len(selected_cluster_ids) == 0:
+            spike_times_list = self.ks_data.spike_times_by_cell
+
+        if len(spike_times_list) == 0:
             raise ValueError("No cells selected for analysis (all cells failed quality criteria)")
         
         # Create time bins
@@ -151,7 +140,7 @@ class PopulationGeometryAnalyzer:
         # Get unique conditions
         unique_labels = np.unique(event_labels)
         n_conditions = len(unique_labels)
-        n_cells = len(selected_cluster_ids)
+        n_cells = len(spike_times_list)
         
         # Initialize population matrices
         # Shape: [conditions, events_per_condition, cells, time_bins]
@@ -170,8 +159,7 @@ class PopulationGeometryAnalyzer:
             
             # Fill matrix for each event and cell
             for event_idx, align_time in enumerate(label_align_times):
-                for matrix_cell_idx, (selected_idx, cell_id) in enumerate(zip(selected_cell_indices, selected_cluster_ids)):
-                    spike_times = self.ks_data.spike_times_by_cell[selected_idx]
+                for matrix_cell_idx, spike_times in enumerate(spike_times_list):
                     
                     # Get spikes in window
                     window_start = align_time + time_window[0]

@@ -947,7 +947,7 @@ def plot_pca_trajectory_with_events(
         animal_of_interest = f"rat{animal_of_interest}"
 
     if behavior_types is None:
-        behavior_types = behavior_data.get_available_event_types(return_format='abbreviations')
+        behavior_types = behavior_data.get_available_event_types()
 
     all_event_starts = []
     all_event_ends = []

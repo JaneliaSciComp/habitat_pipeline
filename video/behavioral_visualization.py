@@ -148,7 +148,7 @@ def plot_rat_behavior_heatmap(events: "BehavioralEventsData",
         return
 
     # Get all behavior types and other rats
-    behavior_types = events.get_available_event_types('abbreviations')
+    behavior_types = events.get_available_event_types()
     other_rats = [r for r in events.get_available_rats() if r != rat_id]
 
     if len(behavior_types) == 0 or len(other_rats) == 0:

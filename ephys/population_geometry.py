@@ -1204,7 +1204,7 @@ if __name__ == "__main__":
     try:
         from ingestion.data_paths import DataStorageManager
         from ingestion.kilosort_data_import import load_kilosort_data
-        from video.behavioral_events import BehavioralEventsData
+        from video.behavioral_events import load_behavioral_events
         from ingestion.ephys_sync import DataSyncManager
     except ImportError as e:
         print(f"Error importing required modules: {e}")
@@ -1231,7 +1231,10 @@ if __name__ == "__main__":
     # Load data
     data_storage = DataStorageManager(args.animal_id, args.session_id, auto_load=True)
     ks_data = load_kilosort_data(data_storage)
-    behavior_data = BehavioralEventsData(data_storage)
+    behavior_data = load_behavioral_events(
+        data_storage.get_behavioral_event_files(),
+        session_id=data_storage.session_id,
+    )
     
     # Synchronize behavioral data with ephys
     sync_manager = DataSyncManager(data_storage, dio_channel=1)

@@ -16,17 +16,20 @@ The main workflow:
 Usage:
     from ephys.decode_opponent_identity import decode_opponent_identity_population
     from ingestion.kilosort_data_import import load_kilosort_data
-    from video.behavioral_events import BehavioralEventsData
+    from video.behavioral_events import load_behavioral_events
     from ingestion.data_paths import DataStorageManager
 
     # Method 1: Using DataStorageManager (recommended)
     data_manager = DataStorageManager("631", "20251216", auto_load=True)
     ks_data = load_kilosort_data(data_manager)
-    behavior_data = BehavioralEventsData(data_manager)
+    behavior_data = load_behavioral_events(
+        data_manager.get_behavioral_event_files(),
+        session_id=data_manager.session_id,
+    )
 
     # Method 2: Using paths
     ks_data = load_kilosort_data(kilosort_path)
-    behavior_data = BehavioralEventsData(data_manager)
+    behavior_data = load_behavioral_events(event_csv_paths, session_id="20251216")
     
     # Decode opponent identity
     results = decode_opponent_identity_population(
@@ -975,7 +978,7 @@ def main():
     try:
         from ingestion.kilosort_data_import import load_kilosort_data
         from ingestion.data_paths import get_kilosort_path
-        from video.behavioral_events import BehavioralEventsData
+        from video.behavioral_events import load_behavioral_events
         from ingestion.data_paths import DataStorageManager
     except ImportError as e:
         print(f"Import error: {e}")
@@ -993,8 +996,11 @@ def main():
         
         # Load behavioral data
         data_manager = DataStorageManager(args.animal_id, args.session_id)
-        behavior_data = BehavioralEventsData(data_manager)
-        print(f"Loaded {len(behavior_data.events_df)} behavioral events")
+        behavior_data = load_behavioral_events(
+            data_manager.get_behavioral_event_files(),
+            session_id=data_manager.session_id,
+        )
+        print(f"Loaded {len(behavior_data.events_data)} behavioral events")
         
     except Exception as e:
         print(f"Error loading data: {e}")

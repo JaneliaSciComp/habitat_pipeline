@@ -20,7 +20,7 @@ from ephys.rastermap_viz import bin_spikes_matrix
 from ingestion.data_paths import DataStorageManager, get_animals_and_sessions
 from ingestion.ephys_sync import DataSyncManager
 from ingestion.kilosort_data_import import load_kilosort_data
-from video.behavioral_events import BehavioralEventsData
+from video.behavioral_events import BehavioralEventsData, load_behavioral_events
 
 pn.extension("plotly")
 
@@ -381,7 +381,10 @@ class HabitatApp:
         try:
             dsm = DataStorageManager(animal_id, session_id, config_path=cfg, auto_load=True)
             self._ks_data = load_kilosort_data(dsm)
-            self._events = BehavioralEventsData(dsm, auto_load=True)
+            self._events = load_behavioral_events(
+                dsm.get_behavioral_event_files(),
+                session_id=dsm.session_id,
+            )
             sync = DataSyncManager(dsm, dio_channel=1, auto_load=True)
             self._events.synchronize_with_ephys(sync, create_new_columns=True)
         except Exception as e:

@@ -1,29 +1,39 @@
 """
 Behavioral Events Import and Processing Module
 
-Loads behavioral event CSV files discovered through DataStorageManager and
-provides filtering, opponent-label extraction, and ephys-time synchronization.
+Provides BehavioralEventsData (a dataclass holding behavioral event records) and
+load_behavioral_events() to load it from CSV file(s) on disk.
 """
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar, Dict, List, Optional, Tuple
+from typing import ClassVar, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
 
-from ingestion.data_paths import DataStorageManager
 from ingestion.ephys_sync import DataSyncManager
 
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# BehavioralEventsData dataclass
+# ---------------------------------------------------------------------------
 
 @dataclass
 class BehavioralEventsData:
     """
-    Behavioral events for one session.
+    Pure data container for behavioral event records.
+
+    All I/O is handled by the standalone ``load_behavioral_events()`` function.
+    This class only stores data and provides analysis methods that operate on
+    the in-memory ``events_data`` DataFrame.
 
     Expected CSV columns: type, initiator, victim, ts_start, ts_end
     (winner/loser optional). Timestamps are Linux nanoseconds; after
-    `synchronize_with_ephys` ts_*_ephys columns are added in seconds.
+    ``synchronize_with_ephys`` ts_*_ephys columns are added in seconds.
     """
 
     BEHAVIOR_TYPES: ClassVar[Dict[str, str]] = {
@@ -48,62 +58,15 @@ class BehavioralEventsData:
         'PS': 'push',
     }
 
-    data_manager: DataStorageManager
-    auto_load: bool = True
+    session_id: str
+    events_data: pd.DataFrame
+    event_files: List[Path] = field(default_factory=list)
+    synchronized: bool = False
 
-    event_files: List[Path] = field(default_factory=list, init=False)
-    events_data: Optional[pd.DataFrame] = field(default=None, init=False)
-    synchronized: bool = field(default=False, init=False)
-
-    def __post_init__(self):
-        if not isinstance(self.data_manager, DataStorageManager):
-            raise TypeError("data_manager must be a DataStorageManager instance")
-
-        self.event_files = self.data_manager.get_behavioral_event_files()
-
-        if self.auto_load and self.event_files:
-            self.load_events()
-
-    def load_events(self) -> bool:
-        """Load all discovered CSVs into a single DataFrame."""
-        if not self.event_files:
-            print("No behavioral event files found for this session")
-            return False
-
-        frames = []
-        for idx, file_path in enumerate(self.event_files):
-            try:
-                df = pd.read_csv(file_path)
-            except Exception as e:
-                print(f"  ✗ Error loading {file_path.name}: {e}")
-                continue
-
-            expected = ['type', 'initiator', 'victim', 'ts_start', 'ts_end']
-            missing = [c for c in expected if c not in df.columns]
-            if missing:
-                print(f"  ⚠ Warning: Missing columns in {file_path.name}: {missing}")
-
-            if 'type' in df.columns:
-                df['behavior_full_name'] = df['type'].map(self.BEHAVIOR_TYPES).fillna(df['type'])
-            df['source_file'] = file_path.name
-            df['file_index'] = idx
-            frames.append(df)
-
-        if not frames:
-            print("Failed to load any event files")
-            return False
-
-        self.events_data = pd.concat(frames, ignore_index=True)
-        print(f"Successfully loaded {len(frames)} file(s) with {len(self.events_data)} total events")
-        if 'type' in self.events_data.columns:
-            print(f"✓ Available behavior types: {dict(self.events_data['type'].value_counts())}")
-        return True
+    # --- analysis methods (pure computation, no I/O) -----------------------
 
     def get_events_by_type(self, event_type: str) -> Optional[pd.DataFrame]:
-        """Return events whose `type` column equals the given abbreviation."""
-        if self.events_data is None:
-            print("No events data loaded. Call load_events() first.")
-            return None
+        """Return events whose ``type`` column equals the given abbreviation."""
         if 'type' not in self.events_data.columns:
             print("No 'type' column found in behavioral events data")
             return None
@@ -116,10 +79,6 @@ class BehavioralEventsData:
 
     def get_events_by_rat(self, rat_id: str, role: str = 'any') -> Optional[pd.DataFrame]:
         """Return events involving a specific rat in any or a given role."""
-        if self.events_data is None:
-            print("No events data loaded. Call load_events() first.")
-            return None
-
         if not rat_id.startswith('rat'):
             rat_id = f"rat{rat_id}"
 
@@ -148,7 +107,7 @@ class BehavioralEventsData:
         return filtered
 
     def get_behavior_type_mapping(self) -> Dict[str, str]:
-        """Return abbreviation → full-name mapping (copy)."""
+        """Return abbreviation -> full-name mapping (copy)."""
         return self.BEHAVIOR_TYPES.copy()
 
     def decode_behavior_type(self, abbreviation: str) -> str:
@@ -157,14 +116,12 @@ class BehavioralEventsData:
 
     def get_available_event_types(self) -> List[str]:
         """Sorted list of behavior abbreviations present in the data."""
-        if self.events_data is None or 'type' not in self.events_data.columns:
+        if 'type' not in self.events_data.columns:
             return []
         return sorted(self.events_data['type'].dropna().unique().tolist())
 
     def get_available_rats(self) -> List[str]:
         """Sorted list of rat identifiers seen in any role column."""
-        if self.events_data is None:
-            return []
         rat_columns = ['initiator', 'victim', 'winner', 'loser']
         ids = set()
         for col in rat_columns:
@@ -180,13 +137,10 @@ class BehavioralEventsData:
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Extract (start_times, end_times, opponent_labels) for events involving
-        `animal_of_interest`, using ephys-synchronized timestamps.
+        ``animal_of_interest``, using ephys-synchronized timestamps.
 
-        Requires `synchronize_with_ephys` to have been called (ts_*_ephys columns).
+        Requires ``synchronize_with_ephys`` to have been called (ts_*_ephys columns).
         """
-        if self.events_data is None:
-            raise ValueError("No events data loaded. Call load_events() first.")
-
         df = self.events_data
         if behavior_type is not None:
             df = df[df['type'] == behavior_type]
@@ -240,9 +194,6 @@ class BehavioralEventsData:
         With create_new_columns=True (default) writes ts_start_ephys /
         ts_end_ephys; otherwise overwrites the originals.
         """
-        if self.events_data is None:
-            print("No events data loaded. Call load_events() first.")
-            return False
         if 'ts_start' not in self.events_data.columns:
             print("No 'ts_start' column found in behavioral events data")
             return False
@@ -275,7 +226,86 @@ class BehavioralEventsData:
         self.events_data.loc[valid_mask, target] = ephys_times
 
     def __repr__(self) -> str:
-        loc = f"{self.data_manager.animal_id}/{self.data_manager.session_id}"
-        if self.events_data is None:
-            return f"BehavioralEventsData({loc}, not loaded)"
-        return f"BehavioralEventsData({loc}, {len(self.events_data)} events)"
+        return (
+            f"BehavioralEventsData(session={self.session_id}, "
+            f"n_events={len(self.events_data)})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Loader
+# ---------------------------------------------------------------------------
+
+def _resolve_event_files(files: Union[str, Path, List[Union[str, Path]]]) -> List[Path]:
+    """Resolve the input into a sorted list of CSV file paths."""
+    if isinstance(files, (str, Path)):
+        p = Path(files)
+        if p.is_dir():
+            return sorted(p.glob("*.csv"))
+        return [p]
+    return [Path(f) for f in files]
+
+
+def load_behavioral_events(
+    files: Union[str, Path, List[Union[str, Path]]],
+    session_id: str = "unknown_session",
+) -> BehavioralEventsData:
+    """Load behavioral events from CSV file(s).
+
+    Behavioral events involve multiple animals (initiator/victim/winner/loser),
+    so the returned object is keyed by session, not by a single animal.
+
+    Parameters
+    ----------
+    files : str, Path, or list of paths
+        A single CSV path, a directory containing CSVs, or a list of CSV paths.
+    session_id : str
+        Session identifier (stored on the returned object).
+
+    Returns
+    -------
+    BehavioralEventsData
+    """
+    file_list = _resolve_event_files(files)
+    if not file_list:
+        raise FileNotFoundError(f"No behavioral event CSV files found at {files}")
+
+    expected = ['type', 'initiator', 'victim', 'ts_start', 'ts_end']
+    frames = []
+    loaded: List[Path] = []
+    for idx, fp in enumerate(file_list):
+        try:
+            df = pd.read_csv(fp)
+        except Exception as e:
+            logger.warning("Error loading %s: %s", fp.name, e)
+            continue
+
+        missing = [c for c in expected if c not in df.columns]
+        if missing:
+            logger.warning("Missing columns in %s: %s", fp.name, missing)
+
+        if 'type' in df.columns:
+            df['behavior_full_name'] = (
+                df['type'].map(BehavioralEventsData.BEHAVIOR_TYPES).fillna(df['type'])
+            )
+        df['source_file'] = fp.name
+        df['file_index'] = idx
+        frames.append(df)
+        loaded.append(fp)
+
+    if not frames:
+        raise ValueError(f"Failed to load any of the {len(file_list)} event file(s)")
+
+    events_data = pd.concat(frames, ignore_index=True)
+    logger.info(
+        "Loaded %d file(s) with %d total events (session=%s)",
+        len(loaded), len(events_data), session_id,
+    )
+    if 'type' in events_data.columns:
+        logger.info("Available behavior types: %s", dict(events_data['type'].value_counts()))
+
+    return BehavioralEventsData(
+        session_id=session_id,
+        events_data=events_data,
+        event_files=loaded,
+    )

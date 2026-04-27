@@ -107,7 +107,7 @@ def plot_rat_interaction_heatmap(events: "BehavioralEventsData",
                 cbar_kws={'label': 'Number of Events'},
                 square=True)
 
-    plt.title(f'Rat Interaction Matrix{title_suffix}\nSession: {events.data_manager.session_id}')
+    plt.title(f'Rat Interaction Matrix{title_suffix}\nSession: {events.session_id}')
     plt.xlabel('Target Rat')
     plt.ylabel('Source Rat')
     plt.xticks(rotation=45)
@@ -190,7 +190,7 @@ def plot_rat_behavior_heatmap(events: "BehavioralEventsData",
                 cbar_kws={'label': 'Number of Events'},
                 yticklabels=behavior_labels)
 
-    plt.title(f'Behavior Pattern for {rat_id}\nSession: {events.data_manager.session_id}')
+    plt.title(f'Behavior Pattern for {rat_id}\nSession: {events.session_id}')
     plt.xlabel('Interaction Partner')
     plt.ylabel('Behavior Type')
     plt.xticks(rotation=45)
@@ -319,7 +319,7 @@ def plot_behavioral_event_timeline(events: "BehavioralEventsData",
     ax.set_yticklabels(list(rat_positions.keys()))
     ax.set_xlabel('Event Index (chronological)')
     ax.set_ylabel('Animal ID')
-    ax.set_title(f'Behavioral Event Timeline\nSession: {events.data_manager.session_id}')
+    ax.set_title(f'Behavioral Event Timeline\nSession: {events.session_id}')
 
     # Legend for event types
     legend_handles = [
@@ -464,7 +464,7 @@ def plot_events_on_trajectory(events: "BehavioralEventsData",
     ax.set_ylabel('Y')
     type_label = f" ({events.decode_behavior_type(event_type)})" if event_type else ""
     ax.set_title(f'{animal_id_full} trajectory with behavioral events{type_label}\n'
-                 f'Session: {events.data_manager.session_id}')
+                 f'Session: {events.session_id}')
     ax.legend(title='Opponent', bbox_to_anchor=(1.01, 1), loc='upper left')
     ax.set_aspect('equal')
     plt.tight_layout()

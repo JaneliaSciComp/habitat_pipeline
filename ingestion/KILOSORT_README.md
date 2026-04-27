@@ -1,282 +1,209 @@
-# KilosortData - Electrophysiology Data Import and Analysis
+# KilosortData - Electrophysiology Data Import
 
-A Python data class for importing, storing, and analyzing Kilosort 4 electrophysiology data, specifically designed for the habitat_pipeline multi-animal analysis system.
+A Python dataclass and loader for Kilosort 4 spike-sorted electrophysiology
+data, used by the habitat_pipeline multi-animal analysis system.
 
-## Features
+The module is split into two parts:
 
-- **Complete Kilosort 4 Support**: Loads all standard Kilosort output files
-- **Efficient Data Access**: Fast filtering and querying of spike data by multiple criteria
-- **Behavioral Integration**: Tools for aligning spikes with behavioral events and continuous features
-- **Multi-Animal Support**: Designed for large-scale studies with multiple animals and sessions
-- **Memory Efficient**: Lazy loading and caching for large datasets
-- **Quality Control**: Built-in firing rate and cluster quality filtering
-
-## Installation
-
-Place `kilosort_data.py` in your project directory and install dependencies:
-
-```bash
-pip install numpy pandas pathlib
-```
+- `KilosortData` — a pure data container with analysis methods that operate
+  on already-loaded arrays (no I/O).
+- Module-level functions (`load_kilosort_data`, `save_kilosort_data`,
+  `load_kilosort_from_file`) that handle disk I/O and caching.
 
 ## Quick Start
 
 ```python
-from kilosort_data import load_kilosort_session
+from ingestion.kilosort_data_import import load_kilosort_data
 
-# Load a single session
-ks_data = load_kilosort_session(
-    data_path="path/to/kilosort/output",
-    animal_id="rat001",
-    session_id="session001"
-)
+# Load from a session/animal directory or directly from a kilosort4 folder.
+# animal_id and session_id are inferred from the path layout.
+ks_data = load_kilosort_data("path/to/animal/session_merged.kilosort/kilosort4")
 
-# Get high-quality clusters
-good_clusters = ks_data.get_clusters(
-    min_firing_rate=1.0,
-    max_firing_rate=50.0,
-    cluster_group='good'
-)
+print(ks_data)
+# KilosortData(animal=..., session=..., n_spikes=..., n_clusters=..., duration=...s)
 
-# Extract spike times for analysis
-spike_times = ks_data.get_spike_times(good_clusters[0])
+# Access spikes per cluster (already in seconds, aligned via timestamps file)
+spikes_cluster_0 = ks_data.spike_times_by_cell[0]
+
+# Quality-filter clusters and bin into a firing-rate matrix
+matrix, bin_centers = ks_data.bin_spike_times(bin_size_sec=0.025)
 ```
 
-## Core Classes and Functions
+## KilosortData
 
-### KilosortData Class
+Dataclass fields:
 
-Main data container for a single Kilosort session.
+**Identity**
+- `animal_id: str`
+- `session_id: str`
 
-**Key Attributes:**
-- `spike_times`: Array of spike times in seconds
-- `spike_clusters`: Array of cluster IDs for each spike  
-- `cluster_info`: DataFrame with cluster metadata
-- `templates`: Spike waveform templates
-- `firing_rates`: Computed firing rates for all clusters
+**Core spike data**
+- `spike_times: np.ndarray` — raw sample indices from Kilosort
+- `spike_clusters: np.ndarray` — cluster assignment per spike
+- `spike_times_by_cell: List[np.ndarray]` — spike times in seconds, one
+  array per cluster in `ks_ids`
 
-**Key Methods:**
+**Cluster properties** (one entry per kept cluster, parallel to `ks_ids`)
+- `ks_ids: List[int]` — cluster IDs that passed `_select_clusters`
+- `channel: np.ndarray` — peak channel per cluster
+- `amplitude: np.ndarray` — template amplitude
+- `fr: np.ndarray` — Kilosort-reported firing rate (only when curated)
+- `amp: np.ndarray` — Kilosort-reported amp (only when curated)
+- `DV: np.ndarray` — dorsoventral channel position (channel_positions[:, 1])
+- `XX: np.ndarray` — mediolateral channel position (channel_positions[:, 0])
+- `cell_numbers: np.ndarray` — `(shank_index, within-shank index)` per cluster
+- `to_load: np.ndarray` — bool mask over the full cluster table marking
+  "good" clusters
 
-#### Data Loading
-- `__init__(data_path, animal_id, session_id)`: Initialize and load Kilosort data
-- Automatically loads all standard Kilosort 4 files (.npy format)
-- Converts spike times to seconds using sampling rate
+**Optional**
+- `curated_cells: Optional[np.ndarray]` — bool array, present when manual
+  curation is available
+- `cluster_info: Optional[pd.DataFrame]` — `cluster_info.tsv` (post-curation)
+- `ks_labels: Optional[pd.DataFrame]` — `cluster_KSLabel.tsv`
+- `channel_map: Optional[np.ndarray]`
+- `metadata: Dict`
+- `filter_results: Optional[Dict]` — populated by
+  `filter_cells_by_firing_patterns`
 
-#### Cluster Filtering
+### Methods
+
+All methods are pure computation over the in-memory arrays.
+
+#### `duration_seconds` (property)
+
+Total recording duration: `(spike_times.max() - spike_times.min()) / 30000`.
+
+#### `get_firing_rates(bin_size_sec=1.0) -> Dict[int, float]`
+
+Mean firing rate (Hz) for every cluster, keyed by cluster ID.
+
+#### `get_isi_statistics() -> Dict[int, Dict]`
+
+Per-cluster ISI stats: `mean_isi`, `median_isi`, `cv_isi`. Clusters with
+fewer than 2 spikes are omitted.
+
+#### `calculate_firing_pattern_metrics(time_bin_sec=60.0) -> Dict[int, Dict]`
+
+Per-cluster quality metrics: `firing_rate`, `presence_ratio` (fraction of
+`time_bin_sec`-wide bins containing at least one spike), and `cv_isi`.
+
+#### `filter_cells_by_firing_patterns(...)`
+
 ```python
-get_clusters(
-    animal_id=None,           # Filter by animal ID
-    session_id=None,          # Filter by session ID  
-    channels=None,            # List of channel numbers
-    min_firing_rate=None,     # Minimum firing rate (Hz)
-    max_firing_rate=None,     # Maximum firing rate (Hz)
-    cluster_group=None        # 'good', 'mua', 'noise'
-)
-```
-
-#### Spike Time Extraction
-```python
-# Single cluster
-spike_times = ks_data.get_spike_times(cluster_id)
-
-# Multiple clusters
-spike_dict = ks_data.get_spike_times([cluster1, cluster2, cluster3])
-```
-
-#### Behavioral Analysis Integration
-
-**Continuous Features** (position, velocity, etc.):
-```python
-# Bin spikes for 40 Hz behavioral data
-binned_spikes = ks_data.bin_spike_times(
-    cluster_ids=[1, 2, 3],
-    bin_size=0.025,  # 25ms bins
-    start_time=0,
-    end_time=300     # 5 minutes
-)
-```
-
-**Discrete Events** (interactions, vocalizations, etc.):
-```python
-# Align spikes to behavioral events
-event_times = np.array([10.5, 25.3, 45.1])  # Event timestamps
-aligned_spikes = ks_data.get_event_aligned_spikes(
-    cluster_ids=[1, 2, 3],
-    event_times=event_times,
-    window_pre=1.0,   # 1s before event
-    window_post=2.0   # 2s after event
-)
-```
-
-### Convenience Functions
-
-#### Single Session Loading
-```python
-from kilosort_data import load_kilosort_session
-
-ks_data = load_kilosort_session(
-    data_path="path/to/kilosort/output",
-    animal_id="rat001", 
-    session_id="day1"
+ks_data.filter_cells_by_firing_patterns(
+    min_firing_rate=0.5,
+    max_firing_rate=100.0,
+    min_presence_ratio=0.8,
+    max_cv_isi=10.0,
+    time_bin_sec=60.0,
 )
 ```
 
-#### Multi-Session Loading
-```python
-from kilosort_data import load_multiple_sessions
+Computes metrics and applies thresholds. Returns (and stores in
+`self.filter_results`) a dict with:
 
-session_configs = [
-    {"data_path": "path/to/rat001/day1", "animal_id": "rat001", "session_id": "day1"},
-    {"data_path": "path/to/rat001/day2", "animal_id": "rat001", "session_id": "day2"},
-    {"data_path": "path/to/rat002/day1", "animal_id": "rat002", "session_id": "day1"},
-]
+- `passed_clusters: List[int]`
+- `failed_clusters: Dict[int, List[str]]` — cluster ID → reasons
+- `metrics: Dict[int, Dict]`
+- `summary: {total_clusters, passed_count, failed_count, pass_rate}`
 
-sessions = load_multiple_sessions(session_configs)
-```
+#### `get_filtered_cells_spike_times(**filter_kwargs) -> List[np.ndarray]`
 
-## Expected Kilosort File Structure
+Runs `filter_cells_by_firing_patterns` and returns the spike-time arrays
+(seconds) for clusters that passed.
 
-The class expects the standard Kilosort 4 output directory structure:
+#### `bin_spike_times(bin_size_sec=1.0, t_start=None, t_end=None, filtered_only=True)`
 
-```
-kilosort_output/
-├── spike_times.npy          # Required: Spike times in samples
-├── spike_clusters.npy       # Required: Cluster ID for each spike
-├── amplitudes.npy           # Optional: Spike amplitudes
-├── templates.npy            # Optional: Spike templates/waveforms
-├── channel_map.npy          # Optional: Channel mapping
-├── channel_positions.npy    # Optional: Physical channel positions
-├── cluster_info.tsv         # Optional: Cluster metadata
-├── pc_features.npy          # Optional: PC features
-├── pc_feature_ind.npy       # Optional: PC feature indices  
-├── whitening_mat.npy        # Optional: Whitening matrix
-├── whitening_mat_inv.npy    # Optional: Inverse whitening matrix
-└── params.py               # Optional: Parameters file
-```
+Bins spike times into a firing-rate matrix.
 
-**Required files**: `spike_times.npy`, `spike_clusters.npy`  
-**Optional files**: All others (warnings issued if missing)
+- If `filtered_only=True` (default), only clusters that pass
+  `filter_cells_by_firing_patterns` are included; if no filter has been
+  run, defaults are applied.
+- `t_start` / `t_end` default to the earliest / latest spike across the
+  selected clusters.
 
-## Integration with Habitat Pipeline
+Returns:
+- `matrix: np.ndarray, shape (n_cells, n_bins)` — rates in Hz
+- `bin_centers: np.ndarray, shape (n_bins,)` — centre of each bin in seconds
 
-This class is specifically designed to support the habitat pipeline requirements:
+#### `print_firing_pattern_summary(filter_results=None, **filter_kwargs)`
 
-### 1. Interactive GUI Support
-- Fast cluster filtering enables responsive GUI interactions
-- Efficient spike time extraction for real-time visualization
-- Waveform access for cluster quality assessment
+Prints a human-readable summary of metrics and per-reason failure counts.
+Runs the filter if `filter_results` is not provided.
 
-### 2. Behavioral Analysis Pipeline
-- **Continuous features**: Use `bin_spike_times()` with behavioral sampling rate
-- **Discrete events**: Use `get_event_aligned_spikes()` for event-triggered analysis
-- **Multi-animal studies**: Filter by animal, session, anatomical location
+## I/O Functions
 
-### 3. Data Organization
-- Hierarchical organization: Animal → Session → Clusters
-- Fast filtering by firing rate, anatomical location, quality metrics
-- Cached computations for repeated analysis
+### `load_kilosort_data(data_input, force_reload=False) -> KilosortData`
 
-### 4. Scalability
-- Memory-efficient loading of large Neuropixels datasets
-- Supports up to 12 animals as specified in pipeline requirements
-- Parallel processing ready (stateless methods)
-
-## Example Workflows
-
-### Quality Control Analysis
-```python
-# Load session
-ks_data = load_kilosort_session("path/to/data", "rat001", "day1")
-
-# Get firing rate statistics
-rates = ks_data.firing_rates
-print(f"Mean firing rate: {rates.mean():.2f} Hz")
-print(f"Clusters: {len(rates)} total")
-
-# Filter high-quality clusters
-good_clusters = ks_data.get_clusters(
-    min_firing_rate=0.5,      # Exclude very quiet cells
-    max_firing_rate=100.0,    # Exclude potential artifacts
-    cluster_group='good'       # Only manually curated good clusters
-)
-print(f"Good clusters: {len(good_clusters)}")
-```
-
-### Position Encoding Analysis
-```python
-# Get hippocampal clusters (example channel range)
-hipp_clusters = ks_data.get_clusters(
-    channels=list(range(100, 200)),  # Hippocampal channels
-    min_firing_rate=1.0,
-    cluster_group='good'
-)
-
-# Bin spikes to match 40 Hz position tracking
-binned_spikes = ks_data.bin_spike_times(
-    hipp_clusters,
-    bin_size=0.025,  # 25ms bins for 40 Hz
-    start_time=0,
-    end_time=3600    # 1 hour session
-)
-
-# Now correlate with position data (loaded separately)
-# correlations = analyze_position_encoding(binned_spikes, position_data)
-```
-
-### Social Interaction Analysis  
-```python
-# Load interaction timestamps (example)
-interaction_times = np.array([45.2, 156.7, 278.3, 445.1])
-
-# Extract spikes around interactions
-social_spikes = ks_data.get_event_aligned_spikes(
-    cluster_ids=good_clusters,
-    event_times=interaction_times,
-    window_pre=2.0,   # 2s before interaction
-    window_post=5.0   # 5s after interaction
-)
-
-# Analyze pre/post interaction activity
-for cluster_id, events in social_spikes.items():
-    pre_counts = [len(spikes[spikes < 0]) for spikes in events]
-    post_counts = [len(spikes[spikes > 0]) for spikes in events] 
-    print(f"Cluster {cluster_id}: Pre={np.mean(pre_counts):.1f}, Post={np.mean(post_counts):.1f}")
-```
-
-## Performance Notes
-
-- **Loading**: ~1-2 seconds for typical Neuropixels session
-- **Filtering**: Sub-millisecond for most filter combinations
-- **Spike extraction**: ~10-100ms depending on cluster count and session length
-- **Memory usage**: Scales with session length, efficient for multi-hour recordings
-- **Caching**: Firing rates and binned spikes are cached after first computation
-
-## Error Handling
-
-The class provides informative error messages for common issues:
-- Missing required files
-- Invalid file formats
-- Empty spike trains
-- Invalid time ranges
-- Missing cluster IDs
-
-## Extending the Class
-
-The modular design allows easy extension:
+Top-level loader.
 
 ```python
-class ExtendedKilosortData(KilosortData):
-    def custom_analysis_method(self):
-        # Add your custom analysis methods
-        pass
-    
-    def _load_custom_data(self):
-        # Override to load additional file formats
-        pass
+from ingestion.kilosort_data_import import load_kilosort_data
+
+ks_data = load_kilosort_data("path/to/data", force_reload=False)
 ```
 
-## See Also
+Behaviour:
 
-- `example_usage.py`: Complete usage examples and demonstrations
-- Pipeline documentation: Integration with behavioral analysis pipeline
-- Kilosort documentation: Understanding the source data format
+1. Resolves the kilosort4 folder. `data_input` may be the kilosort4 folder
+   itself or a parent directory containing exactly one `*kilosort*`
+   subfolder with a `kilosort4` child.
+2. Infers `animal_id` and `session_id` from the path. The expected layout
+   is `.../<animal_id>/<session_id>_merged.kilosort/kilosort4/`.
+3. Unless `force_reload=True`, returns the most recent cached pkl found in
+   the kilosort4 folder (preferring `kilosort_full_*.pkl` over
+   `kilosort_processed_*.pkl`).
+4. Otherwise loads raw data: spike times/clusters, `cluster_info.tsv` (if
+   present, otherwise falls back to `cluster_KSLabel.tsv`),
+   `channel_map.npy`, `channel_positions.npy`, and the
+   `*.timestamps.dat` file in the parent directory; selects "good"
+   clusters; and groups spikes by cluster (converted to seconds).
+
+Notes on raw loading:
+- `spike_times.npy` is shifted by `-31` samples to align with the template
+  centre.
+- Spike sample indices are remapped through the timestamps file before
+  conversion to seconds (sample rate = 30 kHz).
+- "Good" cluster selection uses `cluster_info["group"] == "good"` when
+  curated, otherwise `cluster_KSLabel["KSLabel"] == "good"`.
+
+### `save_kilosort_data(ks_data, ks_folder, filename=None, exclude_large_arrays=False) -> str`
+
+Pickles a `KilosortData` to `ks_folder`.
+
+- If `filename` is omitted, names the file
+  `kilosort_full_<animal>_<session>_<timestamp>.pkl` (or
+  `kilosort_processed_...` when `exclude_large_arrays=True`).
+- With `exclude_large_arrays=True`, omits `spike_times`, `spike_clusters`,
+  and `channel_map` to produce a smaller file suitable for downstream
+  analysis that only needs `spike_times_by_cell`.
+
+### `load_kilosort_from_file(filepath) -> KilosortData`
+
+Loads a previously saved pkl directly, bypassing path-based ID inference.
+
+## Expected On-Disk Layout
+
+```
+<animal_id>/
+└── <session_id>_merged.kilosort/
+    ├── <something>.timestamps.dat        # required (sample-index remap)
+    └── kilosort4/
+        ├── spike_times.npy               # required
+        ├── spike_clusters.npy            # required
+        ├── cluster_KSLabel.tsv           # required
+        ├── channel_map.npy               # required for property extraction
+        ├── channel_positions.npy         # required for DV/XX
+        ├── templates.npy                 # required when no cluster_info.tsv
+        ├── cluster_info.tsv              # optional (post-curation)
+        ├── cluster_Amplitude.tsv         # required when no cluster_info.tsv
+        └── kilosort_*.pkl                # optional cache files
+```
+
+When `cluster_info.tsv` is absent, peak channels are recomputed from
+`templates.npy` (max peak-to-peak across channels).
+
+## Sample Rate
+
+`SAMPLE_RATE = 30000.0` is hard-coded at the top of the module. Change it
+there if your acquisition rate differs.

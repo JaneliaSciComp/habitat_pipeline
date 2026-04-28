@@ -110,7 +110,7 @@ def find_sync_mapping(TSESync, TSBSync, system_time_at_creation, search_window=3
 
     slope, intercept, r_value, p_value, std_err = stats.linregress(matched_ephys, matched_behavior)
 
-    mapping = {
+    return {
         'slope': slope,
         'intercept': intercept,
         'r_squared': r_value ** 2,
@@ -120,9 +120,6 @@ def find_sync_mapping(TSESync, TSBSync, system_time_at_creation, search_window=3
         'matched_ephys': matched_ephys,
         'matched_behavior': matched_behavior,
     }
-    mapping['ephys_to_behavior'] = lambda t: slope * t + intercept
-    mapping['behavior_to_ephys'] = lambda t: (t - intercept) / slope
-    return mapping
 
 
 def plot_sync_results(mapping_dict, TSESync=None, TSBSync=None, figsize=(15, 10)):
@@ -176,7 +173,7 @@ def plot_sync_results(mapping_dict, TSESync=None, TSBSync=None, figsize=(15, 10)
 
     # Interval comparison (if full arrays provided)
     if TSESync is not None and TSBSync is not None:
-        ephys_converted = mapping_dict['ephys_to_behavior'](TSESync)
+        ephys_converted = slope * TSESync + intercept
         start = max(TSBSync.min(), ephys_converted.min())
         end = min(TSBSync.max(), ephys_converted.max())
         tsb_overlap = TSBSync[(TSBSync >= start) & (TSBSync <= end)]
@@ -242,8 +239,6 @@ class DataSyncManager:
     def __init__(self, data_manager: DataStorageManager, dio_channel: int = 1):
         self.data_manager = data_manager
         self.dio_channel = dio_channel
-        self.animal_id = data_manager.animal_id
-        self.session_id = data_manager.session_id
 
         self.ephys_sync, self.behavior_sync, self.system_time = load_ephys_sync(
             data_manager, dio_channel
@@ -251,20 +246,22 @@ class DataSyncManager:
         self.mapping = find_sync_mapping(
             self.ephys_sync, self.behavior_sync, self.system_time
         )
-        logger.info("Sync mapping clock-rate ratio: %.8f", self.mapping['slope'])
+        self.slope = self.mapping['slope']
+        self.intercept = self.mapping['intercept']
+        logger.info("Sync mapping clock-rate ratio: %.8f", self.slope)
 
     def convert_ephys_to_behavior(self, ephys_timestamps):
         """Convert ephys timestamps to behavioral timestamps."""
-        return self.mapping['ephys_to_behavior'](ephys_timestamps)
+        return self.slope * ephys_timestamps + self.intercept
 
     def convert_behavior_to_ephys(self, behavior_timestamps):
         """Convert behavioral timestamps to ephys timestamps."""
-        return self.mapping['behavior_to_ephys'](behavior_timestamps)
+        return (behavior_timestamps - self.intercept) / self.slope
 
     def plot_sync_results(self, figsize=(15, 10)):
         """Plot synchronization residuals and quality metrics."""
         return plot_sync_results(self.mapping, self.ephys_sync, self.behavior_sync, figsize)
 
     def __repr__(self) -> str:
-        return (f"DataSyncManager({self.animal_id}/{self.session_id}, "
+        return (f"DataSyncManager({self.data_manager.animal_id}/{self.data_manager.session_id}, "
                 f"DIO{self.dio_channel}, n_matches={self.mapping['n_matches']})")

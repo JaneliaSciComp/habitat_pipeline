@@ -10,7 +10,7 @@ import pandas as pd
 
 from .database_core import HabitatDatabase, ExperimentSession, DataFile
 from ingestion.kilosort_data_import import load_kilosort_data
-from video.tracking_import import load_tracking_data, parse_tracking
+from video.tracking_import import load_tracking_data
 
 
 class PipelineIntegration:
@@ -58,9 +58,10 @@ class PipelineIntegration:
             self.db.add_data_file(session_id, 'tracking', tracking_path)
             
             # Load and validate data
-            tracking_df = load_tracking_data(tracking_path)
-            animals = parse_tracking(tracking_df)
-            
+            vt = load_tracking_data(tracking_path)
+            animals = vt.parsed_data
+            n_frames = len(vt.timestamps) if vt.timestamps is not None else 0
+
             # Update processing notes
             with self.db.get_db_session() as session:
                 data_file = session.query(DataFile).filter(
@@ -68,10 +69,10 @@ class PipelineIntegration:
                     DataFile.data_type == 'tracking',
                     DataFile.file_path == str(tracking_path)
                 ).first()
-                
+
                 if data_file:
                     data_file.is_processed = True
-                    data_file.processing_notes = f"Animals tracked: {list(animals.keys())}, Frames: {len(tracking_df)}"
+                    data_file.processing_notes = f"Animals tracked: {list(animals.keys())}, Frames: {n_frames}"
                     session.commit()
             
             return True
@@ -113,11 +114,7 @@ class PipelineIntegration:
         if 'tracking' in data_files:
             tracking_file = data_files['tracking'][0]  # Take first file
             try:
-                tracking_df = load_tracking_data(tracking_file.file_path)
-                session_data['tracking'] = {
-                    'raw_df': tracking_df,
-                    'animals': parse_tracking(tracking_df)
-                }
+                session_data['tracking'] = load_tracking_data(tracking_file.file_path)
             except Exception as e:
                 print(f"Error loading tracking data: {e}")
                 session_data['tracking'] = None

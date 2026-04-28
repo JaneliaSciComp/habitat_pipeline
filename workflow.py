@@ -203,7 +203,8 @@ def process_tracking_data(session_id: str, verbose: bool = False) -> tuple:
         verbose: Enable verbose output
         
     Returns:
-        Tuple of (tracking_path, tracking_df, animals_dict, timestamps)
+        Tuple of (tracking_path, tracking_obj, animals_dict, timestamps)
+        where tracking_obj is a VideoTrackingData instance.
     """
     print("\n" + "=" * 60)
     print("PROCESSING VIDEO TRACKING DATA")
@@ -225,40 +226,24 @@ def process_tracking_data(session_id: str, verbose: bool = False) -> tuple:
             return None, None, None, None
         
         print(f"✓ Found tracking file: {tracking_path}")
-        
-        # Load tracking data
+
+        # Load tracking data into a VideoTrackingData container
         print("Loading tracking data...")
-        tracking_df = tracking_import.load_tracking_data(tracking_path)
-        print(f"✓ Loaded tracking data: {tracking_df.shape}")
-        
-        if verbose:
-            print("Tracking DataFrame columns:", list(tracking_df.columns))
-            print("Tracking DataFrame shape:", tracking_df.shape)
-            print("First few rows:")
-            print(tracking_df.head())
-        
-        # Parse tracking data by animal
-        print("Parsing tracking data by animal...")
-        animals = tracking_import.parse_tracking(tracking_df)
+        vt = tracking_import.load_tracking_data(tracking_path)
+        animals = vt.parsed_data
+        timestamps = vt.timestamps
         print(f"✓ Found {len(animals)} animals: {list(animals.keys())}")
-        
+        if timestamps is None:
+            print("Warning: No timestamps available for this tracking file")
+
         if verbose:
             for animal_name, animal_df in animals.items():
                 stats = path_viz.calculate_path_statistics(animal_df)
                 print(f"\n{animal_name} statistics:")
                 for key, value in stats.items():
                     print(f"  {key}: {value:.2f}")
-        
-        # Load timestamps
-        print("Loading timestamps...")
-        try:
-            timestamps = tracking_import.load_timestamps(tracking_path)
-            print(f"✓ Loaded timestamps: {timestamps.shape}")
-        except Exception as e:
-            print(f"Warning: Could not load timestamps: {e}")
-            timestamps = None
-        
-        return tracking_path, tracking_df, animals, timestamps
+
+        return tracking_path, vt, animals, timestamps
         
     except Exception as e:
         print(f"ERROR: Failed to process tracking data: {e}")
@@ -442,16 +427,16 @@ def main():
             print("Skipping ephys data processing (--skip_ephys)")
             kilosort_path, kilosort_data_obj = None, None
         
-        # 2. Process tracking data  
+        # 2. Process tracking data
         if not args.skip_tracking:
-            tracking_path, tracking_df, animals, timestamps = process_tracking_data(
+            tracking_path, tracking_obj, animals, timestamps = process_tracking_data(
                 args.session_id, args.verbose
             )
             results['tracking_path'] = str(tracking_path) if tracking_path else None
             results['animals_found'] = list(animals.keys()) if animals else []
         else:
             print("Skipping tracking data processing (--skip_tracking)")
-            tracking_path, tracking_df, animals, timestamps = None, None, None, None
+            tracking_path, tracking_obj, animals, timestamps = None, None, None, None
         
         # 3. Generate visualizations
         if not args.skip_plots and animals:

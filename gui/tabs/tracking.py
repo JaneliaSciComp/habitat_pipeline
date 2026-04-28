@@ -1,7 +1,7 @@
 import streamlit as st
 
 from gui.loaders import get_data_storage
-from video.tracking_import import VideoTrackingData
+from video.tracking_import import load_tracking_data
 from video import plot_trajectory as pt
 
 
@@ -9,7 +9,7 @@ def render(animal_id: str, session_id: str, config_path):
     dsm = get_data_storage(animal_id, session_id, config_path)
 
     try:
-        vt = VideoTrackingData(dsm)
+        vt = load_tracking_data(dsm)
     except Exception as e:
         st.warning(f"No tracking data available for this session. ({e})")
         return

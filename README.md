@@ -94,10 +94,9 @@ habitat_pipeline/
 
 | Symbol | Description |
 |--------|-------------|
-| `DataSyncManager` | Manages sync state for a session. Provides `ephys_to_behavior(t)` and `behavior_to_ephys(t)` conversion. Supports `session_index` for multi-DIO paths. |
-| `load_ephys_sync()` | Load DIO and pulse log data. Handles list DIO paths via `session_index`. |
-| `find_sync_mapping()` | Primary sync via linear regression on matched inter-pulse intervals. |
-| `find_sync_mapping_new()` | Advanced sync with interval matching and subset search. |
+| `DataSyncManager` | Manages sync state for a session. Provides `convert_ephys_to_behavior(t)` and `convert_behavior_to_ephys(t)`. |
+| `load_ephys_sync()` | Load DIO pulses and pulse-log timestamps from a `DataStorageManager`. |
+| `find_sync_mapping()` | Sync via linear regression on matched inter-pulse intervals. |
 | `plot_sync_results()` | Visualize sync quality (residuals, matched pulses). |
 
 **`trodes_to_python.py`** — Read SpikeGadgets Trodes binary files.

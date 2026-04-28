@@ -377,7 +377,7 @@ def process_synchronization(animal_id: str, session_id: str, timestamps: Optiona
         
         # Find sync mapping
         print("Finding sync mapping between ephys and video...")
-        mapping = ephys_sync.find_sync_mapping(TSBSync, TSESync, system_time_at_creation)
+        mapping = ephys_sync.find_sync_mapping(TSESync, TSBSync, system_time_at_creation)
         print("✓ Sync mapping completed")
         
         if verbose and mapping is not None:

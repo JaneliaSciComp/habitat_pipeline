@@ -385,7 +385,7 @@ class HabitatApp:
                 dsm.get_behavioral_event_files(),
                 session_id=dsm.session_id,
             )
-            sync = DataSyncManager(dsm, dio_channel=1, auto_load=True)
+            sync = DataSyncManager(dsm, dio_channel=1)
             self._events.synchronize_with_ephys(sync, create_new_columns=True)
         except Exception as e:
             self._content[:] = [pn.pane.Alert(f"Failed to load: {e}", alert_type="danger")]

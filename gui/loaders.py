@@ -34,7 +34,6 @@ def get_sync(animal_id: str, session_id: str, config_path):
         return DataSyncManager(
             get_data_storage(animal_id, session_id, config_path),
             dio_channel=1,
-            auto_load=True,
         )
     except Exception:
         return None

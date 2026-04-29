@@ -35,18 +35,21 @@ def render(animal_id: str, session_id: str, config_path):
 
     if plot_type == "Interaction Heatmap":
         etype = st.selectbox("Event type", ["All"] + TYPES)
-        plot_rat_interaction_heatmap(events, event_type=None if etype == "All" else etype)
-        st.pyplot(plt.gcf())
-        plt.close()
+        fig = plot_rat_interaction_heatmap(events, event_type=None if etype == "All" else etype)
+        if fig is not None:
+            st.pyplot(fig)
+            plt.close(fig)
 
     elif plot_type == "Per-Rat Heatmap":
         rats = events.get_available_rats()
         rat = st.selectbox("Rat", rats)
-        plot_rat_behavior_heatmap(events, rat_id=rat)
-        st.pyplot(plt.gcf())
-        plt.close()
+        fig = plot_rat_behavior_heatmap(events, rat_id=rat)
+        if fig is not None:
+            st.pyplot(fig)
+            plt.close(fig)
 
     elif plot_type == "Event Timeline":
-        plot_behavioral_event_timeline(events)
-        st.pyplot(plt.gcf())
-        plt.close()
+        fig = plot_behavioral_event_timeline(events)
+        if fig is not None:
+            st.pyplot(fig)
+            plt.close(fig)

@@ -74,7 +74,7 @@ def analysis_param_widgets(
 
     min_evts = st.slider(
         "Min events / class",
-        min_value=2,
+        min_value=1,
         max_value=max(2, max_events),
         value=min(5, max(2, max_events)),
         help="Opponents with fewer events than this are excluded.",

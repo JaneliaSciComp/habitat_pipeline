@@ -12,6 +12,7 @@ from typing import Optional
 import numpy as np
 import streamlit as st
 
+from ephys.rastermap_viz import plot_rastermap, plot_rastermap_with_events
 from ingestion.data_paths import DataStorageManager
 from ingestion.ephys_sync import DataSyncManager
 from ingestion.kilosort_data_import import load_kilosort_data
@@ -28,7 +29,8 @@ def get_data_storage(animal_id: str, session_id: str, config_path):
 
 @st.cache_resource(show_spinner="Loading spike data (may take a minute)...")
 def get_ks_data(animal_id: str, session_id: str, config_path):
-    return load_kilosort_data(get_data_storage(animal_id, session_id, config_path))
+    dsm = get_data_storage(animal_id, session_id, config_path)
+    return load_kilosort_data(dsm.get_kilosort_path())
 
 
 @st.cache_resource(show_spinner="Loading behavioral events...")
@@ -89,6 +91,35 @@ def get_synced_behavior(animal_id: str, session_id: str, config_path) -> Optiona
     except Exception as e:
         log.warning("synchronize_with_ephys failed: %s", e)
     return events
+
+
+@st.cache_resource(show_spinner="Fitting Rastermap (full session)...")
+def get_rastermap_full(animal_id: str, session_id: str, config_path, bin_size: float):
+    ks_data = get_ks_data(animal_id, session_id, config_path)
+    return plot_rastermap(ks_data, bin_size=bin_size)
+
+
+@st.cache_resource(show_spinner="Fitting Rastermap (event-aligned)...")
+def get_rastermap_events(
+    animal_id: str,
+    session_id: str,
+    config_path,
+    behavior_type: str,
+    bin_size: float,
+    time_window: tuple,
+):
+    ks_data = get_ks_data(animal_id, session_id, config_path)
+    events = get_synced_behavior(animal_id, session_id, config_path)
+    if events is None:
+        return None, None
+    return plot_rastermap_with_events(
+        ks_data,
+        events,
+        animal_of_interest=animal_id,
+        behavior_type=behavior_type,
+        bin_size=bin_size,
+        time_window=tuple(time_window),
+    )
 
 
 @st.cache_data(show_spinner=False)

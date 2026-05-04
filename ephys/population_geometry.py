@@ -126,8 +126,11 @@ class PopulationGeometryAnalyzer:
         # Handle quality cell filtering
         if use_quality_cells:
             spike_times_list = self.ks_data.get_filtered_cells_spike_times()
+            passed = set(self.ks_data.filter_results['passed_clusters'])
+            selected_cluster_ids = [cid for cid in self.ks_data.ks_ids if cid in passed]
         else:
             spike_times_list = self.ks_data.spike_times_by_cell
+            selected_cluster_ids = list(self.ks_data.ks_ids)
 
         if len(spike_times_list) == 0:
             raise ValueError("No cells selected for analysis (all cells failed quality criteria)")

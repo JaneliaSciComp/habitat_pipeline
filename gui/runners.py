@@ -65,9 +65,19 @@ def cached_step(
     with cols[0]:
         _cache_chip(pkl)
     with cols[1]:
-        run_clicked = st.button(button_label, type="primary", use_container_width=True)
+        run_clicked = st.button(
+            button_label,
+            type="primary",
+            use_container_width=True,
+            key=f"{prefix}_run_{pkl.stem}",
+        )
     with cols[2]:
-        clear_clicked = st.button("Clear", use_container_width=True, help="Delete this cache entry.")
+        clear_clicked = st.button(
+            "Clear",
+            use_container_width=True,
+            help="Delete this cache entry.",
+            key=f"{prefix}_clear_{pkl.stem}",
+        )
 
     if clear_clicked and pkl.exists():
         pkl.unlink()

@@ -1,7 +1,9 @@
-import matplotlib.pyplot as plt
 import streamlit as st
 
-from gui.loaders import get_behavior_data, get_sync
+from gui.loaders import get_synced_behavior
+from gui.plotting import show_fig
+from gui.state import SessionKey
+from gui.widgets import plot_picker
 from video.behavioral_visualization import (
     plot_behavioral_event_timeline,
     plot_rat_behavior_heatmap,
@@ -9,47 +11,29 @@ from video.behavioral_visualization import (
 )
 
 
-def render(animal_id: str, session_id: str, config_path):
-    events = get_behavior_data(animal_id, session_id, config_path)
+PLOT_TYPES = ["Interaction Heatmap", "Per-Rat Heatmap", "Event Timeline"]
+
+
+def render(key: SessionKey) -> None:
+    events = get_synced_behavior(*key.as_loader_args())
     if events is None:
         st.warning("No behavioral event data available for this session.")
         return
 
-    # Sync once; guard against repeated calls since synchronize_with_ephys mutates in place
-    if not getattr(events, "_gui_synced", False):
-        sync = get_sync(animal_id, session_id, config_path)
-        if sync is not None:
-            try:
-                events.synchronize_with_ephys(sync, create_new_columns=True)
-            except Exception:
-                pass
-        events._gui_synced = True
-
-    plot_type = st.radio(
-        "Plot type",
-        ["Interaction Heatmap", "Per-Rat Heatmap", "Event Timeline"],
-        horizontal=True,
-    )
-
-    TYPES = list(events.BEHAVIOR_TYPES.keys())
+    plot_type = plot_picker("Plot type", PLOT_TYPES, key="behavioral_plot")
+    types = list(events.BEHAVIOR_TYPES.keys())
 
     if plot_type == "Interaction Heatmap":
-        etype = st.selectbox("Event type", ["All"] + TYPES)
-        fig = plot_rat_interaction_heatmap(events, event_type=None if etype == "All" else etype)
-        if fig is not None:
-            st.pyplot(fig)
-            plt.close(fig)
-
+        etype = st.selectbox("Event type", ["All"] + types)
+        fig = plot_rat_interaction_heatmap(
+            events, event_type=None if etype == "All" else etype
+        )
     elif plot_type == "Per-Rat Heatmap":
-        rats = events.get_available_rats()
-        rat = st.selectbox("Rat", rats)
+        rat = st.selectbox("Rat", events.get_available_rats())
         fig = plot_rat_behavior_heatmap(events, rat_id=rat)
-        if fig is not None:
-            st.pyplot(fig)
-            plt.close(fig)
-
     elif plot_type == "Event Timeline":
         fig = plot_behavioral_event_timeline(events)
-        if fig is not None:
-            st.pyplot(fig)
-            plt.close(fig)
+    else:
+        return
+
+    show_fig(fig)

@@ -431,9 +431,208 @@ def decode_opponent_identity_population(ks_data,
     
     return population_results
 
+def decode_opponent_identity_time_resolved(ks_data,
+                                           behavior_data,
+                                           animal_of_interest: str,
+                                           behavior_type: str = None,
+                                           use_quality_cells: bool = True,
+                                           quality_thresholds: Dict = None,
+                                           alignment: str = 'start',
+                                           time_window: Tuple[float, float] = (-1.0, 2.0),
+                                           time_bin_size: float = 0.5,
+                                           time_bin_step: Optional[float] = None,
+                                           cv_folds: int = 5,
+                                           min_events_per_class: int = 5,
+                                           n_shuffles: int = 0,
+                                           selected_opponents: Optional[List[str]] = None) -> Dict:
+    """Population (multi-cell) LDA decoding of opponent identity per time bin.
+
+    For each time bin, all selected cells' firing rates form the predictor
+    vector; one stratified-CV LDA is fit per bin, yielding a single
+    accuracy(t) curve. Error bars come from CV-fold variability (SEM across
+    folds), and an optional label-permutation shuffle gives a chance band.
+
+    Parameters mirror ``decode_opponent_identity_population``. Extra:
+      time_bin_step : float, optional
+          Step between successive bin starts. ``None`` (default) means no
+          overlap (``= time_bin_size``); smaller values give sliding,
+          overlapping bins.
+      n_shuffles : int, default=0
+          If > 0, also compute the population accuracy curve under
+          label-permuted data (``n_shuffles, n_bins``) for a chance band.
+    """
+    try:
+        event_start_times, event_end_times, opponent_labels = behavior_data.extract_opponent_labels(
+            animal_of_interest, behavior_type, min_events_per_class
+        )
+        if len(event_start_times) == 0:
+            raise ValueError(f"No events found for behavior type '{behavior_type}'")
+    except Exception as e:
+        return {'error': str(e), 'status': 'failed'}
+
+    if alignment == 'start':
+        event_times = event_start_times
+    elif alignment == 'end':
+        event_times = event_end_times
+    else:
+        raise ValueError("alignment must be 'start' or 'end'")
+
+    if selected_opponents is not None:
+        mask = np.isin(opponent_labels, selected_opponents)
+        event_times = event_times[mask]
+        opponent_labels = opponent_labels[mask]
+
+    if use_quality_cells:
+        if quality_thresholds is None:
+            quality_thresholds = {
+                'min_firing_rate': 0.5,
+                'min_presence_ratio': 0.8,
+                'max_cv_isi': 5.0,
+            }
+        filter_results = ks_data.filter_cells_by_firing_patterns(**quality_thresholds)
+        passed = set(filter_results['passed_clusters'])
+        selected_cell_indices = [i for i, cid in enumerate(ks_data.ks_ids) if cid in passed]
+        selected_cluster_ids = [cid for cid in ks_data.ks_ids if cid in passed]
+    else:
+        selected_cell_indices = list(range(len(ks_data.ks_ids)))
+        selected_cluster_ids = list(ks_data.ks_ids)
+
+    if len(selected_cluster_ids) == 0:
+        return {'error': 'No cells selected', 'status': 'failed'}
+
+    step = float(time_bin_step) if time_bin_step is not None else float(time_bin_size)
+    if step <= 0 or time_bin_size <= 0:
+        return {'error': 'time_bin_size and time_bin_step must be positive', 'status': 'failed'}
+    bin_starts = np.arange(time_window[0], time_window[1] - time_bin_size + 1e-9, step)
+    if len(bin_starts) == 0:
+        return {'error': 'time_window is shorter than time_bin_size', 'status': 'failed'}
+    bin_centers = bin_starts + time_bin_size / 2
+    n_bins = len(bin_starts)
+
+    n_cells = len(selected_cell_indices)
+    n_events = len(event_times)
+    rates = np.zeros((n_cells, n_events, n_bins), dtype=np.float32)
+    bin_ends = bin_starts + time_bin_size
+    for ci, cell_idx in enumerate(selected_cell_indices):
+        spike_times = ks_data.spike_times_by_cell[cell_idx]
+        for ei, et in enumerate(event_times):
+            in_window = (spike_times >= et + time_window[0]) & (spike_times < et + time_window[1])
+            rel = np.sort(spike_times[in_window] - et)
+            if len(rel) > 0:
+                lo = np.searchsorted(rel, bin_starts, side='left')
+                hi = np.searchsorted(rel, bin_ends, side='left')
+                rates[ci, ei, :] = (hi - lo) / time_bin_size
+
+    unique_labels, class_counts = np.unique(opponent_labels, return_counts=True)
+    n_splits = min(cv_folds, int(np.min(class_counts)))
+    if n_splits < 2:
+        return {'error': f'Not enough events per class for {cv_folds}-fold CV', 'status': 'failed'}
+
+    def _population_bin_accuracy(labels_vec):
+        cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+        mean = np.full(n_bins, np.nan, dtype=np.float32)
+        sem = np.full(n_bins, np.nan, dtype=np.float32)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            for bi in range(n_bins):
+                X = rates[:, :, bi].T  # (n_events, n_cells)
+                # Standardize; zero-variance cells in this bin → 0 column.
+                X_s = np.nan_to_num(StandardScaler().fit_transform(X), nan=0.0)
+                if not np.any(X_s.std(axis=0) > 0):
+                    continue
+                scores = cross_val_score(
+                    LinearDiscriminantAnalysis(solver='lsqr', shrinkage='auto'),
+                    X_s, labels_vec, cv=cv, scoring='accuracy',
+                )
+                mean[bi] = float(np.mean(scores))
+                sem[bi] = float(np.std(scores) / np.sqrt(len(scores)))
+        return mean, sem
+
+    accuracy_by_bin, accuracy_sem_by_bin = _population_bin_accuracy(opponent_labels)
+
+    shuffle_null = None
+    if n_shuffles > 0:
+        rng = np.random.default_rng(0)
+        shuffle_null = np.full((n_shuffles, n_bins), np.nan, dtype=np.float32)
+        for s in range(n_shuffles):
+            perm_labels = opponent_labels[rng.permutation(n_events)]
+            shuf_mean, _ = _population_bin_accuracy(perm_labels)
+            shuffle_null[s, :] = shuf_mean
+
+    return {
+        'cluster_ids': selected_cluster_ids,
+        'accuracy_by_bin': accuracy_by_bin,
+        'accuracy_sem_by_bin': accuracy_sem_by_bin,
+        'bin_centers': bin_centers,
+        'shuffle_null': shuffle_null,
+        'chance_level': 1.0 / len(unique_labels),
+        'unique_opponents': unique_labels,
+        'parameters': {
+            'animal_of_interest': animal_of_interest,
+            'behavior_type': behavior_type,
+            'use_quality_cells': use_quality_cells,
+            'alignment': alignment,
+            'time_window': time_window,
+            'time_bin_size': time_bin_size,
+            'time_bin_step': step,
+            'cv_folds': cv_folds,
+            'min_events_per_class': min_events_per_class,
+            'n_shuffles': n_shuffles,
+        },
+        'n_cells': n_cells,
+        'n_events': n_events,
+        'status': 'success',
+    }
+
+
 # Visualization functions
 
-def plot_decoding_accuracy_distribution(results: Dict, 
+def plot_time_resolved_decoding(results: Dict,
+                                figsize: Tuple[int, int] = (9, 5)) -> plt.Figure:
+    """Plot the population-LDA accuracy curve as a function of time around the event.
+
+    Expects the dict returned by ``decode_opponent_identity_time_resolved``.
+    Shows accuracy ± CV-fold SEM, the chance level, and (when present) the
+    label-shuffle 95% band.
+    """
+    if results.get('status') != 'success':
+        return None
+
+    acc = results['accuracy_by_bin']
+    sem = results['accuracy_sem_by_bin']
+    t = results['bin_centers']
+    chance = results['chance_level']
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    ax.fill_between(t, acc - sem, acc + sem, color='steelblue', alpha=0.25)
+    ax.plot(t, acc, color='steelblue', linewidth=2.0,
+            label=f'Population LDA ({results["n_cells"]} cells)')
+
+    if results.get('shuffle_null') is not None:
+        null = results['shuffle_null']
+        lo, hi = np.nanpercentile(null, [2.5, 97.5], axis=0)
+        ax.fill_between(t, lo, hi, color='gray', alpha=0.25,
+                        label='Shuffle 95% band')
+
+    ax.axhline(chance, color='red', linestyle='--', alpha=0.7,
+               label=f'Chance ({chance:.1%})')
+    ax.axvline(0, color='black', linestyle='--', alpha=0.4, linewidth=0.8)
+
+    params = results.get('parameters', {})
+    btype = params.get('behavior_type', '?')
+    n_opp = len(results.get('unique_opponents', []))
+    ax.set_xlabel('Time from event (s)')
+    ax.set_ylabel('Decoding accuracy')
+    ax.set_title(f'Time-resolved population decoding of opponent identity\n'
+                 f'behavior={btype} · {n_opp} opponents · {results["n_events"]} events')
+    ax.legend(loc='best', fontsize=9)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    return fig
+
+
+def plot_decoding_accuracy_distribution(results: Dict,
                                       figsize: Tuple[int, int] = (9, 5),
                                       save_path: str = None) -> plt.Figure:
     """
@@ -670,16 +869,41 @@ def plot_decoding_summary(results: Dict,
         ax1.legend()
         ax1.grid(True, alpha=0.3)
     
-    # 2. Success rate summary
+    # 2. Confusion matrix for best cell
     ax2 = fig.add_subplot(gs[0, 1])
-    success_data = [
-        results['n_successful_cells'], 
-        results['n_total_cells'] - results['n_successful_cells']
+    cell_accs = [
+        (cid, results['cell_results'][cid]['accuracy'])
+        for cid in results['successful_cells']
+        if not np.isnan(results['cell_results'][cid]['accuracy'])
     ]
-    labels = ['Successful', 'Failed'] 
-    colors = ['lightgreen', 'lightcoral']
-    ax2.pie(success_data, labels=labels, colors=colors, autopct='%1.1f%%')
-    ax2.set_title(f"Cell Success Rate\n({results['n_successful_cells']}/{results['n_total_cells']} cells)")
+    best_cell_id = max(cell_accs, key=lambda x: x[1])[0] if cell_accs else None
+    best_result = results['cell_results'].get(best_cell_id) if best_cell_id is not None else None
+
+    if best_result is not None and best_result.get('confusion_matrix') is not None:
+        cm = best_result['confusion_matrix']
+        im = ax2.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+        ax2.set_title(f'Confusion Matrix — Best Cell (ID: {best_cell_id})')
+
+        unique_opponents = results['behavioral_summary']['unique_opponents']
+        tick_marks = np.arange(len(unique_opponents))
+        ax2.set_xticks(tick_marks)
+        ax2.set_yticks(tick_marks)
+        ax2.set_xticklabels([f'{o}' for o in unique_opponents])
+        ax2.set_yticklabels([f'{o}' for o in unique_opponents])
+        ax2.set_xlabel('Predicted Opponent')
+        ax2.set_ylabel('True Opponent')
+
+        thresh = cm.max() / 2.
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                ax2.text(j, i, format(cm[i, j], 'd'),
+                        ha="center", va="center",
+                        color="white" if cm[i, j] > thresh else "black")
+        plt.colorbar(im, ax=ax2)
+    else:
+        ax2.axis('off')
+        ax2.text(0.5, 0.5, 'No confusion matrix available',
+                 ha='center', va='center', transform=ax2.transAxes)
     
     # 3. Behavioral event summary
     ax3 = fig.add_subplot(gs[0, 2])
@@ -687,7 +911,7 @@ def plot_decoding_summary(results: Dict,
     opponents = list(opponent_counts.keys())
     counts = list(opponent_counts.values())
     
-    bars = ax3.bar([f'Rat {o}' for o in opponents], counts, color='lightblue')
+    bars = ax3.bar([f'{o}' for o in opponents], counts, color='lightblue')
     ax3.set_xlabel('Opponent Identity')
     ax3.set_ylabel('Number of Events')
     ax3.set_title(f"Behavioral Events\n(Total: {results['behavioral_summary']['n_events']})")

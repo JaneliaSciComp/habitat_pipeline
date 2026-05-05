@@ -59,11 +59,11 @@ def analysis_param_widgets(
 
     cols = st.columns(2)
     with cols[0]:
-        t_start = st.number_input("Window start (s)", value=-1.0, step=0.25)
+        t_start = st.number_input("Window start (s)", value=-2.0, step=0.25)
     with cols[1]:
-        t_end = st.number_input("Window end (s)", value=2.0, step=0.25)
+        t_end = st.number_input("Window end (s)", value=4.0, step=0.25)
 
-    bin_size = st.number_input("Bin size (s)", value=0.5, step=0.05, min_value=0.01)
+    bin_size = st.number_input("Bin size (s)", value=0.5, step=0.1, min_value=0.1)
     cv_folds = st.slider("CV folds", 2, 10, 5)
 
     if events is not None:
@@ -78,7 +78,7 @@ def analysis_param_widgets(
         "Min events / class",
         min_value=1,
         max_value=max(2, max_events),
-        value=min(5, max(2, max_events)),
+        value=min(20, max(2, max_events)),
         help="Opponents with fewer events than this are excluded.",
     )
     if events is not None and max_events <= 2:

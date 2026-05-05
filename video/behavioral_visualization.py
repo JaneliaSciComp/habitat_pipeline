@@ -46,7 +46,7 @@ def _type_color_map(types) -> dict:
 
 def plot_rat_interaction_heatmap(events: "BehavioralEventsData",
                                  event_type: Optional[str] = None,
-                                 figsize: Tuple[int, int] = (10, 8)
+                                 figsize: Tuple[int, int] = (6, 5)
                                  ) -> Optional[plt.Figure]:
     """Heatmap matrix of pairwise event counts between rats.
 
@@ -98,7 +98,7 @@ def plot_rat_interaction_heatmap(events: "BehavioralEventsData",
 
 def plot_rat_behavior_heatmap(events: "BehavioralEventsData",
                               rat_id: str,
-                              figsize: Tuple[int, int] = (12, 8)
+                              figsize: Tuple[int, int] = (6, 5)
                               ) -> Optional[plt.Figure]:
     """Heatmap of behavior-type counts for a specific rat against every other rat.
 

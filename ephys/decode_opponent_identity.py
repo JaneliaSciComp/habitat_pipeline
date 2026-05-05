@@ -434,7 +434,7 @@ def decode_opponent_identity_population(ks_data,
 # Visualization functions
 
 def plot_decoding_accuracy_distribution(results: Dict, 
-                                      figsize: Tuple[int, int] = (10, 6),
+                                      figsize: Tuple[int, int] = (9, 5),
                                       save_path: str = None) -> plt.Figure:
     """
     Plot distribution of decoding accuracies across cells.
@@ -519,7 +519,7 @@ def plot_decoding_accuracy_distribution(results: Dict,
 
 def plot_best_cells_decoding(results: Dict,
                            n_top_cells: int = 10,
-                           figsize: Tuple[int, int] = (12, 8), 
+                           figsize: Tuple[int, int] = (12, 6), 
                            save_path: str = None) -> plt.Figure:
     """
     Plot decoding performance of top performing cells.
@@ -766,9 +766,9 @@ def plot_decoding_summary(results: Dict,
 def plot_top_cells_firing_rates(ks_data,
                                behavior_data,
                                test_results: Dict,
-                               time_window: Tuple[float, float] = (-0.5, 1.0), 
-                               time_bin_size: float = 0.05,
-                               n_top_cells: int = 6,
+                               time_window: Tuple[float, float] = (-2.0, 2.0), 
+                               time_bin_size: float = 0.2,
+                               n_top_cells: int = 12,
                                figsize: Tuple[int, int] = (15, 10),
                                save_path: str = None) -> plt.Figure:
     """

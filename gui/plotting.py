@@ -14,5 +14,5 @@ def show_fig(fig) -> None:
     if fig is None:
         st.info("No figure produced for this view.")
         return
-    st.pyplot(fig)
+    st.pyplot(fig, use_container_width=False)
     plt.close(fig)

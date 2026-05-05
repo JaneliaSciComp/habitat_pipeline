@@ -30,7 +30,6 @@ from ingestion.data_paths import get_animals_and_sessions
 
 
 st.set_page_config(page_title="Habitat Pipeline", layout="wide")
-st.title("RatCity — Habitat Pipeline Explorer")
 
 
 @st.cache_data(show_spinner="Scanning sessions...")

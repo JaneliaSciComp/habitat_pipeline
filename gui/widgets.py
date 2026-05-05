@@ -48,9 +48,11 @@ def analysis_param_widgets(
     abbrevs = list(behavior_types.keys())
     labels = list(behavior_types.values())
 
+    default_idx = abbrevs.index("EC") if "EC" in abbrevs else 0
     beh_idx = st.selectbox(
         "Behavior type",
         range(len(abbrevs)),
+        index=default_idx,
         format_func=lambda i: f"{abbrevs[i]} — {labels[i]}",
     )
     behavior_type = abbrevs[beh_idx]
@@ -120,30 +122,18 @@ def plot_picker(label: str, options: Sequence[str], key: Optional[str] = None) -
 
 def session_info_header(summary: dict, key: SessionKey) -> None:
     """One-line summary banner shown above the tabs after Load Session."""
-    st.markdown(f"### Session `{key.session_id}` · animal `{key.animal_id}`")
-    cols = st.columns(4)
-    with cols[0]:
-        st.metric(
-            "Quality cells",
-            summary["n_cells"] if summary["n_cells"] is not None else "—",
-        )
-    with cols[1]:
-        st.metric(
-            "Duration",
-            f"{summary['duration_min']:.1f} min" if summary["duration_min"] else "—",
-        )
-    with cols[2]:
-        st.metric(
-            "Events",
-            summary["n_events"] if summary["n_events"] is not None else "—",
-        )
-    with cols[3]:
-        st.metric("Opponents", len(summary["opponents"]) if summary["opponents"] else 0)
-
-    flags = []
-    flags.append("✓ tracking" if summary["has_tracking"] else "✗ tracking")
-    flags.append("✓ sync" if summary["has_sync"] else "✗ sync")
-    st.caption(" · ".join(flags))
+    parts = [f"**`{key.session_id}` / `{key.animal_id}`**"]
+    if summary["n_cells"] is not None:
+        parts.append(f"{summary['n_cells']} cells")
+    if summary["duration_min"]:
+        parts.append(f"{summary['duration_min']:.1f} min")
+    if summary["n_events"] is not None:
+        parts.append(f"{summary['n_events']} events")
+    if summary["opponents"]:
+        parts.append(f"{len(summary['opponents'])} opponents")
+    parts.append("✓ tracking" if summary["has_tracking"] else "✗ tracking")
+    parts.append("✓ sync" if summary["has_sync"] else "✗ sync")
+    st.markdown(" · ".join(parts))
 
 
 def cache_controls() -> None:

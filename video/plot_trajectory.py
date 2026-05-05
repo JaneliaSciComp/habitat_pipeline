@@ -43,7 +43,7 @@ DEFAULT_MIN_INTERACTION_FRAMES = 30
 # ---------------------------------------------------------------------------
 
 def plot_animal_path(df: pd.DataFrame, animal_name: str,
-                    figsize: Tuple[int, int] = (10, 8),
+                    figsize: Tuple[int, int] = (10, 5),
                     cmap: str = 'viridis',
                     show_start_end: bool = True,
                     show_stats: bool = True,
@@ -107,7 +107,7 @@ def plot_animal_path(df: pd.DataFrame, animal_name: str,
 
 
 def plot_path_heatmap(df: pd.DataFrame, animal_name: str,
-                     figsize: Tuple[int, int] = (10, 8),
+                     figsize: Tuple[int, int] = (10, 5),
                      bins: int = DEFAULT_BINS,
                      cmap: str = 'hot',
                      title: Optional[str] = None) -> plt.Figure:
@@ -457,7 +457,7 @@ def compute_proximity_interactions(
 def plot_proximity_network(tracking_dict: Dict[str, pd.DataFrame],
                          proximity_threshold: float = DEFAULT_PROXIMITY_PX,
                          min_interaction_time: int = DEFAULT_MIN_INTERACTION_FRAMES,
-                         figsize: Tuple[int, int] = (10, 8),
+                         figsize: Tuple[int, int] = (10, 5),
                          node_size_factor: float = 1000,
                          title: Optional[str] = None,
                          colors: Optional[List[str]] = None,

@@ -68,6 +68,6 @@ def render(key: SessionKey, params: AnalysisParams) -> None:
             plot_top_cells_firing_rates(
                 ks_data, events, results,
                 time_window=params.time_window,
-                time_bin_size=params.time_bin_size,
+                # time_bin_size=params.time_bin_size,
             )
         )

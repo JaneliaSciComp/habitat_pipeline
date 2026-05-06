@@ -17,8 +17,8 @@ from gui.widgets import plot_picker
 
 
 VIEWS = [
-    "Accuracy Distribution",
-    "Best Cells",
+#    "Accuracy Distribution",
+#    "Best Cells",
     "Summary",
     "Top Cells Firing Rates",
     "Time-Resolved Accuracy",

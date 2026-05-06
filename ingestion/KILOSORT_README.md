@@ -151,8 +151,8 @@ Behaviour:
 2. Infers `animal_id` and `session_id` from the path. The expected layout
    is `.../<animal_id>/<session_id>_merged.kilosort/kilosort4/`.
 3. Unless `force_reload=True`, returns the most recent cached pkl found in
-   the kilosort4 folder (preferring `kilosort_full_*.pkl` over
-   `kilosort_processed_*.pkl`).
+   the kilosort4 folder (preferring `kilosort_processed_*.pkl` over
+   `kilosort_full_*.pkl`).
 4. Otherwise loads raw data: spike times/clusters, `cluster_info.tsv` (if
    present, otherwise falls back to `cluster_KSLabel.tsv`),
    `channel_map.npy`, `channel_positions.npy`, and the

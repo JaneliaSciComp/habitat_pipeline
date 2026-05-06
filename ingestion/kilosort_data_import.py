@@ -363,12 +363,12 @@ def _waveform_to_channel(ks_folder: Path) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 def _find_cached_file(ks_folder: Path) -> Optional[Path]:
-    """Find the most recent cached pkl in *ks_folder*, preferring full over processed."""
+    """Find the most recent cached pkl in *ks_folder*, preferring processed over full."""
     cached = sorted(ks_folder.glob("kilosort_*.pkl"), key=lambda p: p.stat().st_mtime, reverse=True)
     if not cached:
         return None
-    full = [f for f in cached if f.name.startswith("kilosort_full_")]
-    return full[0] if full else cached[0]
+    processed = [f for f in cached if f.name.startswith("kilosort_processed_")]
+    return processed[0] if processed else cached[0]
 
 
 def _load_cached(filepath: Path) -> dict:

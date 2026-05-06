@@ -73,6 +73,38 @@ def _parse_session_date(session_id: str) -> str:
     return session_date
 
 
+def _resolve_session_animal(animal_id: str, session_id: str, config: dict) -> List[tuple]:
+    """Resolve [(animal_dir, full_session_id), ...] for matching sessions.
+
+    Centralises the two iterdir() walks shared by get_kilosort_path / get_dio_path
+    so callers needing several files under the same animal directory only pay the
+    network listing cost once.
+    """
+    if 'ephys' not in config:
+        raise KeyError("'ephys' key not found in configuration file")
+    ephys_base = Path(config['ephys'])
+
+    session_matches = _find_matching_directories(ephys_base, session_id, ".rec")
+    if not session_matches:
+        raise FileNotFoundError(f"No session directory found matching '{session_id}' in {ephys_base}")
+
+    results: List[tuple] = []
+    for session_dir in session_matches:
+        full_session_id = session_dir.name.replace('.rec', '')
+        animal_matches = _find_matching_directories(session_dir, animal_id)
+        if not animal_matches:
+            if len(session_matches) == 1:
+                raise FileNotFoundError(f"No animal directory found matching '{animal_id}' in {session_dir}")
+            continue
+        if len(animal_matches) > 1:
+            raise ValueError(f"Multiple animal directories found matching '{animal_id}': {animal_matches}")
+        results.append((animal_matches[0], full_session_id))
+
+    if not results:
+        raise FileNotFoundError(f"No animal directory found matching '{animal_id}' in any of the matched sessions")
+    return results
+
+
 def get_kilosort_path(animal_id: str, session_id: str, config_path: Optional[str] = None,
                       _config: Optional[dict] = None) -> List[Path]:
     """
@@ -101,38 +133,8 @@ def get_kilosort_path(animal_id: str, session_id: str, config_path: Optional[str
         >>> print(paths[0])
     """
     config = _config or _load_config(config_path)
-    
-    # Get the ephys base path
-    if 'ephys' not in config:
-        raise KeyError("'ephys' key not found in configuration file")
-    
-    ephys_base = Path(config['ephys'])
-    
-    # Find matching session directory (session_id.rec format)
-    session_matches = _find_matching_directories(ephys_base, session_id, ".rec")
-    if not session_matches:
-        raise FileNotFoundError(f"No session directory found matching '{session_id}' in {ephys_base}")
-    
-    kilosort_paths = []
-    for session_dir in session_matches:
-        full_session_id = session_dir.name.replace('.rec', '')
-        
-        # Find matching animal directory within the session directory
-        animal_matches = _find_matching_directories(session_dir, animal_id)
-        if not animal_matches:
-            if len(session_matches) == 1:
-                raise FileNotFoundError(f"No animal directory found matching '{animal_id}' in {session_dir}")
-            continue
-        if len(animal_matches) > 1:
-            raise ValueError(f"Multiple animal directories found matching '{animal_id}': {animal_matches}")
-        
-        animal_dir = animal_matches[0]
-        kilosort_paths.append(animal_dir / f"{full_session_id}_merged.kilosort" / "kilosort4")
-    
-    if not kilosort_paths:
-        raise FileNotFoundError(f"No animal directory found matching '{animal_id}' in any of the matched sessions")
-
-    return kilosort_paths
+    return [animal_dir / f"{full_session_id}_merged.kilosort" / "kilosort4"
+            for animal_dir, full_session_id in _resolve_session_animal(animal_id, session_id, config)]
 
 def get_dio_path(animal_id: str, session_id: str, dio_channel: int = 1,
                  config_path: Optional[str] = None, _config: Optional[dict] = None) -> List[Path]:
@@ -159,39 +161,10 @@ def get_dio_path(animal_id: str, session_id: str, dio_channel: int = 1,
         >>> print(paths[0])
     """
     config = _config or _load_config(config_path)
-    
-    # Get the ephys base path
-    if 'ephys' not in config:
-        raise KeyError("'ephys' key not found in configuration file")
-    
-    ephys_base = Path(config['ephys'])
-    
-    # Find matching session directory (session_id.rec format)
-    session_matches = _find_matching_directories(ephys_base, session_id, ".rec")
-    if not session_matches:
-        raise FileNotFoundError(f"No session directory found matching '{session_id}' in {ephys_base}")
-    
-    dio_paths = []
     dio_channel_str = f"Controller_Din{dio_channel}"
-    for session_dir in session_matches:
-        full_session_id = session_dir.name.replace('.rec', '')
-        
-        # Find matching animal directory within the session directory
-        animal_matches = _find_matching_directories(session_dir, animal_id)
-        if not animal_matches:
-            if len(session_matches) == 1:
-                raise FileNotFoundError(f"No animal directory found matching '{animal_id}' in {session_dir}")
-            continue
-        if len(animal_matches) > 1:
-            raise ValueError(f"Multiple animal directories found matching '{animal_id}': {animal_matches}")
-        
-        animal_dir = animal_matches[0]
-        dio_paths.append(animal_dir / f"{full_session_id}_merged.DIO" / f"{full_session_id}_merged.dio_{dio_channel_str}.dat")
-    
-    if not dio_paths:
-        raise FileNotFoundError(f"No animal directory found matching '{animal_id}' in any of the matched sessions")
-
-    return dio_paths
+    return [animal_dir / f"{full_session_id}_merged.DIO"
+            / f"{full_session_id}_merged.dio_{dio_channel_str}.dat"
+            for animal_dir, full_session_id in _resolve_session_animal(animal_id, session_id, config)]
 
 def get_pulse_log_path(config_path: Optional[str] = None, _config: Optional[dict] = None) -> Path:
     """
@@ -553,19 +526,18 @@ class DataStorageManager:
 
     def _load_ephys_paths(self):
         try:
-            paths = get_kilosort_path(self.animal_id, self.session_id, _config=self._config)
-            self.kilosort_path = paths[0] if paths else None
-
-            self.dio_paths = {}
-            for channel in range(1, 5):
-                try:
-                    dio_paths = get_dio_path(self.animal_id, self.session_id, channel, _config=self._config)
-                    self.dio_paths[channel] = dio_paths[0]
-                except (FileNotFoundError, ValueError):
-                    pass
+            animal_dir, full_session_id = _resolve_session_animal(
+                self.animal_id, self.session_id, self._config)[0]
+            self.kilosort_path = animal_dir / f"{full_session_id}_merged.kilosort" / "kilosort4"
+            dio_dir = animal_dir / f"{full_session_id}_merged.DIO"
+            self.dio_paths = {
+                ch: dio_dir / f"{full_session_id}_merged.dio_Controller_Din{ch}.dat"
+                for ch in range(1, 5)
+            }
         except Exception as e:
             logger.warning("Error loading ephys paths: %s", e)
             self.kilosort_path = None
+            self.dio_paths = {}
 
     def _load_video_paths(self):
         try:

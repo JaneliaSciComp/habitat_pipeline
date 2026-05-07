@@ -61,14 +61,24 @@ class KilosortData:
     metadata: Dict = field(default_factory=dict)
     filter_results: Optional[Dict] = None
 
+    # Cached duration loaded from a saved pkl; the property prefers this
+    # when raw spike_times have been excluded from the cache.
+    _duration_seconds: Optional[float] = None
+
     # --- analysis methods (pure computation, no I/O) -----------------------
 
     @property
     def duration_seconds(self) -> float:
         """Total recording duration in seconds."""
-        if self.spike_times is None or len(self.spike_times) == 0:
-            return 0.0
-        return (self.spike_times.max() - self.spike_times.min()) / SAMPLE_RATE
+        if self._duration_seconds is not None:
+            return float(self._duration_seconds)
+        if self.spike_times is not None and len(self.spike_times) > 0:
+            return float(self.spike_times.max() - self.spike_times.min()) / SAMPLE_RATE
+        # spike_times excluded from cache — fall back to spike_times_by_cell (seconds).
+        valid = [st for st in (self.spike_times_by_cell or []) if len(st) > 0]
+        if valid:
+            return float(max(st[-1] for st in valid) - min(st[0] for st in valid))
+        return 0.0
 
     def get_firing_rates(self, bin_size_sec: float = 1.0) -> Dict[int, float]:
         """Calculate mean firing rate (Hz) for every cluster."""
@@ -406,6 +416,7 @@ def _dict_to_kilosort_data(saved: dict) -> KilosortData:
         channel_map=_get('channel_map'),
         metadata=_get('metadata', {}),
         filter_results=_get('filter_results'),
+        _duration_seconds=_get('duration_seconds'),
     )
 
 
@@ -447,6 +458,7 @@ def save_kilosort_data(
         'ks_labels': ks_data.ks_labels,
         'KSfolder': str(ks_folder),
         'excluded_large_arrays': exclude_large_arrays,
+        'duration_seconds': ks_data.duration_seconds,
     }
     if not exclude_large_arrays:
         save_obj['spike_times'] = ks_data.spike_times

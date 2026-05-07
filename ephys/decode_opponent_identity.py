@@ -267,7 +267,8 @@ def decode_opponent_identity_population(ks_data,
                                       time_bin_size: float = 0.5,
                                       cv_folds: int = 5,
                                       min_events_per_class: int = 5,
-                                      selected_opponents: Optional[List[str]] = None) -> Dict:
+                                      selected_opponents: Optional[List[str]] = None,
+                                      label_mode: str = 'opponent') -> Dict:
     """
     Decode opponent identity across population of cells using cross-validated LDA.
     
@@ -308,17 +309,24 @@ def decode_opponent_identity_population(ks_data,
     # print(f"Time window: {time_window}")
     # print(f"Time bin size: {time_bin_size}")
     
-    # Extract behavioral events and opponent labels
+    # Extract behavioral events and labels
+    if label_mode not in ('opponent', 'group'):
+        raise ValueError(f"label_mode must be 'opponent' or 'group', got {label_mode!r}")
     try:
-        event_start_times, event_end_times, opponent_labels = behavior_data.extract_opponent_labels(
-            animal_of_interest, behavior_type, min_events_per_class
-        )
-        
+        if label_mode == 'group':
+            event_start_times, event_end_times, opponent_labels = behavior_data.extract_group_labels(
+                animal_of_interest, behavior_type, min_events_per_class
+            )
+        else:
+            event_start_times, event_end_times, opponent_labels = behavior_data.extract_opponent_labels(
+                animal_of_interest, behavior_type, min_events_per_class
+            )
+
         if len(event_start_times) == 0:
             raise ValueError(f"No events found for behavior type '{behavior_type}'")
-            
+
         print(f"Found {len(event_start_times)} behavioral events")
-        
+
     except Exception as e:
         print(f"Error extracting behavioral events: {e}")
         return {'error': str(e), 'status': 'failed'}
@@ -415,11 +423,12 @@ def decode_opponent_identity_population(ks_data,
             'behavior_type': behavior_type,
             'use_quality_cells': use_quality_cells,
             'quality_thresholds': quality_thresholds,
-            'alignment': alignment, 
+            'alignment': alignment,
             'time_window': time_window,
             'time_bin_size': time_bin_size,
             'cv_folds': cv_folds,
-            'min_events_per_class': min_events_per_class
+            'min_events_per_class': min_events_per_class,
+            'label_mode': label_mode,
         },
         'behavioral_summary': {
             'n_events': len(event_times),
@@ -444,7 +453,8 @@ def decode_opponent_identity_time_resolved(ks_data,
                                            cv_folds: int = 5,
                                            min_events_per_class: int = 5,
                                            n_shuffles: int = 0,
-                                           selected_opponents: Optional[List[str]] = None) -> Dict:
+                                           selected_opponents: Optional[List[str]] = None,
+                                           label_mode: str = 'opponent') -> Dict:
     """Population (multi-cell) LDA decoding of opponent identity per time bin.
 
     For each time bin, all selected cells' firing rates form the predictor
@@ -461,10 +471,18 @@ def decode_opponent_identity_time_resolved(ks_data,
           If > 0, also compute the population accuracy curve under
           label-permuted data (``n_shuffles, n_bins``) for a chance band.
     """
+    if label_mode not in ('opponent', 'group'):
+        return {'error': f"label_mode must be 'opponent' or 'group', got {label_mode!r}",
+                'status': 'failed'}
     try:
-        event_start_times, event_end_times, opponent_labels = behavior_data.extract_opponent_labels(
-            animal_of_interest, behavior_type, min_events_per_class
-        )
+        if label_mode == 'group':
+            event_start_times, event_end_times, opponent_labels = behavior_data.extract_group_labels(
+                animal_of_interest, behavior_type, min_events_per_class
+            )
+        else:
+            event_start_times, event_end_times, opponent_labels = behavior_data.extract_opponent_labels(
+                animal_of_interest, behavior_type, min_events_per_class
+            )
         if len(event_start_times) == 0:
             raise ValueError(f"No events found for behavior type '{behavior_type}'")
     except Exception as e:
@@ -600,6 +618,7 @@ def decode_opponent_identity_time_resolved(ks_data,
             'cv_folds': cv_folds,
             'min_events_per_class': min_events_per_class,
             'n_shuffles': n_shuffles,
+            'label_mode': label_mode,
         },
         'n_cells': n_cells,
         'n_events': n_events,

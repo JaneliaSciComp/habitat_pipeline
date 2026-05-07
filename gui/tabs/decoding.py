@@ -33,6 +33,15 @@ def render(key: SessionKey, params: AnalysisParams) -> None:
 
     ks_data = get_ks_data(*key.as_loader_args())
 
+    label_mode = st.radio(
+        "Label mode",
+        ["opponent", "group"],
+        horizontal=True,
+        key="decoding_label_mode",
+        help="opponent: decode each individual opponent rat. "
+             "group: decode two ID-half groups (low vs high opponent IDs).",
+    )
+
     view = plot_picker("View", VIEWS, key="decoding_view")
 
     if view == "Time-Resolved Accuracy":
@@ -57,6 +66,7 @@ def render(key: SessionKey, params: AnalysisParams) -> None:
             **params.as_dict(),
             "time_bin_step": float(bin_step),
             "n_shuffles": n_shuffles,
+            "label_mode": label_mode,
         }
 
         def _run_tr():
@@ -73,6 +83,7 @@ def render(key: SessionKey, params: AnalysisParams) -> None:
                 cv_folds=params.cv_folds,
                 min_events_per_class=params.min_events_per_class,
                 n_shuffles=n_shuffles,
+                label_mode=label_mode,
             )
 
         results_tr = cached_step(
@@ -103,12 +114,13 @@ def render(key: SessionKey, params: AnalysisParams) -> None:
             time_bin_size=params.time_bin_size,
             cv_folds=params.cv_folds,
             min_events_per_class=params.min_events_per_class,
+            label_mode=label_mode,
         )
 
     results = cached_step(
         prefix="decoding",
         key=key,
-        params=params.as_dict(),
+        params={**params.as_dict(), "label_mode": label_mode},
         run_fn=_run,
         button_label="Run Decoding",
         spinner_label="Running LDA decoding across all cells...",

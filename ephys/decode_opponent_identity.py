@@ -49,7 +49,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-from sklearn.model_selection import StratifiedKFold, cross_val_score, LeaveOneOut
+from sklearn.model_selection import StratifiedKFold, cross_val_score, cross_val_predict, LeaveOneOut
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import classification_report, confusion_matrix
 import warnings
@@ -550,6 +550,24 @@ def decode_opponent_identity_time_resolved(ks_data,
 
     accuracy_by_bin, accuracy_sem_by_bin = _population_bin_accuracy(opponent_labels)
 
+    # Confusion matrix at the best-accuracy bin (CV out-of-fold predictions).
+    best_bin_index = None
+    best_bin_confusion_matrix = None
+    if np.any(np.isfinite(accuracy_by_bin)):
+        best_bin_index = int(np.nanargmax(accuracy_by_bin))
+        X_best = rates[:, :, best_bin_index].T  # (n_events, n_cells)
+        X_best_s = np.nan_to_num(StandardScaler().fit_transform(X_best), nan=0.0)
+        if np.any(X_best_s.std(axis=0) > 0):
+            cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                preds = cross_val_predict(
+                    LinearDiscriminantAnalysis(solver='lsqr', shrinkage='auto'),
+                    X_best_s, opponent_labels, cv=cv,
+                )
+            best_bin_confusion_matrix = confusion_matrix(
+                opponent_labels, preds, labels=unique_labels)
+
     shuffle_null = None
     if n_shuffles > 0:
         rng = np.random.default_rng(0)
@@ -567,6 +585,10 @@ def decode_opponent_identity_time_resolved(ks_data,
         'shuffle_null': shuffle_null,
         'chance_level': 1.0 / len(unique_labels),
         'unique_opponents': unique_labels,
+        'best_bin_index': best_bin_index,
+        'best_bin_center': float(bin_centers[best_bin_index]) if best_bin_index is not None else None,
+        'best_bin_accuracy': float(accuracy_by_bin[best_bin_index]) if best_bin_index is not None else None,
+        'best_bin_confusion_matrix': best_bin_confusion_matrix,
         'parameters': {
             'animal_of_interest': animal_of_interest,
             'behavior_type': behavior_type,
@@ -588,8 +610,9 @@ def decode_opponent_identity_time_resolved(ks_data,
 # Visualization functions
 
 def plot_time_resolved_decoding(results: Dict,
-                                figsize: Tuple[int, int] = (9, 5)) -> plt.Figure:
-    """Plot the population-LDA accuracy curve as a function of time around the event.
+                                figsize: Tuple[int, int] = (13, 5)) -> plt.Figure:
+    """Plot the population-LDA accuracy curve as a function of time around the event,
+    plus the confusion matrix for the best-accuracy time bin on the right.
 
     Expects the dict returned by ``decode_opponent_identity_time_resolved``.
     Shows accuracy ± CV-fold SEM, the chance level, and (when present) the
@@ -602,8 +625,10 @@ def plot_time_resolved_decoding(results: Dict,
     sem = results['accuracy_sem_by_bin']
     t = results['bin_centers']
     chance = results['chance_level']
+    best_idx = results.get('best_bin_index')
 
-    fig, ax = plt.subplots(figsize=figsize)
+    fig, (ax, ax_cm) = plt.subplots(1, 2, figsize=figsize,
+                                    gridspec_kw={'width_ratios': [2, 1]})
 
     ax.fill_between(t, acc - sem, acc + sem, color='steelblue', alpha=0.25)
     ax.plot(t, acc, color='steelblue', linewidth=2.0,
@@ -619,6 +644,10 @@ def plot_time_resolved_decoding(results: Dict,
                label=f'Chance ({chance:.1%})')
     ax.axvline(0, color='black', linestyle='--', alpha=0.4, linewidth=0.8)
 
+    if best_idx is not None:
+        ax.axvline(t[best_idx], color='goldenrod', linestyle=':', linewidth=1.5,
+                   alpha=0.9, label=f'Best bin ({t[best_idx]:.2f}s)')
+
     params = results.get('parameters', {})
     btype = params.get('behavior_type', '?')
     n_opp = len(results.get('unique_opponents', []))
@@ -628,6 +657,36 @@ def plot_time_resolved_decoding(results: Dict,
                  f'behavior={btype} · {n_opp} opponents · {results["n_events"]} events')
     ax.legend(loc='best', fontsize=9)
     ax.grid(True, alpha=0.3)
+
+    cm = results.get('best_bin_confusion_matrix')
+    if cm is not None and best_idx is not None:
+        unique_opponents = results.get('unique_opponents', [])
+        im = ax_cm.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+        tick_marks = np.arange(len(unique_opponents))
+        ax_cm.set_xticks(tick_marks)
+        ax_cm.set_yticks(tick_marks)
+        ax_cm.set_xticklabels([f'{o}' for o in unique_opponents])
+        ax_cm.set_yticklabels([f'{o}' for o in unique_opponents])
+        ax_cm.set_xlabel('Predicted')
+        ax_cm.set_ylabel('True')
+        best_acc = results.get('best_bin_accuracy')
+        title = f'Best bin: t={t[best_idx]:.2f}s'
+        if best_acc is not None:
+            title += f'\naccuracy={best_acc:.1%}'
+        ax_cm.set_title(title)
+
+        thresh = cm.max() / 2.0
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                ax_cm.text(j, i, format(int(cm[i, j]), 'd'),
+                           ha='center', va='center',
+                           color='white' if cm[i, j] > thresh else 'black')
+        plt.colorbar(im, ax=ax_cm, fraction=0.046, pad=0.04)
+    else:
+        ax_cm.axis('off')
+        ax_cm.text(0.5, 0.5, 'No confusion matrix available',
+                   ha='center', va='center', transform=ax_cm.transAxes)
+
     fig.tight_layout()
     return fig
 

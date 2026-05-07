@@ -6,9 +6,10 @@ load_behavioral_events() to load it from CSV file(s) on disk.
 """
 
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar, Dict, List, Optional, Tuple, Union
+from typing import ClassVar, Dict, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -182,6 +183,119 @@ class BehavioralEventsData:
         print(f"✓ Found {len(event_start_times)} {behavior_type} events with opponent labels")
         print(f"✓ Unique opponents: {np.unique(opponent_labels)}")
         return event_start_times, event_end_times, opponent_labels
+
+    @staticmethod
+    def _assign_id_groups(rat_ids: Iterable[str]) -> Dict[str, str]:
+        """Map each rat id to ``'low'`` or ``'high'`` by splitting on numeric ID.
+
+        Sorts the provided rat ids by their trailing integer suffix, assigns the
+        bottom half to ``'low'`` and the top half to ``'high'``. For odd counts,
+        the middle rat joins whichever group's median ID is numerically closer
+        to its own ID.
+        """
+        ids = list(rat_ids)
+        if len(ids) < 2:
+            raise ValueError(
+                f"Need at least 2 rats to form 2 groups, got {len(ids)}"
+            )
+
+        nums: List[int] = []
+        for rid in ids:
+            m = re.search(r"(\d+)$", str(rid))
+            if m is None:
+                raise ValueError(f"Cannot extract numeric suffix from rat id {rid!r}")
+            nums.append(int(m.group(1)))
+
+        order = np.argsort(nums)
+        sorted_ids = [ids[i] for i in order]
+        sorted_nums = [nums[i] for i in order]
+
+        n = len(sorted_ids)
+        half = n // 2
+
+        if n % 2 == 0:
+            low_ids = sorted_ids[:half]
+            high_ids = sorted_ids[half:]
+        else:
+            middle_id = sorted_ids[half]
+            middle_num = sorted_nums[half]
+            low_candidates = sorted_nums[:half]
+            high_candidates = sorted_nums[half + 1:]
+            low_median = float(np.median(low_candidates))
+            high_median = float(np.median(high_candidates))
+            if abs(middle_num - low_median) <= abs(middle_num - high_median):
+                low_ids = sorted_ids[:half] + [middle_id]
+                high_ids = sorted_ids[half + 1:]
+            else:
+                low_ids = sorted_ids[:half]
+                high_ids = [middle_id] + sorted_ids[half + 1:]
+
+        mapping: Dict[str, str] = {}
+        for rid in low_ids:
+            mapping[rid] = 'low'
+        for rid in high_ids:
+            mapping[rid] = 'high'
+        return mapping
+
+    def extract_group_labels(
+        self,
+        animal_of_interest: str,
+        behavior_type: Optional[str] = None,
+        min_events_per_class: int = 5,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Extract (start_times, end_times, group_labels) where group_labels are
+        ``'low'`` / ``'high'`` based on the opponent's numeric ID, using the
+        ID-half split rule documented on ``_assign_id_groups``.
+
+        Mirrors ``extract_opponent_labels`` but pools opponents into two groups.
+        ``min_events_per_class`` is applied at the group level: each of
+        ``'low'`` / ``'high'`` must have at least ``min_events_per_class``
+        events, otherwise empty arrays are returned.
+        """
+        df = self.events_data
+        if behavior_type is not None:
+            df = df[df['type'] == behavior_type]
+
+        if 'initiator' not in df.columns or 'victim' not in df.columns:
+            raise ValueError("Behavioral data must have 'initiator' and 'victim' columns")
+
+        if not animal_of_interest.startswith('rat'):
+            animal_of_interest = f"rat{animal_of_interest}"
+
+        is_init = df['initiator'] == animal_of_interest
+        is_vict = df['victim'] == animal_of_interest
+        df = df[is_init | is_vict]
+
+        if len(df) == 0:
+            return np.array([]), np.array([]), np.array([])
+
+        if 'ts_start_ephys' not in df.columns:
+            raise ValueError("No ephys-synchronized timestamp columns found in behavioral data")
+
+        event_start_times = df['ts_start_ephys'].values
+        event_end_times = df['ts_end_ephys'].values
+        opponent_ids = np.where(
+            df['initiator'].values == animal_of_interest,
+            df['victim'].values,
+            df['initiator'].values,
+        )
+
+        unique_opponents = np.unique(opponent_ids)
+        if len(unique_opponents) < 2:
+            return np.array([]), np.array([]), np.array([])
+
+        group_map = self._assign_id_groups(unique_opponents.tolist())
+        group_labels = np.array([group_map[op] for op in opponent_ids])
+
+        unique_groups, counts = np.unique(group_labels, return_counts=True)
+        if len(unique_groups) < 2 or int(np.min(counts)) < min_events_per_class:
+            return np.array([]), np.array([]), np.array([])
+
+        composition = {op: group_map[op] for op in unique_opponents}
+        print(f"✓ Found {len(event_start_times)} {behavior_type} events with group labels")
+        print(f"✓ Group composition: {composition}")
+        return event_start_times, event_end_times, group_labels
 
     def synchronize_with_ephys(
         self,

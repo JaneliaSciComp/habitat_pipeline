@@ -1250,7 +1250,158 @@ def plot_top_cells_firing_rates(ks_data,
     if save_path:
         fig.savefig(save_path, dpi=300, bbox_inches='tight')
         print(f"Saved firing rate plot: {save_path}")
-    
+
+    return fig
+
+
+def plot_top_cells_rasters(ks_data,
+                           behavior_data,
+                           test_results: Dict,
+                           time_window: Tuple[float, float] = (-2.0, 2.0),
+                           n_top_cells: int = 12,
+                           figsize: Tuple[int, int] = (15, 10),
+                           save_path: str = None) -> plt.Figure:
+    """
+    Plot spike rasters around event times for top performing cells.
+
+    Each row in a panel is one event; rows are grouped/sorted by opponent
+    identity, with horizontal separators and color-coded tick marks per class.
+
+    Parameters mirror ``plot_top_cells_firing_rates``.
+
+    Returns:
+    --------
+    plt.Figure : The created figure
+    """
+    if test_results['status'] != 'success' or test_results['n_successful_cells'] == 0:
+        print("No successful results to plot")
+        return None
+
+    cell_accs = [(cluster_id, test_results['cell_results'][cluster_id]['accuracy'])
+                 for cluster_id in test_results['successful_cells']
+                 if not np.isnan(test_results['cell_results'][cluster_id]['accuracy'])]
+
+    if len(cell_accs) == 0:
+        print("No valid accuracies to plot")
+        return None
+
+    cell_accs_sorted = sorted(cell_accs, key=lambda x: x[1], reverse=True)
+    top_cells = cell_accs_sorted[:min(n_top_cells, len(cell_accs_sorted))]
+
+    params = test_results['parameters']
+    try:
+        event_start_times, event_end_times, opponent_labels = behavior_data.extract_opponent_labels(
+            animal_of_interest=params.get('animal_of_interest', ''),
+            behavior_type=params['behavior_type'],
+            min_events_per_class=params['min_events_per_class']
+        )
+        if len(event_start_times) == 0:
+            print("No behavioral events found")
+            return None
+    except Exception as e:
+        print(f"Error extracting behavioral events: {e}")
+        return None
+
+    if params['alignment'] == 'start':
+        event_times = event_start_times
+    else:
+        event_times = event_end_times
+
+    # Sort events by opponent identity so each class forms a contiguous block
+    unique_opponents = np.unique(opponent_labels)
+    sort_idx = np.argsort(opponent_labels, kind='stable')
+    event_times_sorted = event_times[sort_idx]
+    opponent_labels_sorted = opponent_labels[sort_idx]
+
+    colors = plt.cm.Set1(np.linspace(0, 1, len(unique_opponents)))
+    color_map = {opp: colors[i] for i, opp in enumerate(unique_opponents)}
+
+    # Boundaries between opponent blocks (in row indices)
+    block_boundaries = []
+    for i in range(1, len(opponent_labels_sorted)):
+        if opponent_labels_sorted[i] != opponent_labels_sorted[i - 1]:
+            block_boundaries.append(i)
+
+    n_top = len(top_cells)
+    n_cols = min(3, n_top)
+    n_rows = int(np.ceil(n_top / n_cols))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize,
+                             sharex=True, sharey=True, squeeze=False)
+
+    n_events = len(event_times_sorted)
+
+    for cell_idx, (cluster_id, accuracy) in enumerate(top_cells):
+        row = cell_idx // n_cols
+        col = cell_idx % n_cols
+        ax = axes[row, col]
+
+        cell_position = None
+        for i, ks_id in enumerate(ks_data.ks_ids):
+            if ks_id == cluster_id:
+                cell_position = i
+                break
+        if cell_position is None:
+            print(f"Warning: Cell {cluster_id} not found in spike data")
+            continue
+
+        spike_times = ks_data.spike_times_by_cell[cell_position]
+        aligned_spikes = align_spikes_to_events(spike_times, event_times_sorted, time_window)
+
+        # Group spikes by opponent class so each class is plotted in one eventplot call
+        for opponent in unique_opponents:
+            class_rows = np.where(opponent_labels_sorted == opponent)[0]
+            if len(class_rows) == 0:
+                continue
+            class_spike_lists = [aligned_spikes[r] for r in class_rows]
+            ax.eventplot(class_spike_lists,
+                         lineoffsets=class_rows,
+                         linelengths=0.85,
+                         linewidths=0.6,
+                         colors=[color_map[opponent]])
+
+        # Block separators between opponent classes
+        for boundary in block_boundaries:
+            ax.axhline(boundary - 0.5, color='black', linestyle='-',
+                       alpha=0.3, linewidth=0.6)
+
+        ax.axvline(0, color='black', linestyle='--', alpha=0.5, linewidth=1)
+        ax.set_xlim(time_window)
+        ax.set_ylim(-0.5, n_events - 0.5)
+        ax.invert_yaxis()
+        ax.set_title(f'Cell {cluster_id}\nAccuracy: {accuracy:.1%}', fontsize=10)
+
+        if cell_idx == 0:
+            from matplotlib.lines import Line2D
+            legend_handles = [
+                Line2D([0], [0], color=color_map[opp], lw=2,
+                       label=f'Opponent {opp} '
+                             f'(n={int(np.sum(opponent_labels_sorted == opp))})')
+                for opp in unique_opponents
+            ]
+            ax.legend(handles=legend_handles, fontsize=8, loc='upper right')
+
+    # Remove empty subplots
+    for idx in range(n_top, n_rows * n_cols):
+        row = idx // n_cols
+        col = idx % n_cols
+        fig.delaxes(axes[row, col])
+
+    fig.text(0.5, 0.02, 'Time from Event (s)', ha='center', fontsize=12)
+    fig.text(0.02, 0.5, 'Event (sorted by opponent)', va='center',
+             rotation=90, fontsize=12)
+
+    plt.suptitle(f'Spike Rasters - Top {n_top} Cells\n' +
+                 f'Behavior: {params["behavior_type"]}, ' +
+                 f'Alignment: {params["alignment"]}, ' +
+                 f'Window: {time_window[0]:.1f} to {time_window[1]:.1f}s',
+                 fontsize=14, fontweight='bold')
+
+    plt.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"Saved raster plot: {save_path}")
+
     return fig
 
 

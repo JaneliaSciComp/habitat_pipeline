@@ -297,6 +297,69 @@ class BehavioralEventsData:
         print(f"✓ Group composition: {composition}")
         return event_start_times, event_end_times, group_labels
 
+    def extract_outcome_labels(
+        self,
+        animal_of_interest: str,
+        behavior_type: Optional[str] = None,
+        min_events_per_class: int = 5,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Extract (start_times, end_times, outcome_labels) for events where
+        ``animal_of_interest`` is either the winner or the loser. Labels are
+        ``'winner'`` or ``'loser'``.
+
+        Default ``behavior_type=None`` keeps every row whose ``winner`` and
+        ``loser`` columns are populated, regardless of behavior type. Pass
+        ``behavior_type='F'`` (or another type) to restrict the scope.
+
+        Mirrors ``extract_opponent_labels`` and requires
+        ``synchronize_with_ephys`` to have been called.
+        """
+        if 'winner' not in self.events_data.columns or 'loser' not in self.events_data.columns:
+            raise ValueError("Behavioral data must have 'winner' and 'loser' columns")
+
+        df = self.events_data
+        if behavior_type is not None:
+            df = df[df['type'] == behavior_type]
+
+        winner_str = df['winner'].astype('string').str.strip()
+        loser_str = df['loser'].astype('string').str.strip()
+        has_outcome = winner_str.notna() & loser_str.notna() & (winner_str != '') & (loser_str != '')
+        df = df[has_outcome]
+
+        if len(df) == 0:
+            return np.array([]), np.array([]), np.array([])
+
+        if not animal_of_interest.startswith('rat'):
+            animal_of_interest = f"rat{animal_of_interest}"
+
+        is_winner = df['winner'].values == animal_of_interest
+        is_loser = df['loser'].values == animal_of_interest
+        df = df[is_winner | is_loser]
+
+        if len(df) == 0:
+            return np.array([]), np.array([]), np.array([])
+
+        if 'ts_start_ephys' not in df.columns:
+            raise ValueError("No ephys-synchronized timestamp columns found in behavioral data")
+
+        event_start_times = df['ts_start_ephys'].values
+        event_end_times = df['ts_end_ephys'].values
+        outcome_labels = np.where(
+            df['winner'].values == animal_of_interest,
+            'winner',
+            'loser',
+        )
+
+        unique_outcomes, counts = np.unique(outcome_labels, return_counts=True)
+        if len(unique_outcomes) < 2 or int(np.min(counts)) < min_events_per_class:
+            return np.array([]), np.array([]), np.array([])
+
+        scope = behavior_type if behavior_type is not None else 'aggressive'
+        print(f"✓ Found {len(event_start_times)} {scope} events with outcome labels")
+        print(f"✓ Outcome counts: {dict(zip(unique_outcomes, counts))}")
+        return event_start_times, event_end_times, outcome_labels
+
     def synchronize_with_ephys(
         self,
         sync_manager: DataSyncManager,

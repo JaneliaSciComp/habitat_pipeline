@@ -41,25 +41,19 @@ Usage:
 
 import argparse
 import sys
-import warnings
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-from sklearn.metrics import confusion_matrix
-from sklearn.model_selection import (
-    LeaveOneOut,
-    StratifiedKFold,
-    cross_val_predict,
-    cross_val_score,
-)
-from sklearn.preprocessing import StandardScaler
 
-from ephys.decode_opponent_identity import (
+from ephys._lda_decoding import (
     align_spikes_to_events,
     extract_firing_rate_features,
+    run_population_per_cell_decode,
+    run_time_resolved_population_decode,
+    select_quality_cells,
+    single_cell_lda_decode,
 )
 
 
@@ -75,83 +69,20 @@ def decode_event_outcome_single_cell(spike_times: np.ndarray,
                                      time_bin_size: float = 0.5,
                                      cv_folds: int = 5,
                                      min_events_per_class: int = 5) -> Dict:
+    """Decode event outcome (winner vs loser) from a single cell using CV LDA.
+
+    Thin wrapper around ``single_cell_lda_decode``; result dict keys are
+    unchanged.
     """
-    Decode event outcome (winner vs loser) from a single cell using CV LDA.
-
-    Returns a dict matching the structure used by the opponent-identity module
-    (``accuracy``, ``confusion_matrix``, ``cv_scores``, ``status`` ...).
-    """
-    unique_labels, counts = np.unique(outcome_labels, return_counts=True)
-    if len(unique_labels) < 2 or np.min(counts) < min_events_per_class:
-        return {
-            'accuracy': np.nan,
-            'accuracy_std': np.nan,
-            'n_events': len(event_times),
-            'n_classes': len(unique_labels),
-            'class_counts': dict(zip(unique_labels, counts)),
-            'confusion_matrix': None,
-            'cv_scores': None,
-            'status': 'insufficient_data',
-        }
-
-    try:
-        aligned_spikes = align_spikes_to_events(spike_times, event_times, time_window)
-        features = extract_firing_rate_features(aligned_spikes, time_window, time_bin_size)
-
-        if np.all(features == 0):
-            return {
-                'accuracy': np.nan,
-                'accuracy_std': np.nan,
-                'n_events': len(event_times),
-                'n_classes': len(unique_labels),
-                'class_counts': dict(zip(unique_labels, counts)),
-                'confusion_matrix': None,
-                'cv_scores': None,
-                'status': 'no_spikes',
-            }
-
-        scaler = StandardScaler()
-        features_scaled = scaler.fit_transform(features)
-
-        if cv_folds == 'loo' or cv_folds == -1:
-            cv = LeaveOneOut()
-        else:
-            cv = StratifiedKFold(n_splits=min(cv_folds, int(np.min(counts))),
-                                 shuffle=True, random_state=42)
-
-        lda = LinearDiscriminantAnalysis()
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            cv_scores = cross_val_score(lda, features_scaled, outcome_labels,
-                                        cv=cv, scoring='accuracy')
-
-        lda.fit(features_scaled, outcome_labels)
-        predictions = lda.predict(features_scaled)
-        conf_matrix = confusion_matrix(outcome_labels, predictions, labels=unique_labels)
-
-        return {
-            'accuracy': float(np.mean(cv_scores)),
-            'accuracy_std': float(np.std(cv_scores)),
-            'n_events': len(event_times),
-            'n_classes': len(unique_labels),
-            'class_counts': dict(zip(unique_labels, counts)),
-            'confusion_matrix': conf_matrix,
-            'cv_scores': cv_scores,
-            'status': 'success',
-        }
-
-    except Exception as e:
-        return {
-            'accuracy': np.nan,
-            'accuracy_std': np.nan,
-            'n_events': len(event_times),
-            'n_classes': len(unique_labels) if 'unique_labels' in locals() else 0,
-            'class_counts': dict(zip(unique_labels, counts)) if 'unique_labels' in locals() else {},
-            'confusion_matrix': None,
-            'cv_scores': None,
-            'status': f'error: {str(e)}',
-        }
+    return single_cell_lda_decode(
+        spike_times=spike_times,
+        event_times=event_times,
+        labels=outcome_labels,
+        time_window=time_window,
+        time_bin_size=time_bin_size,
+        cv_folds=cv_folds,
+        min_events_per_class=min_events_per_class,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -180,15 +111,12 @@ def decode_event_outcome_population(ks_data,
         event_start_times, event_end_times, outcome_labels = behavior_data.extract_outcome_labels(
             animal_of_interest, behavior_type, min_events_per_class
         )
-
         if len(event_start_times) == 0:
             scope = behavior_type if behavior_type is not None else 'aggressive'
             raise ValueError(
                 f"No {scope} events with outcome labels found for {animal_of_interest}"
             )
-
         print(f"Found {len(event_start_times)} behavioral events")
-
     except Exception as e:
         print(f"Error extracting behavioral events: {e}")
         return {'error': str(e), 'status': 'failed'}
@@ -200,67 +128,37 @@ def decode_event_outcome_population(ks_data,
     else:
         raise ValueError("alignment must be 'start' or 'end'")
 
+    selected_cell_indices, selected_cluster_ids, quality_thresholds = select_quality_cells(
+        ks_data, use_quality_cells=use_quality_cells, quality_thresholds=quality_thresholds,
+    )
     if use_quality_cells:
-        if quality_thresholds is None:
-            quality_thresholds = {
-                'min_firing_rate': 0.5,
-                'min_presence_ratio': 0.8,
-                'max_cv_isi': 5.0,
-            }
-        filter_results = ks_data.filter_cells_by_firing_patterns(**quality_thresholds)
-        selected_cell_indices = [i for i, cluster_id in enumerate(ks_data.ks_ids)
-                                 if cluster_id in filter_results['passed_clusters']]
-        selected_cluster_ids = filter_results['passed_clusters']
         print(f"Using {len(selected_cluster_ids)} quality-filtered cells")
     else:
-        selected_cell_indices = list(range(len(ks_data.ks_ids)))
-        selected_cluster_ids = list(ks_data.ks_ids)
         print(f"Using all {len(selected_cluster_ids)} cells")
 
     if len(selected_cluster_ids) == 0:
         print("No cells selected for analysis")
         return {'error': 'No cells selected', 'status': 'failed'}
 
-    cell_results: Dict = {}
-    successful_cells = 0
+    cell_results, successful_cluster_ids, accuracies = run_population_per_cell_decode(
+        ks_data=ks_data,
+        event_times=event_times,
+        labels=outcome_labels,
+        selected_cell_indices=selected_cell_indices,
+        selected_cluster_ids=selected_cluster_ids,
+        time_window=time_window,
+        time_bin_size=time_bin_size,
+        cv_folds=cv_folds,
+        min_events_per_class=min_events_per_class,
+    )
 
-    for i, cell_idx in enumerate(selected_cell_indices):
-        cluster_id = ks_data.ks_ids[cell_idx]
-        spike_times = ks_data.spike_times_by_cell[cell_idx]
-
-        if i % 50 == 0:
-            print(f"Processing cell {i+1}/{len(selected_cell_indices)} (cluster {cluster_id})")
-
-        result = decode_event_outcome_single_cell(
-            spike_times=spike_times,
-            event_times=event_times,
-            outcome_labels=outcome_labels,
-            alignment=alignment,
-            time_window=time_window,
-            time_bin_size=time_bin_size,
-            cv_folds=cv_folds,
-            min_events_per_class=min_events_per_class,
-        )
-
-        cell_results[cluster_id] = result
-        if result['status'] == 'success':
-            successful_cells += 1
-
-    print(f"Successfully decoded {successful_cells}/{len(selected_cluster_ids)} cells")
-
-    accuracies = []
-    successful_cluster_ids = []
-    for cluster_id, result in cell_results.items():
-        if result['status'] == 'success' and not np.isnan(result['accuracy']):
-            accuracies.append(result['accuracy'])
-            successful_cluster_ids.append(cluster_id)
-
-    population_results = {
+    n_total = len(selected_cluster_ids)
+    return {
         'cell_results': cell_results,
         'successful_cells': successful_cluster_ids,
         'n_successful_cells': len(successful_cluster_ids),
-        'n_total_cells': len(selected_cluster_ids),
-        'success_rate': len(successful_cluster_ids) / len(selected_cluster_ids) if len(selected_cluster_ids) > 0 else 0,
+        'n_total_cells': n_total,
+        'success_rate': len(successful_cluster_ids) / n_total if n_total > 0 else 0,
         'population_accuracy_mean': float(np.mean(accuracies)) if accuracies else np.nan,
         'population_accuracy_std': float(np.std(accuracies)) if accuracies else np.nan,
         'population_accuracy_median': float(np.median(accuracies)) if accuracies else np.nan,
@@ -284,8 +182,6 @@ def decode_event_outcome_population(ks_data,
         },
         'status': 'success',
     }
-
-    return population_results
 
 
 # ---------------------------------------------------------------------------
@@ -329,127 +225,41 @@ def decode_event_outcome_time_resolved(ks_data,
     else:
         raise ValueError("alignment must be 'start' or 'end'")
 
-    if use_quality_cells:
-        if quality_thresholds is None:
-            quality_thresholds = {
-                'min_firing_rate': 0.5,
-                'min_presence_ratio': 0.8,
-                'max_cv_isi': 5.0,
-            }
-        filter_results = ks_data.filter_cells_by_firing_patterns(**quality_thresholds)
-        passed = set(filter_results['passed_clusters'])
-        selected_cell_indices = [i for i, cid in enumerate(ks_data.ks_ids) if cid in passed]
-        selected_cluster_ids = [cid for cid in ks_data.ks_ids if cid in passed]
-    else:
-        selected_cell_indices = list(range(len(ks_data.ks_ids)))
-        selected_cluster_ids = list(ks_data.ks_ids)
-
+    selected_cell_indices, selected_cluster_ids, _ = select_quality_cells(
+        ks_data, use_quality_cells=use_quality_cells, quality_thresholds=quality_thresholds,
+    )
     if len(selected_cluster_ids) == 0:
         return {'error': 'No cells selected', 'status': 'failed'}
 
-    step = float(time_bin_step) if time_bin_step is not None else float(time_bin_size)
-    if step <= 0 or time_bin_size <= 0:
-        return {'error': 'time_bin_size and time_bin_step must be positive', 'status': 'failed'}
-    bin_starts = np.arange(time_window[0], time_window[1] - time_bin_size + 1e-9, step)
-    if len(bin_starts) == 0:
-        return {'error': 'time_window is shorter than time_bin_size', 'status': 'failed'}
-    bin_centers = bin_starts + time_bin_size / 2
-    n_bins = len(bin_starts)
+    core = run_time_resolved_population_decode(
+        ks_data=ks_data,
+        event_times=event_times,
+        labels=outcome_labels,
+        selected_cell_indices=selected_cell_indices,
+        selected_cluster_ids=selected_cluster_ids,
+        time_window=time_window,
+        time_bin_size=time_bin_size,
+        time_bin_step=time_bin_step,
+        cv_folds=cv_folds,
+        n_shuffles=n_shuffles,
+    )
+    if core.get('status') != 'success':
+        return core
 
-    n_cells = len(selected_cell_indices)
-    n_events = len(event_times)
-    rates = np.zeros((n_cells, n_events, n_bins), dtype=np.float32)
-    bin_ends = bin_starts + time_bin_size
-    for ci, cell_idx in enumerate(selected_cell_indices):
-        spike_times = ks_data.spike_times_by_cell[cell_idx]
-        for ei, et in enumerate(event_times):
-            in_window = (spike_times >= et + time_window[0]) & (spike_times < et + time_window[1])
-            rel = np.sort(spike_times[in_window] - et)
-            if len(rel) > 0:
-                lo = np.searchsorted(rel, bin_starts, side='left')
-                hi = np.searchsorted(rel, bin_ends, side='left')
-                rates[ci, ei, :] = (hi - lo) / time_bin_size
-
-    unique_labels, class_counts = np.unique(outcome_labels, return_counts=True)
-    n_splits = min(cv_folds, int(np.min(class_counts)))
-    if n_splits < 2:
-        return {'error': f'Not enough events per class for {cv_folds}-fold CV', 'status': 'failed'}
-
-    def _population_bin_accuracy(labels_vec):
-        cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
-        mean = np.full(n_bins, np.nan, dtype=np.float32)
-        sem = np.full(n_bins, np.nan, dtype=np.float32)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            for bi in range(n_bins):
-                X = rates[:, :, bi].T  # (n_events, n_cells)
-                X_s = np.nan_to_num(StandardScaler().fit_transform(X), nan=0.0)
-                if not np.any(X_s.std(axis=0) > 0):
-                    continue
-                scores = cross_val_score(
-                    LinearDiscriminantAnalysis(solver='lsqr', shrinkage='auto'),
-                    X_s, labels_vec, cv=cv, scoring='accuracy',
-                )
-                mean[bi] = float(np.mean(scores))
-                sem[bi] = float(np.std(scores) / np.sqrt(len(scores)))
-        return mean, sem
-
-    accuracy_by_bin, accuracy_sem_by_bin = _population_bin_accuracy(outcome_labels)
-
-    best_bin_index = None
-    best_bin_confusion_matrix = None
-    if np.any(np.isfinite(accuracy_by_bin)):
-        best_bin_index = int(np.nanargmax(accuracy_by_bin))
-        X_best = rates[:, :, best_bin_index].T
-        X_best_s = np.nan_to_num(StandardScaler().fit_transform(X_best), nan=0.0)
-        if np.any(X_best_s.std(axis=0) > 0):
-            cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                preds = cross_val_predict(
-                    LinearDiscriminantAnalysis(solver='lsqr', shrinkage='auto'),
-                    X_best_s, outcome_labels, cv=cv,
-                )
-            best_bin_confusion_matrix = confusion_matrix(
-                outcome_labels, preds, labels=unique_labels)
-
-    shuffle_null = None
-    if n_shuffles > 0:
-        rng = np.random.default_rng(0)
-        shuffle_null = np.full((n_shuffles, n_bins), np.nan, dtype=np.float32)
-        for s in range(n_shuffles):
-            perm_labels = outcome_labels[rng.permutation(n_events)]
-            shuf_mean, _ = _population_bin_accuracy(perm_labels)
-            shuffle_null[s, :] = shuf_mean
-
-    return {
-        'cluster_ids': selected_cluster_ids,
-        'accuracy_by_bin': accuracy_by_bin,
-        'accuracy_sem_by_bin': accuracy_sem_by_bin,
-        'bin_centers': bin_centers,
-        'shuffle_null': shuffle_null,
-        'chance_level': 1.0 / len(unique_labels),
-        'unique_outcomes': unique_labels,
-        'best_bin_index': best_bin_index,
-        'best_bin_center': float(bin_centers[best_bin_index]) if best_bin_index is not None else None,
-        'best_bin_accuracy': float(accuracy_by_bin[best_bin_index]) if best_bin_index is not None else None,
-        'best_bin_confusion_matrix': best_bin_confusion_matrix,
-        'parameters': {
-            'animal_of_interest': animal_of_interest,
-            'behavior_type': behavior_type,
-            'use_quality_cells': use_quality_cells,
-            'alignment': alignment,
-            'time_window': time_window,
-            'time_bin_size': time_bin_size,
-            'time_bin_step': step,
-            'cv_folds': cv_folds,
-            'min_events_per_class': min_events_per_class,
-            'n_shuffles': n_shuffles,
-        },
-        'n_cells': n_cells,
-        'n_events': n_events,
-        'status': 'success',
+    core['unique_outcomes'] = core.pop('unique_classes')
+    core['parameters'] = {
+        'animal_of_interest': animal_of_interest,
+        'behavior_type': behavior_type,
+        'use_quality_cells': use_quality_cells,
+        'alignment': alignment,
+        'time_window': time_window,
+        'time_bin_size': time_bin_size,
+        'time_bin_step': core.pop('time_bin_step'),
+        'cv_folds': cv_folds,
+        'min_events_per_class': min_events_per_class,
+        'n_shuffles': n_shuffles,
     }
+    return core
 
 
 # ---------------------------------------------------------------------------

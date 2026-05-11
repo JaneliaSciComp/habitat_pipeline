@@ -1,25 +1,30 @@
 # Habitat Pipeline
 
-Analysis pipeline for multi-animal electrophysiology and behavioral data. Handles data ingestion, ephys–behavior synchronization, spike sorting output processing, neural decoding, and visualization for freely behaving animals recorded simultaneously.
+Analysis pipeline for multi-animal electrophysiology and behavioral data (RatCity cohorts at Janelia). Handles data ingestion, ephys–behavior clock synchronization, Kilosort 4 spike-sorting output processing, neural decoding (opponent identity, event outcome, location), population geometry, and visualization for freely behaving animals recorded simultaneously.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for a deeper module-by-module reference.
 
 ## Quick Start
 
 ```python
 from ingestion.data_paths import DataStorageManager
-from ingestion.kilosort_data_import import KilosortData
-from video.behavioral_events import BehavioralEventsData
+from ingestion.kilosort_data_import import load_kilosort_data
 from ingestion.ephys_sync import DataSyncManager
+from video.behavioral_events import load_behavioral_events
 from ephys.decode_opponent_identity import decode_opponent_identity_population
 
-# Initialize — discovers all session data files automatically
-data_manager = DataStorageManager("631", "20251216", auto_load=True)
+# Discover all session data files automatically
+dsm = DataStorageManager("631", "20251216", auto_load=True)
 
 # Load electrophysiology and behavioral data
-ks_data = KilosortData(data_manager)
-behavior_data = BehavioralEventsData(data_manager)
+ks_data = load_kilosort_data(dsm.get_kilosort_path())
+behavior_data = load_behavioral_events(
+    dsm.get_behavioral_event_files(),
+    session_id=dsm.session_id,
+)
 
-# Synchronize behavioral timestamps with ephys clock
-sync_manager = DataSyncManager(data_manager, dio_channel=1)
+# Synchronize behavioral timestamps with the ephys clock
+sync_manager = DataSyncManager(dsm, dio_channel=1)
 behavior_data.synchronize_with_ephys(sync_manager, create_new_columns=True)
 
 # Decode opponent identity from neural activity
@@ -27,8 +32,8 @@ results = decode_opponent_identity_population(
     ks_data=ks_data,
     behavior_data=behavior_data,
     animal_of_interest="631",
-    behavior_type='EC',  # Encounter events
-    use_quality_cells=True
+    behavior_type="EC",   # Encounter events
+    use_quality_cells=True,
 )
 ```
 
@@ -36,24 +41,36 @@ results = decode_opponent_identity_population(
 
 ```
 habitat_pipeline/
-├── config/                         # Path configuration (JSON)
-│   └── default_paths.json
-├── ingestion/                      # Data loading & preprocessing
-│   ├── data_paths.py              # Centralized path management (DataStorageManager)
-│   ├── kilosort_data_import.py    # Kilosort 4 data loading & quality metrics
-│   ├── kilosort_data.py           # Low-level Kilosort file parsing
-│   ├── ephys_sync.py              # Ephys ↔ behavior synchronization
-│   └── trodes_to_python.py        # SpikeGadgets Trodes binary reader
-├── video/                          # Behavioral tracking & events
-│   ├── tracking_import.py         # Position tracking data loader
-│   ├── behavioral_events.py       # Behavioral event management
-│   ├── behavioral_visualization.py # Event heatmaps & timelines
-│   └── plot_trajectory.py         # Trajectory & occupancy plots
-├── ephys/                          # Electrophysiology analysis
-│   ├── decode_opponent_identity.py # LDA-based opponent decoding
-│   ├── population_geometry.py     # Population dynamics & dimensionality reduction
-│   └── plot_ephys_qa_stats.py     # Quality assessment visualization
-└── workflow.py                     # CLI workflow orchestration
+├── config/                            # Cohort path configuration (JSON)
+│   ├── default_paths.json             # Cohort 7
+│   └── cohort5_paths.json             # Cohort 5
+├── ingestion/                         # Data loading and preprocessing
+│   ├── data_paths.py                  # DataStorageManager + path discovery
+│   ├── kilosort_data_import.py        # Kilosort 4 loader + quality metrics (dataclass)
+│   ├── kilosort_data.py               # Low-level Kilosort file parser
+│   ├── ephys_sync.py                  # Ephys ↔ behavior clock synchronization
+│   └── trodes_to_python.py            # SpikeGadgets Trodes binary reader
+├── video/                             # Behavioral tracking and events
+│   ├── tracking_import.py             # VideoTrackingData + loader
+│   ├── behavioral_events.py           # BehavioralEventsData + opponent/group/outcome labels
+│   ├── behavioral_visualization.py    # Event heatmaps & timelines
+│   └── plot_trajectory.py             # Trajectory, occupancy, Voronoi, proximity
+├── ephys/                             # Electrophysiology analysis
+│   ├── _lda_decoding.py               # Shared LDA / CV / feature core (label-agnostic)
+│   ├── decoding_plots.py              # Shared decoding plots
+│   ├── decode_opponent_identity.py    # Opponent identity / ID-group LDA decoding
+│   ├── decode_event_outcome.py        # Winner/loser LDA decoding
+│   ├── decode_location.py             # Bayesian location decoding
+│   ├── population_geometry.py         # PCA/UMAP population dynamics
+│   ├── rastermap_viz.py               # Rastermap visualization
+│   └── plot_ephys_qa_stats.py         # Quality-metric plots + CLI
+├── gui/                               # Streamlit + Panel dashboards
+│   ├── app.py                         # Streamlit entry
+│   ├── interactive_app.py             # Panel + Bokeh + Plotly entry
+│   ├── tabs/                          # Tracking / Behavioral / Decoding / Population
+│   ├── loaders.py, runners.py, state.py, widgets.py, cache.py, plotting.py
+├── database/                          # Optional SQLite session/animal metadata
+└── workflow.py                        # Legacy CLI orchestrator
 ```
 
 ## Modules
@@ -64,117 +81,115 @@ habitat_pipeline/
 
 | Symbol | Description |
 |--------|-------------|
-| `DataStorageManager` | Discovers and manages all data file paths for a given animal/session. Supports `auto_load` for automatic path resolution. |
-| `get_kilosort_path()` | Locate Kilosort output directory. Returns `Path` or `List[Path]` for multi-session. |
-| `get_dio_path()` | Get DIO (digital I/O) file path. Returns `Path` or `List[Path]` for multi-session. |
-| `get_pulse_log_path()` | Get pulse log file for synchronization. |
-| `get_video_files_by_date()` | Find video files by session date. |
-| `get_tracking_files_by_date()` | Find tracking data files by session date. |
-| `get_event_files_by_date()` | Find behavioral event CSV files by session date. |
-| `get_animals_and_sessions()` | Scan ephys directory to list all available animal/session pairs. |
-| `verify_kilosort_path()` | Validate a Kilosort directory has required files. |
+| `DataStorageManager(animal_id, session_id, config_path=None, auto_load=True)` | Discovers and validates all data file paths for an animal/session. Passes to every downstream loader. |
+| `.get_kilosort_path()` / `.get_dio_path(channel)` / `.get_pulse_log_path()` | Ephys-side path accessors. |
+| `.get_video_files()` / `.get_tracking_files()` / `.get_behavioral_event_files()` | Behavior-side path accessors. |
+| `get_animals_and_sessions(config_path=None)` | Scan ephys root and return a DataFrame of available `(session, animal, kilosort_path)`. |
+| `verify_kilosort_path(path)` | Validate a Kilosort directory has the required files. |
 
-**`kilosort_data_import.py`** — High-level Kilosort 4 data loading with quality filtering.
+**`kilosort_data_import.py`** — High-level Kilosort 4 loader (dataclass + function), with on-disk pickle cache.
 
 | Symbol | Description |
 |--------|-------------|
-| `KilosortData` | Main data class. Accepts `DataStorageManager` or a file path. Supports `session_index` for multi-session recordings. |
-| `.load_spike_data()` | Load spike times and cluster assignments. |
-| `.get_cluster_spikes_fast()` | Efficiently split spikes by cluster using stable sort + `np.split`. |
-| `.select_clusters()` | Filter clusters by quality label (good/mua). |
-| `.calculate_firing_pattern_metrics()` | Compute firing rate, presence ratio, CV ISI per cluster. |
-| `.filter_cells_by_firing_patterns()` | Select cells passing quality thresholds. |
-| `.get_event_aligned_spikes()` | Extract spikes aligned to behavioral event times. |
-| `.bin_spike_times()` | Bin spikes into fixed time intervals. |
-
-**`kilosort_data.py`** — Low-level Kilosort file parser (direct path interface).
-
+| `KilosortData` | Pure-data dataclass: `spike_times_by_cell`, `ks_ids`, `cluster_info`, channel/amplitude/etc., metadata. |
+| `.duration_seconds` | Recording duration (with cache-trim-safe fallback). |
+| `.get_firing_rates()` / `.get_isi_statistics()` | Per-cluster firing-rate and ISI stats. |
+| `.calculate_firing_pattern_metrics()` | Firing rate, presence ratio, CV ISI per cluster. |
+| `.filter_cells_by_firing_patterns(...)` | Apply quality thresholds. |
+| `.get_filtered_cells_spike_times(...)` / `.bin_spike_times(...)` | Cached filtered spike lists and binned firing-rate matrices. |
+| `load_kilosort_data(path, force_reload=False)` | Disk loader with auto-cache. |
+| `save_kilosort_data(...)` / `load_kilosort_from_file(...)` | Persist or reload an instance. |
 
 **`ephys_sync.py`** — Ephys–behavior timestamp synchronization via inter-pulse interval matching.
 
 | Symbol | Description |
 |--------|-------------|
-| `DataSyncManager` | Manages sync state for a session. Provides `convert_ephys_to_behavior(t)` and `convert_behavior_to_ephys(t)`. |
-| `load_ephys_sync()` | Load DIO pulses and pulse-log timestamps from a `DataStorageManager`. |
-| `find_sync_mapping()` | Sync via linear regression on matched inter-pulse intervals. |
-| `plot_sync_results()` | Visualize sync quality (residuals, matched pulses). |
+| `DataSyncManager(data_manager, dio_channel=1)` | Sync state for a session. Exposes `convert_ephys_to_behavior(t)` and `convert_behavior_to_ephys(t)` plus `slope`/`intercept`. |
+| `load_ephys_sync(data_manager, dio_channel=1)` | Load DIO pulses and pulse-log timestamps. |
+| `find_sync_mapping(TSESync, TSBSync, system_time)` | Linear regression on matched IPIs; returns `{slope, intercept, r_squared, matched_ephys, matched_behavior, ...}`. |
+| `plot_sync_results(...)` | 4-panel sync quality diagnostic. |
 
-**`trodes_to_python.py`** — Read SpikeGadgets Trodes binary files.
-
-| Symbol | Description |
-|--------|-------------|
-| `readTrodesExtractedDataFile()` | Parse binary Trodes data files with settings header. |
+**`trodes_to_python.py`** — `readTrodesExtractedDataFile()` to parse SpikeGadgets Trodes binary files.
 
 ### video
 
-**`behavioral_events.py`** — Load and query behavioral event data.
+**`behavioral_events.py`** — Behavioral event records and label extraction.
 
 | Symbol | Description |
 |--------|-------------|
-| `BehavioralEventsData` | Loads behavioral event CSVs. Filter by type, rat, role. Provides `synchronize_with_ephys()` for timestamp alignment. |
-| `.get_events_by_type()` | Filter events by behavior abbreviation (F, EC, etc.). |
-| `.get_events_by_rat()` | Filter events involving a specific animal as initiator or victim. |
-| `.extract_opponent_labels()` | Extract event times and opponent identity labels for decoding. |
+| `BehavioralEventsData` | Dataclass holding `events_data` (DataFrame), `BEHAVIOR_TYPES` mapping, sync state. |
+| `.synchronize_with_ephys(sync_manager)` | Add `ts_*_ephys` columns to `events_data`. |
+| `.extract_opponent_labels(animal, behavior_type, ...)` | Per-event opponent identity labels. |
+| `.extract_group_labels(animal, behavior_type, ...)` | Pool opponents into `low`/`high` halves by numeric ID. |
+| `.extract_outcome_labels(animal, behavior_type, ...)` | Winner/loser labels for the focal animal (defaults to "any aggressive event"). |
+| `.get_events_by_type()` / `.get_events_by_rat()` / `.get_available_event_types()` / `.get_available_rats()` | Filtering and inventory helpers. |
+| `load_behavioral_events(files, session_id=...)` | Load CSV(s) into a `BehavioralEventsData`. |
 
-**`behavioral_visualization.py`** — Standalone behavioral event plots.
+**`behavioral_visualization.py`** — Standalone event plots: `plot_rat_interaction_heatmap`, `plot_rat_behavior_heatmap`, `plot_behavioral_event_timeline`, `plot_events_on_trajectory`.
 
-| Symbol | Description |
-|--------|-------------|
-| `plot_rat_interaction_heatmap()` | Heatmap of rat-pair interaction counts by event type. |
-| `plot_rat_behavior_heatmap()` | Heatmap of behavior types for a specific rat vs. all partners. |
-| `plot_behavioral_event_timeline()` | Timeline with Y=animal, X=event index, colored lines connecting initiator/victim. Center-outward Y-axis reordering by interaction frequency. |
-
-**`tracking_import.py`** — Load position tracking data.
+**`tracking_import.py`** — Position tracking loader.
 
 | Symbol | Description |
 |--------|-------------|
-| `load_tracking_data()` | Load tracking CSV/TSV via DataStorageManager. |
-| `load_timestamps()` | Load corresponding .npy timestamp file. |
-| `parse_tracking()` | Organize DataFrame by animal/object name. |
+| `VideoTrackingData` | Dataclass with `parsed_data: Dict[str, DataFrame]`, `timestamps`, helpers. |
+| `load_tracking_data(source, file_index=0, load_ts=True)` | Accepts a `DataStorageManager` or a path. |
+| `parse_tracking(df)` | Split a combined frame into per-animal DataFrames. |
+| `load_timestamps(path)` | Locate the paired `*_ts.npy` file. |
 
-**`plot_trajectory.py`** — Trajectory visualization.
-
-| Symbol | Description |
-|--------|-------------|
-| `plot_animal_path()` | Plot single animal trajectory with optional start/end markers. |
-| `plot_multiple_paths()` | Overlay trajectories of multiple animals. |
-| `plot_path_heatmap()` | 2D positional occupancy heatmap. |
-| `calculate_path_statistics()` | Compute distance, speed, and occupancy metrics. |
+**`plot_trajectory.py`** — Trajectory and occupancy plots: `plot_animal_path`, `plot_multiple_paths`, `plot_path_heatmap`, `plot_territorial_occupancy`, `plot_voronoi_territories`, `plot_proximity_network` (+ `compute_proximity_interactions`), `calculate_path_statistics`, `save_visualization`.
 
 ### ephys
 
-**`decode_opponent_identity.py`** — Opponent identity decoding from neural activity using cross-validated LDA.
+The decoding modules share a single label-agnostic core ([ephys/_lda_decoding.py](ephys/_lda_decoding.py)) and a shared plotting module ([ephys/decoding_plots.py](ephys/decoding_plots.py)). Wrappers add label-specific extraction and identical plot calls.
+
+**`decode_opponent_identity.py`** — Opponent identity (and ID-group) LDA decoding.
 
 | Symbol | Description |
 |--------|-------------|
-| `decode_opponent_identity_single_cell()` | Single-cell LDA decoding. Supports `selected_opponents` to restrict to specific opponent labels. |
-| `decode_opponent_identity_population()` | Population-level decoding across quality-filtered cells. Passes `selected_opponents` through to per-cell calls. |
-| `align_spikes_to_events()` | Align spike times to behavioral event times within a time window. |
-| `extract_firing_rate_features()` | Bin aligned spikes into firing rate feature vectors. |
-| `plot_decoding_accuracy_distribution()` | Histogram + boxplot of cross-validated accuracies across cells. |
-| `plot_best_cells_decoding()` | Bar plot of top cells + confusion matrix of best cell. |
-| `plot_decoding_summary()` | Comprehensive multi-panel summary figure. |
-| `plot_top_cells_firing_rates()` | Peri-event firing rate traces split by opponent class. |
+| `decode_opponent_identity_single_cell(...)` | Single-cell decode wrapper. |
+| `decode_opponent_identity_population(ks_data, behavior_data, animal_of_interest, behavior_type=None, label_mode='opponent'|'group', ...)` | Per-cell population sweep. |
+| `decode_opponent_identity_time_resolved(...)` | Population LDA per time bin with optional shuffle null. |
 
-**`population_geometry.py`** — Neural population dynamics and state-space analysis.
+**`decode_event_outcome.py`** — Winner vs loser decoding (mirrors the opponent module). `behavior_type=None` includes every event with both `winner` and `loser` populated.
 
-| Symbol | Description |
-|--------|-------------|
-| `PopulationGeometryAnalyzer` | Construct population firing rate matrices, apply PCA/UMAP, compare conditions. |
-| `.construct_population_matrix()` | Build (cells × time bins × trials) tensor from event-aligned spikes. |
-| `.apply_dimensionality_reduction()` | PCA or UMAP on population activity. |
-| `.plot_population_state_space()` | Visualize reduced-dimensionality trajectories by condition. |
+**`decode_location.py`** — Bayesian decoding of `(x, y)` for tracked objects: `build_binned_data`, `decode_location_single_cell`, `decode_location_population`, `decode_all_locations`, `plot_decoding_results`, `plot_all_decoding_summary`.
 
-**`plot_ephys_qa_stats.py`** — Quality assessment plots.
+**`population_geometry.py`** — PCA/UMAP on event-aligned population activity.
 
 | Symbol | Description |
 |--------|-------------|
-| `plot_firing_pattern_histograms()` | Distribution plots for firing rate, presence ratio, CV ISI. |
-| `plot_pass_fail_histograms()` | Pass/fail comparison overlay for quality thresholds. |
+| `PopulationGeometryAnalyzer(ks_data, behavior_data)` | Build (cells × bins × trials) tensors, run PCA/UMAP. |
+| `.construct_population_matrix(...)` / `.apply_dimensionality_reduction(...)` | Core methods. |
+| `.plot_population_dynamics(...)` / `.plot_pca_summary(...)` / `.plot_normalized_population_matrix(...)` | Built-in plots. |
+| `run_population_analysis_pipeline(ks, be, ...)` | End-to-end wrapper. |
+
+**`rastermap_viz.py`** — `run_rastermap`, `plot_rastermap`, `plot_rastermap_interactive`, `plot_rastermap_with_events`, `bin_spikes_matrix`. Requires `pip install rastermap`.
+
+**`plot_ephys_qa_stats.py`** — Quality-assessment plots: `plot_firing_pattern_histograms`, `plot_pass_fail_histograms`, `test_threshold_combinations`, `load_and_analyze_data` (+ CLI).
+
+**`decoding_plots.py`** — Shared plots for both opponent and outcome decoders. Result-dict-driven titles (`results['parameters']['class_label']` / `['analysis_title']`):
+
+- `plot_decoding_accuracy_distribution` — histogram + boxplot of per-cell CV accuracies
+- `plot_best_cells_decoding` — top-N bar chart + best-cell confusion matrix
+- `plot_decoding_summary` — 6-panel dashboard
+- `plot_time_resolved_decoding` — accuracy curve vs time + best-bin confusion matrix
+- `plot_top_cells_firing_rates` — peri-event firing-rate curves split by class
+- `plot_top_cells_rasters` — spike rasters for top cells, sorted by class
+
+### gui
+
+Two parallel apps share the same loaders.
+
+| App | Command | Best for |
+|---|---|---|
+| Streamlit explorer | `streamlit run gui/app.py` | Browsing all analyses across tabs (Tracking, Behavioral, Decoding, Population) |
+| Panel explorer | `panel serve gui/interactive_app.py --show` | Linked timeline ↔ Rastermap ↔ 3D PCA |
+
+The Streamlit app caches heavy results to `.gui_cache/` (git-ignored). Decoding and population-geometry runs are persisted to disk and invalidated automatically when parameters change. See [gui/README.md](gui/README.md) for details.
 
 ### workflow
 
-**`workflow.py`** — End-to-end CLI pipeline.
+**`workflow.py`** — Legacy end-to-end CLI. Useful as a scaffold; per-module CLIs and the GUIs are the recommended entry points.
 
 ```bash
 python workflow.py --animal_id 631 --session_id 20251216 --save_plots --output_dir ./results
@@ -182,37 +197,49 @@ python workflow.py --animal_id 631 --session_id 20251216 --save_plots --output_d
 
 Orchestrates: Kilosort data loading → tracking processing → ephys-video synchronization → visualization generation.
 
+### database (optional)
+
+SQLAlchemy ORM (`Animal`, `ExperimentSession`, `DataFile`, `HabitatDatabase`) over `habitat_pipeline.db`, plus `database/database_cli.py` for `init_database`, `scan_directory`, `add_*`, `show_status`, `export_summary`. Bridge helpers in `database/database_integration.py` (`PipelineIntegration`, `quick_setup`). See [database/README.md](database/README.md).
+
 ## Configuration
 
 Data paths are defined in JSON files under `config/`:
 
 ```json
 {
-    "ephys_base_path": "/path/to/ephys",
-    "video_base_path": "/path/to/video",
-    "tracking_base_path": "/path/to/tracking",
-    "events_base_path": "/path/to/events",
-    "pulse_log_path": "/path/to/pulse_log.csv"
+  "ephys":    "/path/to/ephys",
+  "video":    "/path/to/video",
+  "tracking": "/path/to/tracking",
+  "events":   "/path/to/events"
 }
 ```
 
-`DataStorageManager` loads configuration automatically, searching the `config/` directory first and falling back to the module directory.
+`DataStorageManager` loads the active config automatically: passing `config_path=None` reads `config/default_paths.json` (Cohort 7); passing just a filename (`"cohort5_paths.json"`) looks under `config/` first, otherwise treats it as an absolute path.
 
 ## Notebooks
 
 | Notebook | Purpose |
 |----------|---------|
-| `pipeline_demo.ipynb` | Full workflow: data loading, behavioral analysis, population decoding, PCA |
-| `clock_sync_demo.ipynb` | Simulated sync pulse timing, interval-based synchronization, error analysis |
-| `ephys/LDA_demo.ipynb` | Single-cell opponent identity decoding walkthrough |
-| `video/trajectory_plots_examples.ipynb` | Trajectory visualization and spatial occupancy examples |
+| `pipeline_demo.ipynb` | Full workflow: data loading, behavioral analysis, population decoding, PCA. |
+| `test.ipynb` | Working scratchpad covering the most recent refactors. |
+| `db_example.ipynb` | Database setup and queries. |
+| `ephys/LDA_demo.ipynb` | Single-cell opponent identity decoding walkthrough. |
+| `video/trajectory_plots_examples.ipynb` | Trajectory visualization and spatial occupancy examples. |
+| `tests/KilosortData_test_demo.ipynb` | KilosortData loader demo. |
 
 ## Installation
 
 ```bash
-git clone https://github.com/your-org/habitat_pipeline.git
+git clone https://github.com/JaneliaSciComp/habitat_pipeline.git
 cd habitat_pipeline
 pip install -e .
+```
+
+For the dashboards:
+
+```bash
+pip install -e ".[gui]"
+pip install rastermap  # required for rastermap_viz and the Panel app
 ```
 
 Or with pixi:
@@ -221,6 +248,26 @@ Or with pixi:
 pixi install
 ```
 
+Or conda:
+
+```bash
+conda env create -f environment.yml
+conda activate habitat-pipeline
+```
+
 ### Dependencies
 
-numpy, pandas, matplotlib, seaborn, scikit-learn, scipy. Optional: umap-learn.
+Core: numpy, pandas, scipy, scikit-learn, matplotlib, seaborn, h5py.
+GUI extras: streamlit, panel, bokeh, plotly, param.
+Optional: rastermap, umap-learn, sqlalchemy, opencv-python.
+
+## Tests
+
+```bash
+cd tests
+python run_tests.py          # all tests
+python run_tests.py loading  # subset
+pytest -v                    # via pytest directly
+```
+
+See [tests/README.md](tests/README.md) for coverage details.

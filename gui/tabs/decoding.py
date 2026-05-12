@@ -1,5 +1,9 @@
 import streamlit as st
 
+from ephys.decode_event_outcome import (
+    decode_event_outcome_population,
+    decode_event_outcome_time_resolved,
+)
 from ephys.decode_opponent_identity import (
     decode_opponent_identity_population,
     decode_opponent_identity_time_resolved,
@@ -35,11 +39,12 @@ def render(key: SessionKey, params: AnalysisParams) -> None:
 
     label_mode = st.radio(
         "Label mode",
-        ["opponent", "group"],
+        ["opponent", "group", "outcome"],
         horizontal=True,
         key="decoding_label_mode",
         help="opponent: decode each individual opponent rat. "
-             "group: decode two ID-half groups (low vs high opponent IDs).",
+             "group: decode two ID-half groups (low vs high opponent IDs). "
+             "outcome: decode event outcome (winner vs loser).",
     )
 
     view = plot_picker("View", VIEWS, key="decoding_view")
@@ -70,6 +75,20 @@ def render(key: SessionKey, params: AnalysisParams) -> None:
         }
 
         def _run_tr():
+            if label_mode == "outcome":
+                return decode_event_outcome_time_resolved(
+                    ks_data=ks_data,
+                    behavior_data=events,
+                    animal_of_interest=key.animal_id,
+                    use_quality_cells=True,
+                    alignment="end",
+                    time_window=params.time_window,
+                    time_bin_size=params.time_bin_size,
+                    time_bin_step=float(bin_step),
+                    cv_folds=params.cv_folds,
+                    min_events_per_class=params.min_events_per_class,
+                    n_shuffles=n_shuffles,
+                )
             return decode_opponent_identity_time_resolved(
                 ks_data=ks_data,
                 behavior_data=events,
@@ -103,6 +122,18 @@ def render(key: SessionKey, params: AnalysisParams) -> None:
         return
 
     def _run():
+        if label_mode == "outcome":
+            return decode_event_outcome_population(
+                ks_data=ks_data,
+                behavior_data=events,
+                animal_of_interest=key.animal_id,
+                use_quality_cells=True,
+                alignment="end",
+                time_window=params.time_window,
+                time_bin_size=params.time_bin_size,
+                cv_folds=params.cv_folds,
+                min_events_per_class=params.min_events_per_class,
+            )
         return decode_opponent_identity_population(
             ks_data=ks_data,
             behavior_data=events,

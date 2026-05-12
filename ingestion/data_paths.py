@@ -14,6 +14,9 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+_CACHE_VERSION = 1
+_DEFAULT_CACHE_DIR = Path(__file__).parent.parent / ".cache" / "data_paths"
+
 
 def _load_config(config_path: Optional[str] = None) -> dict:
     """
@@ -498,11 +501,14 @@ class DataStorageManager:
     """
 
     def __init__(self, animal_id: str, session_id: str, config_path: Optional[str] = None,
-                 auto_load: bool = True):
+                 auto_load: bool = True, use_cache: bool = True,
+                 cache_dir: Optional[Path] = None):
         self.animal_id = animal_id
         self.session_id = session_id
         self.config_path = config_path
         self._config = _load_config(config_path)
+        self.use_cache = use_cache
+        self.cache_dir = Path(cache_dir) if cache_dir is not None else _DEFAULT_CACHE_DIR
 
         self.kilosort_path = None
         self.dio_paths: Dict[int, Path] = {}
@@ -515,7 +521,14 @@ class DataStorageManager:
             self.load_all_paths()
 
     def load_all_paths(self):
-        """Load all available data paths for this animal/session."""
+        """Load all available data paths for this animal/session.
+
+        Reads from the JSON cache when available; otherwise scans the data
+        directories and writes a fresh cache file.
+        """
+        if self.use_cache and self._load_cache():
+            self._log_availability_summary()
+            return
         logger.info("Loading data paths for %s/%s", self.animal_id, self.session_id)
         self._load_ephys_paths()
         self._load_video_paths()
@@ -523,6 +536,81 @@ class DataStorageManager:
         self._load_behavioral_events()
         self._load_sync_paths()
         self._log_availability_summary()
+        if self.use_cache:
+            self._save_cache()
+
+    def refresh(self):
+        """Re-scan all paths from disk and update the cache."""
+        logger.info("Refreshing data paths for %s/%s", self.animal_id, self.session_id)
+        self._load_ephys_paths()
+        self._load_video_paths()
+        self._load_tracking_paths()
+        self._load_behavioral_events()
+        self._load_sync_paths()
+        self._log_availability_summary()
+        if self.use_cache:
+            self._save_cache()
+
+    def _cache_file(self) -> Path:
+        return self.cache_dir / f"{self.animal_id}_{self.session_id}.json"
+
+    def _to_cache_dict(self) -> dict:
+        return {
+            "version": _CACHE_VERSION,
+            "animal_id": self.animal_id,
+            "session_id": self.session_id,
+            "kilosort_path": str(self.kilosort_path) if self.kilosort_path else None,
+            "dio_paths": {str(ch): str(p) for ch, p in self.dio_paths.items()},
+            "video_files": [str(p) for p in self.video_files],
+            "tracking_files": [str(p) for p in self.tracking_files],
+            "behavioral_event_files": [str(p) for p in self.behavioral_event_files],
+            "pulse_log_path": str(self.pulse_log_path) if self.pulse_log_path else None,
+        }
+
+    def _apply_cache_dict(self, data: dict) -> None:
+        self.kilosort_path = Path(data["kilosort_path"]) if data.get("kilosort_path") else None
+        self.dio_paths = {int(ch): Path(p) for ch, p in data.get("dio_paths", {}).items()}
+        self.video_files = [Path(p) for p in data.get("video_files", [])]
+        self.tracking_files = [Path(p) for p in data.get("tracking_files", [])]
+        self.behavioral_event_files = [Path(p) for p in data.get("behavioral_event_files", [])]
+        self.pulse_log_path = Path(data["pulse_log_path"]) if data.get("pulse_log_path") else None
+
+    def _save_cache(self) -> None:
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            with open(self._cache_file(), "w") as f:
+                json.dump(self._to_cache_dict(), f, indent=2)
+            logger.debug("Saved data-paths cache: %s", self._cache_file())
+        except (OSError, PermissionError) as e:
+            logger.warning("Could not save data-paths cache: %s", e)
+
+    def _load_cache(self) -> bool:
+        cache_file = self._cache_file()
+        if not cache_file.exists():
+            return False
+        try:
+            with open(cache_file, "r") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning("Could not read cache %s: %s — rebuilding", cache_file, e)
+            return False
+        if data.get("version") != _CACHE_VERSION:
+            logger.info("Cache version mismatch in %s — rebuilding", cache_file)
+            return False
+        try:
+            self._apply_cache_dict(data)
+        except (KeyError, ValueError, TypeError) as e:
+            logger.warning("Malformed cache %s: %s — rebuilding", cache_file, e)
+            return False
+        logger.info("Loaded data paths from cache: %s", cache_file)
+        return True
+
+    def clear_cache(self) -> None:
+        """Delete this animal/session's cache file if it exists."""
+        cache_file = self._cache_file()
+        if cache_file.exists():
+            cache_file.unlink()
+            logger.info("Removed cache file: %s", cache_file)
 
     def _load_ephys_paths(self):
         try:

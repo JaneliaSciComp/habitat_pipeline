@@ -852,12 +852,275 @@ class PopulationGeometryAnalyzer:
                      f'Std: {std_activity:.3f}\n'
                      f'Range: [{min_activity:.2f}, {max_activity:.2f}]')
         
-        ax.text(0.98, 0.98, stats_text, transform=ax.transAxes, 
+        ax.text(0.98, 0.98, stats_text, transform=ax.transAxes,
                fontsize=10, verticalalignment='top', horizontalalignment='right',
                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-        
+
         plt.tight_layout()
-        
+
+        return fig
+
+    def compute_opponent_similarity(self,
+                                    animal_of_interest: str,
+                                    behavior_type: str = 'EC',
+                                    windows: Union[Tuple[float, float], List[Tuple[float, float]]] = (-1.0, 0.0),
+                                    alignment: str = 'start',
+                                    use_quality_cells: bool = True,
+                                    min_events_per_opponent: int = 5,
+                                    top_n_cells: Optional[int] = None) -> Dict:
+        """
+        Compute pairwise Pearson similarity between mean population activity
+        vectors for each opponent the focal animal encountered.
+
+        For each window in ``windows``, the mean firing rate per cell per
+        opponent (averaged across that opponent's events) is computed. Per-cell
+        means are concatenated across windows into a single feature vector per
+        opponent of length ``n_cells * n_windows``. Pairwise Pearson
+        correlation across opponents yields the similarity matrix.
+
+        Parameters
+        ----------
+        animal_of_interest : str
+            Focal animal id (``'631'`` or ``'rat631'`` — auto-prefixed).
+        behavior_type : str, default='EC'
+            Behavior abbreviation (passed through to
+            ``BehavioralEventsData.extract_opponent_labels``).
+        windows : (start, end) tuple or list of such tuples, default=(-1.0, 0.0)
+            One or more analysis windows (seconds, relative to the alignment
+            point). Multi-window features are concatenated.
+        alignment : {'start', 'end', 'center'}, default='start'
+            Event alignment point.
+        use_quality_cells : bool, default=True
+            Restrict to quality-filtered cells.
+        min_events_per_opponent : int, default=5
+            Drop opponents with fewer than this many events.
+        top_n_cells : int, optional
+            If set, keep only the ``top_n_cells`` cells with the highest mean
+            firing rate across all selected events and windows. Applied after
+            quality filtering. ``None`` (default) keeps all selected cells.
+
+        Returns
+        -------
+        dict
+            Result with keys ``similarity_matrix``, ``opponents``,
+            ``mean_activity``, ``event_counts``, ``parameters``,
+            ``behavioral_summary``, ``status``. On failure (no events after
+            filtering) returns ``{'status': 'failed', 'error': ..., 'parameters': ...}``.
+
+        Notes
+        -----
+        Internally calls ``construct_population_matrix`` once per window with
+        ``time_bin_size`` equal to the window width (so each event yields a
+        single mean-rate bin per cell). Successive calls overwrite
+        ``self.population_matrices[f"{alignment}_none"]``; the returned dict
+        holds everything needed downstream.
+        """
+        if self.behavior_data is None:
+            raise ValueError(
+                "compute_opponent_similarity requires behavior_data; "
+                "pass it to PopulationGeometryAnalyzer(ks_data, behavior_data)."
+            )
+
+        # Normalize windows -> list of (start, end) tuples
+        def _is_single_window(w) -> bool:
+            try:
+                return (
+                    len(w) == 2
+                    and isinstance(w[0], (int, float))
+                    and isinstance(w[1], (int, float))
+                )
+            except TypeError:
+                return False
+
+        if _is_single_window(windows):
+            window_list: List[Tuple[float, float]] = [(float(windows[0]), float(windows[1]))]
+        else:
+            window_list = [(float(w[0]), float(w[1])) for w in windows]
+
+        for w_start, w_end in window_list:
+            if w_end <= w_start:
+                raise ValueError(f"Window {(w_start, w_end)} has non-positive width")
+
+        if top_n_cells is not None and top_n_cells <= 0:
+            raise ValueError(f"top_n_cells must be positive or None, got {top_n_cells}")
+
+        base_params = {
+            'animal_of_interest': animal_of_interest,
+            'behavior_type': behavior_type,
+            'windows': window_list,
+            'alignment': alignment,
+            'use_quality_cells': use_quality_cells,
+            'min_events_per_opponent': min_events_per_opponent,
+            'top_n_cells': top_n_cells,
+            'n_windows': len(window_list),
+            'class_label': 'Opponent',
+            'analysis_title': 'Opponent Representation Similarity',
+        }
+
+        # Extract opponent labels (ephys-synced timestamps)
+        event_starts, event_ends, opponent_labels = self.behavior_data.extract_opponent_labels(
+            animal_of_interest=animal_of_interest,
+            behavior_type=behavior_type,
+            min_events_per_class=min_events_per_opponent,
+        )
+
+        if len(event_starts) == 0:
+            return {
+                'status': 'failed',
+                'error': (
+                    f"No '{behavior_type}' events for {animal_of_interest} "
+                    f"after min_events_per_opponent={min_events_per_opponent} filter."
+                ),
+                'parameters': base_params,
+            }
+
+        # Per-window: opp -> mean firing rate vector across cells
+        per_window_means: List[Dict[str, np.ndarray]] = []
+        n_cells_final: Optional[int] = None
+
+        for w_start, w_end in window_list:
+            width = w_end - w_start
+            pop_matrix = self.construct_population_matrix(
+                event_starts=event_starts,
+                event_ends=event_ends,
+                event_labels=opponent_labels,
+                time_window=(w_start, w_end),
+                time_bin_size=width,
+                alignment=alignment,
+                normalize_method='none',
+                use_quality_cells=use_quality_cells,
+            )
+            n_cells_final = pop_matrix['metadata']['n_cells']
+
+            window_means: Dict[str, np.ndarray] = {}
+            for opp, data in pop_matrix['population_data'].items():
+                # data shape: (n_events_opp, n_cells, 1)
+                window_means[str(opp)] = data[:, :, 0].mean(axis=0)
+            per_window_means.append(window_means)
+
+        # Deterministic opponent ordering
+        opponents_sorted = sorted(per_window_means[0].keys())
+
+        # Optional top-N cell selection by overall mean firing rate across
+        # all opponents and windows.
+        selected_cell_indices: Optional[np.ndarray] = None
+        if top_n_cells is not None and n_cells_final is not None:
+            # Sum each cell's mean rate across opponents and windows
+            cell_rate_sum = np.zeros(n_cells_final)
+            for window_means in per_window_means:
+                for opp in opponents_sorted:
+                    cell_rate_sum += window_means[opp]
+            n_keep = min(top_n_cells, n_cells_final)
+            # Indices of the top-n cells (descending by rate)
+            selected_cell_indices = np.argsort(cell_rate_sum)[::-1][:n_keep]
+            selected_cell_indices.sort()  # stable order for interpretability
+            for window_means in per_window_means:
+                for opp in window_means:
+                    window_means[opp] = window_means[opp][selected_cell_indices]
+            n_cells_final = int(n_keep)
+
+        # Concatenate per-window vectors -> feature matrix [n_opponents, n_cells * n_windows]
+        feature_rows = [
+            np.concatenate([per_window_means[i][opp] for i in range(len(window_list))])
+            for opp in opponents_sorted
+        ]
+        mean_activity = np.vstack(feature_rows)
+
+        # Pairwise Pearson correlation
+        similarity_matrix = np.corrcoef(mean_activity)
+
+        # Event counts per opponent
+        unique_labels, counts = np.unique(opponent_labels, return_counts=True)
+        event_counts = {str(lbl): int(c) for lbl, c in zip(unique_labels, counts)}
+
+        return {
+            'status': 'success',
+            'similarity_matrix': similarity_matrix,
+            'opponents': np.array(opponents_sorted),
+            'mean_activity': mean_activity,
+            'event_counts': event_counts,
+            'selected_cell_indices': selected_cell_indices,
+            'parameters': {**base_params, 'n_cells': n_cells_final},
+            'behavioral_summary': {
+                'n_events': int(len(opponent_labels)),
+                'unique_classes': unique_labels,
+                'class_counts': event_counts,
+            },
+        }
+
+    def plot_opponent_similarity_matrix(self,
+                                        result: Dict,
+                                        figsize: Tuple[float, float] = (8, 7),
+                                        cmap: str = 'RdBu_r',
+                                        annotate: bool = True,
+                                        vmin: Optional[float] = None,
+                                        vmax: Optional[float] = None) -> plt.Figure:
+        """
+        Plot the opponent similarity matrix from ``compute_opponent_similarity``.
+
+        Parameters
+        ----------
+        result : dict
+            Successful result dict from ``compute_opponent_similarity``.
+        figsize : tuple, default=(8, 7)
+        cmap : str, default='RdBu_r'
+        annotate : bool, default=True
+            Write the correlation value in each cell.
+        vmin, vmax : float, optional
+            Colour-bar range. ``None`` (default) autoscales to the matrix
+            min/max.
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+        """
+        if result.get('status') != 'success':
+            raise ValueError(
+                f"Cannot plot — result status is '{result.get('status')}'. "
+                f"Error: {result.get('error', 'unknown')}"
+            )
+
+        sim = result['similarity_matrix']
+        opponents = result['opponents']
+        params = result['parameters']
+        event_counts = result['event_counts']
+
+        if vmin is None:
+            vmin = float(np.nanmin(sim))
+        if vmax is None:
+            vmax = float(np.nanmax(sim))
+
+        fig, ax = plt.subplots(figsize=figsize)
+        sns.heatmap(
+            sim,
+            ax=ax,
+            xticklabels=list(opponents),
+            yticklabels=list(opponents),
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            annot=annotate,
+            fmt='.2f',
+            square=True,
+            cbar_kws={'label': 'Pearson r'},
+        )
+
+        windows_str = ', '.join(f'({s:g}, {e:g})s' for s, e in params['windows'])
+        counts_str = ', '.join(
+            f"{opp}: n={event_counts.get(str(opp), 0)}" for opp in opponents
+        )
+
+        title_main = params.get('analysis_title', 'Opponent Representation Similarity')
+        title_sub = (
+            f"{params['animal_of_interest']} | {params['behavior_type']} events | "
+            f"{params['n_cells']} cells | windows: {windows_str}\n"
+        #    f"events per opponent — {counts_str}"
+        )
+        ax.set_title(f"{title_main}\n{title_sub}", fontsize=12)
+        ax.set_xlabel('Opponent')
+        ax.set_ylabel('Opponent')
+        plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+        plt.tight_layout()
         return fig
 
 

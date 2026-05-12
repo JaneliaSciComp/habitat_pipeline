@@ -6,33 +6,26 @@ Multi-animal electrophysiology and behavioral analysis pipeline for freely behav
 
 ```mermaid
 flowchart LR
-    Config[config/*.json] --> DSM[DataStorageManager]
-    DSM --> Ingest[ingestion]
-    DSM --> Video[video]
-    Ingest --> KS[KilosortData]
-    Video --> BE[BehavioralEventsData]
-    Video --> VT[VideoTrackingData]
-    Ingest --> Sync[DataSyncManager]
+    ks[(KiloSort files)] --> KS[KilosortData]
+    behavior[(behavior files)] --> BE[BehavioralEventsData]
+    sync[(Sync files)] --> Sync[DataSyncManager]
     Sync --> BE
+    video[(tracking files)] --> VT[VideoTrackingData]
     Sync --> VT
-    KS --> Core[_lda_decoding core]
-    BE --> Core
-    Core --> Opp[decode_opponent_identity]
-    Core --> Out[decode_event_outcome]
-    KS --> Loc[decode_location]
-    VT --> Loc
     KS --> PopGeo[population_geometry]
     BE --> PopGeo
-    KS --> Raster[rastermap_viz]
-    KS --> QA[plot_ephys_qa_stats]
+    KS --> Core[lda_decoding core]
+    BE --> Core
+    BE --> BV[behavioral_visualization]
+    PopGeo --> Raster[rastermap_viz]
+    Core --> Opp[decode_opponent_identity]
+    Core --> Out[decode_event_outcome]
     Opp --> Plots[decoding_plots]
     Out --> Plots
-    KS --> Consumers
-    BE --> Consumers
     Plots --> Consumers
     PopGeo --> Consumers
-    Consumers["GUIs · workflow.py · notebooks"]
-    Consumers --> DB[(habitat_pipeline.db)]
+    BV --> Consumers
+    Consumers(["GUIs · notebooks"])
 ```
 
 ## Repository Layout

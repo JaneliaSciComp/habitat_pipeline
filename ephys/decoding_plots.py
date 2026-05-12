@@ -376,7 +376,9 @@ def plot_decoding_summary(results: Dict,
 
         bars = ax4.bar(range(top_n), accuracies_top, color='lightcoral')
         ax4.axhline(chance_level, color='red', linestyle='--', alpha=0.7, label='Chance')
-        ax4.set_xlabel('Cell Rank')
+        ax4.set_xticks(range(top_n))
+        ax4.set_xticklabels([str(cell[0]) for cell in top_cells], rotation=45, ha='right')
+        ax4.set_xlabel('Cluster ID')
         ax4.set_ylabel('Accuracy')
         ax4.set_title(f'Top {top_n} Cells by Accuracy')
         ax4.legend()

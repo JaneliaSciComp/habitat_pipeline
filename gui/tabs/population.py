@@ -16,6 +16,7 @@ from gui.widgets import plot_picker
 VIEWS = [
     "Population Dynamics",
     "PCA Summary",
+    "Similarity Matrix",
     "Rastermap",
     "Rastermap (events)",
 ]
@@ -50,6 +51,64 @@ def render(key: SessionKey, params: PopulationParams) -> None:
 
     ks_data = get_ks_data(*key.as_loader_args())
     analyzer = PopulationGeometryAnalyzer(ks_data, events)
+
+    if view == "Similarity Matrix":
+        cols = st.columns(3)
+        with cols[0]:
+            win_start = st.number_input(
+                "Window start (s)",
+                value=float(base.time_window[0]),
+                step=0.1,
+                help="Window start relative to alignment point.",
+            )
+        with cols[1]:
+            win_end = st.number_input(
+                "Window end (s)",
+                value=float(base.time_window[1]),
+                step=0.1,
+                help="Window end relative to alignment point.",
+            )
+        with cols[2]:
+            top_n = st.number_input(
+                "Top N cells (0 = all)",
+                value=0,
+                min_value=0,
+                step=1,
+                help="Keep only the N highest-firing cells. 0 = keep all.",
+            )
+        top_n_cells = int(top_n) if top_n > 0 else None
+        sim_params = {
+            **params.as_dict(),
+            "sim_window": (float(win_start), float(win_end)),
+            "top_n_cells": top_n_cells,
+        }
+
+        def _run_sim():
+            return analyzer.compute_opponent_similarity(
+                animal_of_interest=key.animal_id,
+                behavior_type=base.behavior_type,
+                windows=(float(win_start), float(win_end)),
+                alignment=params.alignment,
+                use_quality_cells=True,
+                min_events_per_opponent=base.min_events_per_class,
+                top_n_cells=top_n_cells,
+            )
+
+        sim_result = cached_step(
+            prefix="population_similarity",
+            key=key,
+            params=sim_params,
+            run_fn=_run_sim,
+            button_label="Run Similarity",
+            spinner_label="Computing opponent similarity matrix...",
+        )
+        if sim_result is None:
+            return
+        if sim_result.get("status") != "success":
+            st.error(f"Similarity failed: {sim_result.get('error', 'unknown error')}")
+            return
+        show_fig(analyzer.plot_opponent_similarity_matrix(sim_result))
+        return
 
     def _run():
         starts, ends, labels = events.extract_opponent_labels(

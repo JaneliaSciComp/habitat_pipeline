@@ -6,11 +6,11 @@ Multi-animal electrophysiology and behavioral analysis pipeline for freely behav
 
 ```mermaid
 flowchart LR
-    ks[(KiloSort files)] --> KS[KilosortData]
-    behavior[(behavior files)] --> BE[BehavioralEventsData]
-    sync[(Sync files)] --> Sync[DataSyncManager]
+    ks[/KiloSort files/] --> KS[KilosortData]
+    behavior[/behavior files/] --> BE[BehavioralEventsData]
+    sync[/sync files/] --> Sync[DataSyncManager]
     Sync --> BE
-    video[(tracking files)] --> VT[VideoTrackingData]
+    video[/tracking files/] --> VT[VideoTrackingData]
     Sync --> VT
     KS --> PopGeo[population_geometry]
     BE --> PopGeo

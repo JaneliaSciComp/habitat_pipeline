@@ -539,7 +539,7 @@ def plot_top_cells_firing_rates(ks_data,
                  f'Behavior: {btype}, Alignment: {params["alignment"]}, '
                  f'Window: {time_window[0]:.1f} to {time_window[1]:.1f}s',
                  fontsize=14, fontweight='bold')
-    plt.tight_layout()
+    fig.tight_layout(rect=[0.03, 0.03, 1.0, 0.97])
 
     if save_path:
         fig.savefig(save_path, dpi=300, bbox_inches='tight')

@@ -1303,7 +1303,7 @@ def plot_pca_trajectory_with_events(
             zaxis_title=f'PC3 ({ev[2]:.1%})' if len(ev) >= 3 else 'PC3',
         ),
         width=950, height=750,
-        legend=dict(title='Opponent'),
+        legend=dict(title='Opponent', x=0.97, xanchor='right', y=1, yanchor='top'),
     )
 
     result = {

@@ -16,7 +16,6 @@ from scipy.stats import zscore
 from sklearn.decomposition import PCA
 
 from ephys.decode_opponent_identity import align_spikes_to_events, extract_firing_rate_features
-from ephys.rastermap_viz import bin_spikes_matrix
 from ingestion.data_paths import DataStorageManager, get_animals_and_sessions
 from ingestion.ephys_sync import DataSyncManager
 from ingestion.kilosort_data_import import load_kilosort_data
@@ -97,8 +96,8 @@ def _build_pop_data(events, ks_data, behavior_type, animal_id, pca_bin, min_even
     or None on failure.
     """
     # Full recording firing-rate matrix (quality-filtered cells, raw FR — no z-score)
-    spks, bin_centers = bin_spikes_matrix(
-        ks_data, bin_size=pca_bin, start_time=t0, end_time=t1, filtered_only=True,
+    spks, bin_centers = ks_data.bin_spike_times(
+        bin_size_sec=pca_bin, t_start=t0, t_end=t1, filtered_only=True,
     )
     n_cells, _ = spks.shape
     if n_cells < 3:
@@ -380,7 +379,7 @@ class HabitatApp:
         self._content[:] = [pn.pane.Alert("Loading spike data…", alert_type="warning")]
         try:
             dsm = DataStorageManager(animal_id, session_id, config_path=cfg, auto_load=True)
-            self._ks_data = load_kilosort_data(dsm)
+            self._ks_data = load_kilosort_data(dsm.get_kilosort_path())
             self._events = load_behavioral_events(
                 dsm.get_behavioral_event_files(),
                 session_id=dsm.session_id,

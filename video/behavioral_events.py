@@ -245,13 +245,16 @@ class BehavioralEventsData:
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Extract (start_times, end_times, group_labels) where group_labels are
-        ``'low'`` / ``'high'`` based on the opponent's numeric ID, using the
-        ID-half split rule documented on ``_assign_id_groups``.
+        ``'self'`` / ``'others'`` based on whether the opponent falls on the
+        same ID-half as ``animal_of_interest``. The ID-half split (including
+        ``animal_of_interest``) follows the rule documented on
+        ``_assign_id_groups``.
 
-        Mirrors ``extract_opponent_labels`` but pools opponents into two groups.
-        ``min_events_per_class`` is applied at the group level: each of
-        ``'low'`` / ``'high'`` must have at least ``min_events_per_class``
-        events, otherwise empty arrays are returned.
+        Mirrors ``extract_opponent_labels`` but pools opponents into two
+        groups relative to ``animal_of_interest``. ``min_events_per_class``
+        is applied at the group level: each of ``'self'`` / ``'others'``
+        must have at least ``min_events_per_class`` events, otherwise empty
+        arrays are returned.
         """
         df = self.events_data
         if behavior_type is not None:
@@ -285,7 +288,13 @@ class BehavioralEventsData:
         if len(unique_opponents) < 2:
             return np.array([]), np.array([]), np.array([])
 
-        group_map = self._assign_id_groups(unique_opponents.tolist())
+        all_rats = sorted(set(unique_opponents.tolist()) | {animal_of_interest})
+        half_map = self._assign_id_groups(all_rats)
+        self_half = half_map[animal_of_interest]
+        group_map = {
+            rid: ('self' if half == self_half else 'others')
+            for rid, half in half_map.items()
+        }
         group_labels = np.array([group_map[op] for op in opponent_ids])
 
         unique_groups, counts = np.unique(group_labels, return_counts=True)
@@ -294,7 +303,7 @@ class BehavioralEventsData:
 
         composition = {op: group_map[op] for op in unique_opponents}
         print(f"✓ Found {len(event_start_times)} {behavior_type} events with group labels")
-        print(f"✓ Group composition: {composition}")
+        print(f"✓ Group composition (relative to {animal_of_interest}): {composition}")
         return event_start_times, event_end_times, group_labels
 
     def extract_outcome_labels(

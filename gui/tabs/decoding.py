@@ -43,7 +43,7 @@ def render(key: SessionKey, params: AnalysisParams) -> None:
         horizontal=True,
         key="decoding_label_mode",
         help="opponent: decode each individual opponent rat. "
-             "group: decode two ID-half groups (low vs high opponent IDs). "
+             "group: decode two ID-half groups (self vs others, relative to the focal animal). "
              "outcome: decode event outcome (winner vs loser).",
     )
 
@@ -86,7 +86,7 @@ def render(key: SessionKey, params: AnalysisParams) -> None:
                     time_bin_size=params.time_bin_size,
                     time_bin_step=float(bin_step),
                     cv_folds=params.cv_folds,
-                    min_events_per_class=params.min_events_per_class,
+                    # min_events_per_class=params.min_events_per_class,
                     n_shuffles=n_shuffles,
                 )
             return decode_opponent_identity_time_resolved(
@@ -132,7 +132,7 @@ def render(key: SessionKey, params: AnalysisParams) -> None:
                 time_window=params.time_window,
                 time_bin_size=params.time_bin_size,
                 cv_folds=params.cv_folds,
-                min_events_per_class=params.min_events_per_class,
+                # min_events_per_class=params.min_events_per_class,
             )
         return decode_opponent_identity_population(
             ks_data=ks_data,

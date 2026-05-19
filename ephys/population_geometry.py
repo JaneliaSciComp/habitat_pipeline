@@ -1050,25 +1050,39 @@ class PopulationGeometryAnalyzer:
 
     def plot_opponent_similarity_matrix(self,
                                         result: Dict,
-                                        figsize: Tuple[float, float] = (8, 7),
+                                        figsize: Tuple[float, float] = (13, 7),
                                         cmap: str = 'RdBu_r',
                                         annotate: bool = True,
                                         vmin: Optional[float] = None,
                                         vmax: Optional[float] = None) -> plt.Figure:
         """
-        Plot the opponent similarity matrix from ``compute_opponent_similarity``.
+        Plot the opponent similarity matrix from ``compute_opponent_similarity``
+        with a side bar-plot summarising within- vs between-group similarity.
+
+        Opponents are split into ``'low'`` / ``'high'`` halves by their
+        trailing numeric ID (same rule as
+        ``BehavioralEventsData._assign_id_groups``). The half whose median
+        ID is closer to the focal animal's ID is labelled ``own``; the
+        other is labelled ``other``. The bar plot shows the mean (± SEM)
+        Pearson *r* of:
+
+        - within-own pairs (upper triangle of the own×own block)
+        - within-other pairs (upper triangle of the other×other block)
+        - between-group pairs (all own×other entries)
+
+        Individual pair values are overlaid as jittered points.
 
         Parameters
         ----------
         result : dict
             Successful result dict from ``compute_opponent_similarity``.
-        figsize : tuple, default=(8, 7)
+        figsize : tuple, default=(13, 7)
         cmap : str, default='RdBu_r'
         annotate : bool, default=True
-            Write the correlation value in each cell.
+            Write the correlation value in each heatmap cell.
         vmin, vmax : float, optional
-            Colour-bar range. ``None`` (default) autoscales to the matrix
-            min/max.
+            Heatmap colour-bar range. ``None`` (default) autoscales to the
+            matrix min/max.
 
         Returns
         -------
@@ -1083,17 +1097,75 @@ class PopulationGeometryAnalyzer:
         sim = result['similarity_matrix']
         opponents = result['opponents']
         params = result['parameters']
-        event_counts = result['event_counts']
 
         if vmin is None:
             vmin = float(np.nanmin(sim))
         if vmax is None:
             vmax = float(np.nanmax(sim))
 
-        fig, ax = plt.subplots(figsize=figsize)
+        # Split opponents into low/high halves by trailing numeric id, then
+        # relabel as own/other relative to the focal animal's numeric id.
+        import re
+        from video.behavioral_events import BehavioralEventsData
+        opp_strs = [str(o) for o in opponents]
+        try:
+            group_map = BehavioralEventsData._assign_id_groups(opp_strs)
+            groups = np.array([group_map[s] for s in opp_strs])
+            low_idx = np.where(groups == 'low')[0]
+            high_idx = np.where(groups == 'high')[0]
+            grouping_error: Optional[str] = None
+        except ValueError as e:
+            low_idx = np.array([], dtype=int)
+            high_idx = np.array([], dtype=int)
+            grouping_error = str(e)
+
+        def _trailing_int(s: str) -> Optional[int]:
+            m = re.search(r'(\d+)$', str(s))
+            return int(m.group(1)) if m else None
+
+        # Decide which half is 'own' for the focal animal
+        own_half: Optional[str] = None
+        focal_num = _trailing_int(params['animal_of_interest'])
+        if grouping_error is None and focal_num is not None:
+            low_nums = [n for n in (_trailing_int(opponents[i]) for i in low_idx) if n is not None]
+            high_nums = [n for n in (_trailing_int(opponents[i]) for i in high_idx) if n is not None]
+            if low_nums and high_nums:
+                low_med = float(np.median(low_nums))
+                high_med = float(np.median(high_nums))
+                own_half = 'low' if abs(focal_num - low_med) <= abs(focal_num - high_med) else 'high'
+            elif low_nums:
+                own_half = 'low'
+            elif high_nums:
+                own_half = 'high'
+
+        if own_half == 'high':
+            own_idx, other_idx = high_idx, low_idx
+        else:
+            # Default to low as own when focal cannot be placed
+            own_idx, other_idx = low_idx, high_idx
+
+        def _offdiag(block: np.ndarray) -> np.ndarray:
+            n = block.shape[0]
+            if n < 2:
+                return np.array([])
+            iu = np.triu_indices(n, k=1)
+            return block[iu]
+
+        within_own = _offdiag(sim[np.ix_(own_idx, own_idx)])
+        within_other = _offdiag(sim[np.ix_(other_idx, other_idx)])
+        between = (
+            sim[np.ix_(own_idx, other_idx)].ravel()
+            if len(own_idx) and len(other_idx) else np.array([])
+        )
+
+        fig, (ax_hm, ax_bar) = plt.subplots(
+            1, 2, figsize=figsize,
+            gridspec_kw={'width_ratios': [3, 1]},
+        )
+
         sns.heatmap(
             sim,
-            ax=ax,
+            ax=ax_hm,
             xticklabels=list(opponents),
             yticklabels=list(opponents),
             cmap=cmap,
@@ -1106,21 +1178,65 @@ class PopulationGeometryAnalyzer:
         )
 
         windows_str = ', '.join(f'({s:g}, {e:g})s' for s, e in params['windows'])
-        counts_str = ', '.join(
-            f"{opp}: n={event_counts.get(str(opp), 0)}" for opp in opponents
-        )
-
         title_main = params.get('analysis_title', 'Opponent Representation Similarity')
         title_sub = (
             f"{params['animal_of_interest']} | {params['behavior_type']} events | "
-            f"{params['n_cells']} cells | windows: {windows_str}\n"
-        #    f"events per opponent — {counts_str}"
+            f"{params['n_cells']} cells | windows: {windows_str}"
         )
-        ax.set_title(f"{title_main}\n{title_sub}", fontsize=12)
-        ax.set_xlabel('Opponent')
-        ax.set_ylabel('Opponent')
-        plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
-        plt.tight_layout()
+        ax_hm.set_title(f"{title_main}\n{title_sub}", fontsize=12)
+        ax_hm.set_xlabel('Opponent')
+        ax_hm.set_ylabel('Opponent')
+        plt.setp(ax_hm.get_xticklabels(), rotation=45, ha='right')
+
+        # Bar plot: within- vs between-group similarity
+        categories = ['Within own', 'Within other', 'Between']
+        pools = [within_own, within_other, between]
+        means = [float(np.mean(p)) if len(p) else np.nan for p in pools]
+        sems = [
+            float(np.std(p, ddof=1) / np.sqrt(len(p))) if len(p) > 1 else 0.0
+            for p in pools
+        ]
+        n_pairs = [len(p) for p in pools]
+        bar_colors = ['#4C72B0', '#C44E52', '#8172B2']
+
+        x = np.arange(len(categories))
+        ax_bar.bar(x, means, yerr=sems, capsize=4,
+                   color=bar_colors, edgecolor='black', linewidth=0.6)
+
+        rng = np.random.default_rng(0)
+        for xi, p in zip(x, pools):
+            if len(p) == 0:
+                continue
+            jitter = rng.uniform(-0.12, 0.12, size=len(p))
+            ax_bar.scatter(np.full(len(p), xi, dtype=float) + jitter, p,
+                           color='black', s=12, alpha=0.6, zorder=3)
+
+        ax_bar.set_xticks(x)
+        ax_bar.set_xticklabels(
+            [f'{c}\n(n={n})' for c, n in zip(categories, n_pairs)],
+            fontsize=10,
+        )
+        ax_bar.set_ylabel('Pearson r')
+        ax_bar.axhline(0, color='gray', linewidth=0.6)
+        ax_bar.set_title('Within- vs between-group', fontsize=12)
+        ax_bar.grid(True, axis='y', alpha=0.3)
+
+        if grouping_error is not None:
+            ax_bar.text(0.5, 0.5, f'Grouping unavailable:\n{grouping_error}',
+                        transform=ax_bar.transAxes,
+                        ha='center', va='center', fontsize=10, color='gray')
+        else:
+            own_lbls = ', '.join(str(o) for o in opponents[own_idx])
+            other_lbls = ', '.join(str(o) for o in opponents[other_idx])
+            own_half_str = own_half if own_half is not None else 'low (default)'
+            # fig.text(
+            #     0.01, 0.01,
+            #     f"focal {params['animal_of_interest']} → {own_half_str} half   "
+            #     f"|   own: {own_lbls}   |   other: {other_lbls}",
+            #     fontsize=9, color='gray',
+            # )
+
+        plt.tight_layout(rect=[0, 0.03, 1, 1])
         return fig
 
 

@@ -1239,6 +1239,319 @@ class PopulationGeometryAnalyzer:
         plt.tight_layout(rect=[0, 0.03, 1, 1])
         return fig
 
+    def compute_event_similarity_to_reference(self,
+                                              animal_of_interest: str,
+                                              reference_animal: str,
+                                              behavior_type: str = 'EC',
+                                              windows: Union[Tuple[float, float], List[Tuple[float, float]]] = (-1.0, 0.0),
+                                              alignment: str = 'start',
+                                              use_quality_cells: bool = True,
+                                              min_events_per_opponent: int = 5,
+                                              top_n_cells: Optional[int] = None) -> Dict:
+        """
+        Track how each non-reference opponent's per-event population activity
+        correlates with a reference opponent's mean activity, as a function
+        of the opponent's serial event number.
+
+        For each opponent ``opp != reference_animal`` and each of ``opp``'s
+        events with ``animal_of_interest`` (chronological order), the Pearson
+        correlation is computed between that single event's per-cell mean
+        firing-rate vector and the mean per-cell vector across all events of
+        ``reference_animal``. Per-cell means are concatenated across all
+        entries in ``windows`` (so the feature vector has length
+        ``n_cells * n_windows``), matching ``compute_opponent_similarity``.
+        Cell selection (quality filter, optional ``top_n_cells``) also
+        matches that function.
+
+        Parameters
+        ----------
+        animal_of_interest : str
+            Focal animal id.
+        reference_animal : str
+            Opponent whose mean activity is the reference template. Accepts
+            either ``'632'`` or ``'rat632'`` — matched by trailing digits
+            against the opponent labels returned by
+            ``extract_opponent_labels``.
+        behavior_type, windows, alignment, use_quality_cells,
+        min_events_per_opponent, top_n_cells :
+            See ``compute_opponent_similarity``.
+
+        Returns
+        -------
+        dict
+            On success::
+
+                {
+                    'status': 'success',
+                    'reference_animal': <resolved label>,
+                    'similarity_traces': {opp: 1-D array of Pearson r},
+                    'event_indices':     {opp: 1-based serial event numbers},
+                    'event_times':       {opp: event-start times (ephys s)},
+                    'reference_mean_activity': 1-D array (n_features,),
+                    'event_counts': {opp: n_events},
+                    'selected_cell_indices': np.ndarray or None,
+                    'parameters': {...},
+                }
+
+            On failure (no events, unknown reference) ``{'status': 'failed',
+            'error': ..., 'parameters': ...}``.
+        """
+        if self.behavior_data is None:
+            raise ValueError(
+                "compute_event_similarity_to_reference requires behavior_data."
+            )
+
+        def _is_single_window(w) -> bool:
+            try:
+                return (
+                    len(w) == 2
+                    and isinstance(w[0], (int, float))
+                    and isinstance(w[1], (int, float))
+                )
+            except TypeError:
+                return False
+
+        if _is_single_window(windows):
+            window_list: List[Tuple[float, float]] = [(float(windows[0]), float(windows[1]))]
+        else:
+            window_list = [(float(w[0]), float(w[1])) for w in windows]
+
+        for w_start, w_end in window_list:
+            if w_end <= w_start:
+                raise ValueError(f"Window {(w_start, w_end)} has non-positive width")
+
+        if top_n_cells is not None and top_n_cells <= 0:
+            raise ValueError(f"top_n_cells must be positive or None, got {top_n_cells}")
+
+        base_params = {
+            'animal_of_interest': animal_of_interest,
+            'reference_animal': reference_animal,
+            'behavior_type': behavior_type,
+            'windows': window_list,
+            'alignment': alignment,
+            'use_quality_cells': use_quality_cells,
+            'min_events_per_opponent': min_events_per_opponent,
+            'top_n_cells': top_n_cells,
+            'n_windows': len(window_list),
+            'class_label': 'Opponent',
+            'analysis_title': 'Event-wise similarity to reference',
+        }
+
+        event_starts, event_ends, opponent_labels = self.behavior_data.extract_opponent_labels(
+            animal_of_interest=animal_of_interest,
+            behavior_type=behavior_type,
+            min_events_per_class=min_events_per_opponent,
+        )
+        event_starts = np.asarray(event_starts)
+        event_ends = np.asarray(event_ends)
+        opponent_labels = np.asarray(opponent_labels)
+
+        if len(event_starts) == 0:
+            return {
+                'status': 'failed',
+                'error': (
+                    f"No '{behavior_type}' events for {animal_of_interest} "
+                    f"after min_events_per_opponent={min_events_per_opponent} filter."
+                ),
+                'parameters': base_params,
+            }
+
+        # Sort events chronologically so per-opponent indexing reflects serial order
+        order = np.argsort(event_starts, kind='stable')
+        event_starts = event_starts[order]
+        event_ends = event_ends[order]
+        opponent_labels = opponent_labels[order]
+
+        # Resolve reference label by trailing digits (accepts '632' or 'rat632')
+        import re
+        unique_label_strs = sorted({str(l) for l in opponent_labels})
+        ref_str = str(reference_animal)
+        if ref_str not in unique_label_strs:
+            m = re.search(r'(\d+)$', ref_str)
+            ref_num = m.group(1) if m else None
+            if ref_num is not None:
+                matches = []
+                for l in unique_label_strs:
+                    mm = re.search(r'(\d+)$', l)
+                    if mm is not None and mm.group(1) == ref_num:
+                        matches.append(l)
+                if matches:
+                    ref_str = matches[0]
+            if ref_str not in unique_label_strs:
+                return {
+                    'status': 'failed',
+                    'error': (
+                        f"Reference animal '{reference_animal}' not among opponents "
+                        f"{unique_label_strs} for {animal_of_interest} "
+                        f"(after min_events_per_opponent={min_events_per_opponent})."
+                    ),
+                    'parameters': base_params,
+                }
+
+        # Per-window: opp -> [n_events_opp, n_cells]
+        per_window_per_event: List[Dict[str, np.ndarray]] = []
+        n_cells_total: Optional[int] = None
+
+        for w_start, w_end in window_list:
+            width = w_end - w_start
+            pop_matrix = self.construct_population_matrix(
+                event_starts=event_starts,
+                event_ends=event_ends,
+                event_labels=opponent_labels,
+                time_window=(w_start, w_end),
+                time_bin_size=width,
+                alignment=alignment,
+                normalize_method='none',
+                use_quality_cells=use_quality_cells,
+            )
+            n_cells_total = pop_matrix['metadata']['n_cells']
+            window_per_event: Dict[str, np.ndarray] = {}
+            for opp, data in pop_matrix['population_data'].items():
+                # data shape: (n_events_opp, n_cells, 1)
+                window_per_event[str(opp)] = data[:, :, 0]
+            per_window_per_event.append(window_per_event)
+
+        # Concatenate windows -> per-opp feature matrix [n_events_opp, n_cells * n_windows]
+        opp_event_features: Dict[str, np.ndarray] = {}
+        for opp in per_window_per_event[0]:
+            opp_event_features[opp] = np.concatenate(
+                [per_window_per_event[i][opp] for i in range(len(window_list))],
+                axis=1,
+            )
+
+        # Optional top-N cell selection (same rule as compute_opponent_similarity)
+        selected_cell_indices: Optional[np.ndarray] = None
+        if top_n_cells is not None and n_cells_total is not None:
+            cell_rate_sum = np.zeros(n_cells_total)
+            for window_per_event in per_window_per_event:
+                for opp, mat in window_per_event.items():
+                    cell_rate_sum += mat.mean(axis=0)
+            n_keep = min(top_n_cells, n_cells_total)
+            selected_cell_indices = np.argsort(cell_rate_sum)[::-1][:n_keep]
+            selected_cell_indices.sort()
+            feature_index = np.concatenate([
+                selected_cell_indices + i * n_cells_total
+                for i in range(len(window_list))
+            ])
+            for opp in opp_event_features:
+                opp_event_features[opp] = opp_event_features[opp][:, feature_index]
+            n_cells_total = int(n_keep)
+
+        # Reference mean across reference's events
+        ref_features = opp_event_features[ref_str]
+        ref_mean = ref_features.mean(axis=0)
+        ref_var = float(np.std(ref_mean))
+
+        # Per non-reference opponent: correlate each event with ref_mean
+        other_opps = [o for o in sorted(opp_event_features) if o != ref_str]
+        similarity_traces: Dict[str, np.ndarray] = {}
+        event_indices: Dict[str, np.ndarray] = {}
+        event_times: Dict[str, np.ndarray] = {}
+
+        for opp in other_opps:
+            feats = opp_event_features[opp]
+            n_ev = feats.shape[0]
+            sims = np.full(n_ev, np.nan)
+            if ref_var > 0:
+                for j in range(n_ev):
+                    v = feats[j]
+                    if np.std(v) > 0:
+                        sims[j] = np.corrcoef(v, ref_mean)[0, 1]
+            similarity_traces[opp] = sims
+            event_indices[opp] = np.arange(1, n_ev + 1)
+            event_times[opp] = event_starts[opponent_labels == opp]
+
+        unique_labels, counts = np.unique(opponent_labels, return_counts=True)
+        event_counts = {str(lbl): int(c) for lbl, c in zip(unique_labels, counts)}
+
+        return {
+            'status': 'success',
+            'reference_animal': ref_str,
+            'similarity_traces': similarity_traces,
+            'event_indices': event_indices,
+            'event_times': event_times,
+            'reference_mean_activity': ref_mean,
+            'event_counts': event_counts,
+            'selected_cell_indices': selected_cell_indices,
+            'parameters': {**base_params, 'n_cells': n_cells_total},
+        }
+
+    def plot_event_similarity_to_reference(self,
+                                           result: Dict,
+                                           figsize: Tuple[float, float] = (10, 6),
+                                           show_markers: bool = True,
+                                           smooth_window: Optional[int] = None) -> plt.Figure:
+        """
+        Plot the result of ``compute_event_similarity_to_reference``.
+
+        One line per non-reference opponent: x = serial event number,
+        y = Pearson r between that event's population activity vector
+        and the reference animal's mean activity vector.
+
+        Parameters
+        ----------
+        result : dict
+            Successful result from ``compute_event_similarity_to_reference``.
+        figsize : tuple, default=(10, 6)
+        show_markers : bool, default=True
+            Draw a marker at each event.
+        smooth_window : int, optional
+            If set, overlay a centred rolling mean of this width. Raw points
+            stay as faded markers (if ``show_markers``).
+        """
+        if result.get('status') != 'success':
+            raise ValueError(
+                f"Cannot plot — result status is '{result.get('status')}'. "
+                f"Error: {result.get('error', 'unknown')}"
+            )
+
+        traces = result['similarity_traces']
+        indices = result['event_indices']
+        ref = result['reference_animal']
+        params = result['parameters']
+
+        opps = sorted(traces)
+        palette = sns.color_palette('tab10', n_colors=max(len(opps), 1))
+
+        fig, ax = plt.subplots(figsize=figsize)
+
+        for i, opp in enumerate(opps):
+            x = indices[opp]
+            y = traces[opp]
+            color = palette[i % len(palette)]
+            label = f'{opp} (n={len(y)})'
+
+            if smooth_window is not None and smooth_window > 1 and len(y) >= 2:
+                w = min(smooth_window, len(y))
+                kernel = np.ones(w) / w
+                fill = np.nanmean(y) if np.any(~np.isnan(y)) else 0.0
+                y_filled = np.where(np.isnan(y), fill, y)
+                y_smooth = np.convolve(y_filled, kernel, mode='same')
+                ax.plot(x, y_smooth, color=color, linewidth=2, label=label)
+                if show_markers:
+                    ax.plot(x, y, 'o', color=color, alpha=0.35, markersize=4)
+            else:
+                ax.plot(
+                    x, y,
+                    marker='o' if show_markers else None,
+                    color=color, linewidth=1.5, markersize=5,
+                    label=label,
+                )
+
+        ax.axhline(0, color='gray', linewidth=0.6, linestyle='--')
+        ax.set_xlabel('Serial event number')
+        ax.set_ylabel(f'Pearson r to mean activity for {ref}')
+        windows_str = ', '.join(f'({s:g}, {e:g})s' for s, e in params['windows'])
+        ax.set_title(
+            f"Event-wise similarity to reference {ref}\n"
+            f"{params['animal_of_interest']} | {params['behavior_type']} events | "
+            f"{params['n_cells']} cells | windows: {windows_str}"
+        )
+        ax.legend(title='Opponent', loc='best', fontsize=9)
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        return fig
+
 
 # ---------------------------------------------------------------------------
 # Continuous PCA trajectory with event overlay

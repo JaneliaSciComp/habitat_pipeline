@@ -479,7 +479,7 @@ def plot_top_cells_firing_rates(ks_data,
     n_cols = min(3, n_top)
     n_rows = int(np.ceil(n_top / n_cols))
     fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize,
-                             sharex=True, sharey=True, squeeze=False)
+                             sharex=True, sharey=False, squeeze=False)
 
     cluster_idx = _cluster_index_map(ks_data)
 
@@ -495,6 +495,7 @@ def plot_top_cells_firing_rates(ks_data,
 
         spike_times = ks_data.spike_times_by_cell[cell_position]
 
+        cell_max_fr = 0.0
         for class_idx, cls in enumerate(unique_classes):
             class_mask = labels == cls
             class_event_times = event_times[class_mask]
@@ -513,6 +514,9 @@ def plot_top_cells_firing_rates(ks_data,
             mean_fr = np.mean(trial_firing_rates, axis=0)
             sem_fr = np.std(trial_firing_rates, axis=0) / np.sqrt(len(trial_firing_rates))
 
+            if mean_fr.size:
+                cell_max_fr = max(cell_max_fr, float(np.nanmax(mean_fr)))
+
             color = colors[class_idx]
             ax.plot(bin_centers, mean_fr, color=color, linewidth=2,
                     label=f'{cls} (n={len(class_event_times)})')
@@ -522,6 +526,7 @@ def plot_top_cells_firing_rates(ks_data,
         ax.axvline(0, color='black', linestyle='--', alpha=0.5, linewidth=1)
         ax.set_title(f'Cell {cluster_id}\nAccuracy: {accuracy:.1%}', fontsize=10)
         ax.grid(True, alpha=0.3)
+        ax.set_ylim(0, 1.3*cell_max_fr if cell_max_fr > 0 else 1.0)
         if cell_idx == 0:
             ax.legend(fontsize=8, loc='upper right')
 

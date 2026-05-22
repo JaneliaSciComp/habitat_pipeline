@@ -867,7 +867,8 @@ class PopulationGeometryAnalyzer:
                                     alignment: str = 'start',
                                     use_quality_cells: bool = True,
                                     min_events_per_opponent: int = 5,
-                                    top_n_cells: Optional[int] = None) -> Dict:
+                                    top_n_cells: Optional[int] = None,
+                                    time_range: Optional[Tuple[float, float]] = None) -> Dict:
         """
         Compute pairwise Pearson similarity between mean population activity
         vectors for each opponent the focal animal encountered.
@@ -898,6 +899,12 @@ class PopulationGeometryAnalyzer:
             If set, keep only the ``top_n_cells`` cells with the highest mean
             firing rate across all selected events and windows. Applied after
             quality filtering. ``None`` (default) keeps all selected cells.
+        time_range : (min_time, max_time) tuple, optional
+            If set, restrict to events whose start time (in ephys seconds)
+            falls within ``[min_time, max_time]`` inclusive. Either bound may
+            be ``None`` to leave that side unbounded. ``min_events_per_opponent``
+            is re-applied after this filter, so opponents below the threshold
+            within the range are dropped.
 
         Returns
         -------
@@ -944,6 +951,16 @@ class PopulationGeometryAnalyzer:
         if top_n_cells is not None and top_n_cells <= 0:
             raise ValueError(f"top_n_cells must be positive or None, got {top_n_cells}")
 
+        time_range_norm: Optional[Tuple[Optional[float], Optional[float]]] = None
+        if time_range is not None:
+            if len(time_range) != 2:
+                raise ValueError(f"time_range must be (min_time, max_time), got {time_range}")
+            t_min = None if time_range[0] is None else float(time_range[0])
+            t_max = None if time_range[1] is None else float(time_range[1])
+            if t_min is not None and t_max is not None and t_max <= t_min:
+                raise ValueError(f"time_range max ({t_max}) must exceed min ({t_min})")
+            time_range_norm = (t_min, t_max)
+
         base_params = {
             'animal_of_interest': animal_of_interest,
             'behavior_type': behavior_type,
@@ -952,16 +969,21 @@ class PopulationGeometryAnalyzer:
             'use_quality_cells': use_quality_cells,
             'min_events_per_opponent': min_events_per_opponent,
             'top_n_cells': top_n_cells,
+            'time_range': time_range_norm,
             'n_windows': len(window_list),
             'class_label': 'Opponent',
             'analysis_title': 'Opponent Representation Similarity',
         }
 
-        # Extract opponent labels (ephys-synced timestamps)
+        # Extract opponent labels (ephys-synced timestamps).
+        # If time_range is set, defer the min-events filter until after we
+        # restrict to the requested range, so the threshold reflects events
+        # actually used downstream.
+        extract_min_events = 1 if time_range_norm is not None else min_events_per_opponent
         event_starts, event_ends, opponent_labels = self.behavior_data.extract_opponent_labels(
             animal_of_interest=animal_of_interest,
             behavior_type=behavior_type,
-            min_events_per_class=min_events_per_opponent,
+            min_events_per_class=extract_min_events,
         )
 
         if len(event_starts) == 0:
@@ -973,6 +995,44 @@ class PopulationGeometryAnalyzer:
                 ),
                 'parameters': base_params,
             }
+
+        if time_range_norm is not None:
+            t_min, t_max = time_range_norm
+            in_range = np.ones(len(event_starts), dtype=bool)
+            if t_min is not None:
+                in_range &= event_starts >= t_min
+            if t_max is not None:
+                in_range &= event_starts <= t_max
+            event_starts = event_starts[in_range]
+            event_ends = event_ends[in_range]
+            opponent_labels = opponent_labels[in_range]
+
+            if len(event_starts) == 0:
+                return {
+                    'status': 'failed',
+                    'error': (
+                        f"No '{behavior_type}' events for {animal_of_interest} "
+                        f"within time_range={time_range_norm}."
+                    ),
+                    'parameters': base_params,
+                }
+
+            # Re-apply per-opponent threshold within the restricted range
+            uniq, counts = np.unique(opponent_labels, return_counts=True)
+            keep_opps = set(uniq[counts >= min_events_per_opponent].tolist())
+            if not keep_opps:
+                return {
+                    'status': 'failed',
+                    'error': (
+                        f"No opponent reaches min_events_per_opponent="
+                        f"{min_events_per_opponent} within time_range={time_range_norm}."
+                    ),
+                    'parameters': base_params,
+                }
+            mask = np.array([lbl in keep_opps for lbl in opponent_labels])
+            event_starts = event_starts[mask]
+            event_ends = event_ends[mask]
+            opponent_labels = opponent_labels[mask]
 
         # Per-window: opp -> mean firing rate vector across cells
         per_window_means: List[Dict[str, np.ndarray]] = []
@@ -1247,7 +1307,8 @@ class PopulationGeometryAnalyzer:
                                               alignment: str = 'start',
                                               use_quality_cells: bool = True,
                                               min_events_per_opponent: int = 5,
-                                              top_n_cells: Optional[int] = None) -> Dict:
+                                              top_n_cells: Optional[int] = None,
+                                              time_range: Optional[Tuple[float, float]] = None) -> Dict:
         """
         Track how each non-reference opponent's per-event population activity
         correlates with a reference opponent's mean activity, as a function
@@ -1273,8 +1334,10 @@ class PopulationGeometryAnalyzer:
             against the opponent labels returned by
             ``extract_opponent_labels``.
         behavior_type, windows, alignment, use_quality_cells,
-        min_events_per_opponent, top_n_cells :
-            See ``compute_opponent_similarity``.
+        min_events_per_opponent, top_n_cells, time_range :
+            See ``compute_opponent_similarity``. ``time_range`` filters by
+            event start time (ephys seconds) before per-opponent thresholding
+            and reference resolution.
 
         Returns
         -------
@@ -1323,6 +1386,16 @@ class PopulationGeometryAnalyzer:
         if top_n_cells is not None and top_n_cells <= 0:
             raise ValueError(f"top_n_cells must be positive or None, got {top_n_cells}")
 
+        time_range_norm: Optional[Tuple[Optional[float], Optional[float]]] = None
+        if time_range is not None:
+            if len(time_range) != 2:
+                raise ValueError(f"time_range must be (min_time, max_time), got {time_range}")
+            t_min = None if time_range[0] is None else float(time_range[0])
+            t_max = None if time_range[1] is None else float(time_range[1])
+            if t_min is not None and t_max is not None and t_max <= t_min:
+                raise ValueError(f"time_range max ({t_max}) must exceed min ({t_min})")
+            time_range_norm = (t_min, t_max)
+
         base_params = {
             'animal_of_interest': animal_of_interest,
             'reference_animal': reference_animal,
@@ -1332,15 +1405,19 @@ class PopulationGeometryAnalyzer:
             'use_quality_cells': use_quality_cells,
             'min_events_per_opponent': min_events_per_opponent,
             'top_n_cells': top_n_cells,
+            'time_range': time_range_norm,
             'n_windows': len(window_list),
             'class_label': 'Opponent',
             'analysis_title': 'Event-wise similarity to reference',
         }
 
+        # If time_range is set, defer the min-events filter until after the
+        # range restriction so the threshold reflects events actually used.
+        extract_min_events = 1 if time_range_norm is not None else min_events_per_opponent
         event_starts, event_ends, opponent_labels = self.behavior_data.extract_opponent_labels(
             animal_of_interest=animal_of_interest,
             behavior_type=behavior_type,
-            min_events_per_class=min_events_per_opponent,
+            min_events_per_class=extract_min_events,
         )
         event_starts = np.asarray(event_starts)
         event_ends = np.asarray(event_ends)
@@ -1355,6 +1432,43 @@ class PopulationGeometryAnalyzer:
                 ),
                 'parameters': base_params,
             }
+
+        if time_range_norm is not None:
+            t_min, t_max = time_range_norm
+            in_range = np.ones(len(event_starts), dtype=bool)
+            if t_min is not None:
+                in_range &= event_starts >= t_min
+            if t_max is not None:
+                in_range &= event_starts <= t_max
+            event_starts = event_starts[in_range]
+            event_ends = event_ends[in_range]
+            opponent_labels = opponent_labels[in_range]
+
+            if len(event_starts) == 0:
+                return {
+                    'status': 'failed',
+                    'error': (
+                        f"No '{behavior_type}' events for {animal_of_interest} "
+                        f"within time_range={time_range_norm}."
+                    ),
+                    'parameters': base_params,
+                }
+
+            uniq, counts = np.unique(opponent_labels, return_counts=True)
+            keep_opps = set(uniq[counts >= min_events_per_opponent].tolist())
+            if not keep_opps:
+                return {
+                    'status': 'failed',
+                    'error': (
+                        f"No opponent reaches min_events_per_opponent="
+                        f"{min_events_per_opponent} within time_range={time_range_norm}."
+                    ),
+                    'parameters': base_params,
+                }
+            mask = np.array([lbl in keep_opps for lbl in opponent_labels])
+            event_starts = event_starts[mask]
+            event_ends = event_ends[mask]
+            opponent_labels = opponent_labels[mask]
 
         # Sort events chronologically so per-opponent indexing reflects serial order
         order = np.argsort(event_starts, kind='stable')

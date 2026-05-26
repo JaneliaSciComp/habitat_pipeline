@@ -19,6 +19,15 @@ logger = logging.getLogger(__name__)
 
 SAMPLE_RATE = 30000.0
 
+# Default firing-pattern thresholds used by downstream decoders (LDA, etc.)
+# when none are supplied. Stricter than the defaults of
+# ``filter_cells_by_firing_patterns`` itself (lower ``max_cv_isi``).
+_DEFAULT_QUALITY_THRESHOLDS: Dict[str, float] = {
+    'min_firing_rate': 0.5,
+    'min_presence_ratio': 0.8,
+    'max_cv_isi': 5.0,
+}
+
 
 # ---------------------------------------------------------------------------
 # KilosortData dataclass
@@ -185,15 +194,22 @@ class KilosortData:
         }
         return self.filter_results
 
-    def get_filtered_cells_spike_times(self, **filter_kwargs) -> List[np.ndarray]:
-        """Return spike times (seconds) for clusters that pass filter_cells_by_firing_patterns."""
+    def get_filtered_cells_spike_times(self, **filter_kwargs) -> tuple[List, List[np.ndarray]]:
+        """Return ``(cluster_ids, spike_times_list)`` for clusters passing
+        ``filter_cells_by_firing_patterns``.
+
+        Both lists are parallel: ``spike_times_list[i]`` is the spike-time
+        array (seconds) for ``cluster_ids[i]``.
+        """
         results = self.filter_cells_by_firing_patterns(**filter_kwargs)
         passed = set(results['passed_clusters'])
-        return [
-            self.spike_times_by_cell[i]
-            for i, cid in enumerate(self.ks_ids)
-            if cid in passed
-        ]
+        cluster_ids: List = []
+        spike_times: List[np.ndarray] = []
+        for i, cid in enumerate(self.ks_ids):
+            if cid in passed:
+                cluster_ids.append(cid)
+                spike_times.append(self.spike_times_by_cell[i])
+        return cluster_ids, spike_times
 
     def bin_spike_times(
         self,
@@ -227,7 +243,7 @@ class KilosortData:
         if filtered_only:
             if self.filter_results is None:
                 self.filter_cells_by_firing_patterns()
-            spike_times_list = self.get_filtered_cells_spike_times()
+            _, spike_times_list = self.get_filtered_cells_spike_times()
         else:
             spike_times_list = self.spike_times_by_cell
 

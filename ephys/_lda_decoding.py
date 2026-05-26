@@ -11,10 +11,14 @@ Public surface:
 
 - ``align_spikes_to_events(spike_times, event_times, time_window)``
 - ``extract_firing_rate_features(aligned_spikes, time_window, time_bin_size)``
-- ``select_quality_cells(ks_data, use_quality_cells, quality_thresholds)``
 - ``single_cell_lda_decode(spike_times, event_times, labels, ...)``
-- ``run_population_per_cell_decode(ks_data, event_times, labels, ...)``
-- ``run_time_resolved_population_decode(ks_data, event_times, labels, ...)``
+- ``run_population_per_cell_decode(spike_times_list, cluster_ids, event_times, labels, ...)``
+- ``run_time_resolved_population_decode(spike_times_list, cluster_ids, event_times, labels, ...)``
+
+Callers select the cells they want to decode (e.g. via
+``KilosortData.get_filtered_cells_spike_times``) and pass the resulting
+parallel ``(cluster_ids, spike_times_list)`` arrays in. This module does
+not know about ``KilosortData``.
 
 The two outer wrappers in the existing modules pass labels through and
 preserve their public result-dict schemas (with label-specific keys like
@@ -36,13 +40,6 @@ from sklearn.model_selection import (
     cross_val_score,
 )
 from sklearn.preprocessing import StandardScaler
-
-
-_DEFAULT_QUALITY_THRESHOLDS: Dict[str, float] = {
-    'min_firing_rate': 0.5,
-    'min_presence_ratio': 0.8,
-    'max_cv_isi': 5.0,
-}
 
 
 # ---------------------------------------------------------------------------
@@ -75,34 +72,6 @@ def extract_firing_rate_features(aligned_spikes: List[np.ndarray],
             counts, _ = np.histogram(spikes, bins=bin_edges)
             firing_rates[i] = counts / time_bin_size
     return firing_rates
-
-
-# ---------------------------------------------------------------------------
-# Cell selection
-# ---------------------------------------------------------------------------
-
-def select_quality_cells(ks_data,
-                         use_quality_cells: bool = True,
-                         quality_thresholds: Optional[Dict] = None
-                         ) -> Tuple[List[int], List, Optional[Dict]]:
-    """Apply the quality filter (or take all cells) and return the selection.
-
-    Returns:
-        selected_cell_indices : positions into ``ks_data.spike_times_by_cell``.
-        selected_cluster_ids  : cluster IDs in ``ks_data.ks_ids`` order.
-        thresholds_used       : the dict actually used (defaults filled in if
-                                ``quality_thresholds`` was None and
-                                ``use_quality_cells`` is True; else None).
-    """
-    if not use_quality_cells:
-        return list(range(len(ks_data.ks_ids))), list(ks_data.ks_ids), quality_thresholds
-
-    thresholds = dict(_DEFAULT_QUALITY_THRESHOLDS) if quality_thresholds is None else quality_thresholds
-    filter_results = ks_data.filter_cells_by_firing_patterns(**thresholds)
-    passed = set(filter_results['passed_clusters'])
-    selected_cell_indices = [i for i, cid in enumerate(ks_data.ks_ids) if cid in passed]
-    selected_cluster_ids = [cid for cid in ks_data.ks_ids if cid in passed]
-    return selected_cell_indices, selected_cluster_ids, thresholds
 
 
 # ---------------------------------------------------------------------------
@@ -197,11 +166,10 @@ def single_cell_lda_decode(spike_times: np.ndarray,
 # Per-cell population decoder (label-agnostic)
 # ---------------------------------------------------------------------------
 
-def run_population_per_cell_decode(ks_data,
+def run_population_per_cell_decode(spike_times_list: Sequence[np.ndarray],
+                                   cluster_ids: Sequence,
                                    event_times: np.ndarray,
                                    labels: np.ndarray,
-                                   selected_cell_indices: Sequence[int],
-                                   selected_cluster_ids: Sequence,
                                    time_window: Tuple[float, float] = (-1.0, 2.0),
                                    time_bin_size: float = 0.5,
                                    cv_folds=5,
@@ -210,6 +178,9 @@ def run_population_per_cell_decode(ks_data,
                                    ) -> Tuple[Dict, List, List[float]]:
     """Loop over selected cells running ``single_cell_lda_decode`` on each.
 
+    ``spike_times_list`` and ``cluster_ids`` must be parallel arrays:
+    ``spike_times_list[i]`` is the spike-time array for ``cluster_ids[i]``.
+
     Returns:
         cell_results           : ``{cluster_id: result_dict}`` for every selected cell.
         successful_cluster_ids : cluster IDs whose decode succeeded with a finite accuracy.
@@ -217,12 +188,9 @@ def run_population_per_cell_decode(ks_data,
     """
     cell_results: Dict = {}
     successful_count = 0
-    n_total = len(selected_cell_indices)
+    n_total = len(spike_times_list)
 
-    for i, cell_idx in enumerate(selected_cell_indices):
-        cluster_id = ks_data.ks_ids[cell_idx]
-        spike_times = ks_data.spike_times_by_cell[cell_idx]
-
+    for i, (cluster_id, spike_times) in enumerate(zip(cluster_ids, spike_times_list)):
         if progress_every and i % progress_every == 0:
             print(f"Processing cell {i + 1}/{n_total} (cluster {cluster_id})")
 
@@ -239,7 +207,7 @@ def run_population_per_cell_decode(ks_data,
         if result['status'] == 'success':
             successful_count += 1
 
-    print(f"Successfully decoded {successful_count}/{len(selected_cluster_ids)} cells")
+    print(f"Successfully decoded {successful_count}/{n_total} cells")
 
     accuracies: List[float] = []
     successful_cluster_ids: List = []
@@ -255,20 +223,18 @@ def run_population_per_cell_decode(ks_data,
 # Time-resolved population decoder (label-agnostic)
 # ---------------------------------------------------------------------------
 
-def _build_rates_tensor(ks_data,
+def _build_rates_tensor(spike_times_list: Sequence[np.ndarray],
                         event_times: np.ndarray,
-                        selected_cell_indices: Sequence[int],
                         time_window: Tuple[float, float],
                         bin_starts: np.ndarray,
                         bin_ends: np.ndarray,
                         time_bin_size: float) -> np.ndarray:
     """Return a (n_cells, n_events, n_bins) firing-rate tensor."""
-    n_cells = len(selected_cell_indices)
+    n_cells = len(spike_times_list)
     n_events = len(event_times)
     n_bins = len(bin_starts)
     rates = np.zeros((n_cells, n_events, n_bins), dtype=np.float32)
-    for ci, cell_idx in enumerate(selected_cell_indices):
-        spike_times = ks_data.spike_times_by_cell[cell_idx]
+    for ci, spike_times in enumerate(spike_times_list):
         for ei, et in enumerate(event_times):
             in_window = (spike_times >= et + time_window[0]) & (spike_times < et + time_window[1])
             rel = np.sort(spike_times[in_window] - et)
@@ -279,11 +245,10 @@ def _build_rates_tensor(ks_data,
     return rates
 
 
-def run_time_resolved_population_decode(ks_data,
+def run_time_resolved_population_decode(spike_times_list: Sequence[np.ndarray],
+                                        cluster_ids: Sequence,
                                         event_times: np.ndarray,
                                         labels: np.ndarray,
-                                        selected_cell_indices: Sequence[int],
-                                        selected_cluster_ids: Sequence,
                                         time_window: Tuple[float, float] = (-1.0, 2.0),
                                         time_bin_size: float = 0.5,
                                         time_bin_step: Optional[float] = None,
@@ -311,7 +276,7 @@ def run_time_resolved_population_decode(ks_data,
     bin_ends = bin_starts + time_bin_size
     n_bins = len(bin_starts)
 
-    rates = _build_rates_tensor(ks_data, event_times, selected_cell_indices,
+    rates = _build_rates_tensor(spike_times_list, event_times,
                                 time_window, bin_starts, bin_ends, time_bin_size)
     n_cells, n_events, _ = rates.shape
 
@@ -368,7 +333,7 @@ def run_time_resolved_population_decode(ks_data,
             shuffle_null[s, :] = shuf_mean
 
     return {
-        'cluster_ids': list(selected_cluster_ids),
+        'cluster_ids': list(cluster_ids),
         'accuracy_by_bin': accuracy_by_bin,
         'accuracy_sem_by_bin': accuracy_sem_by_bin,
         'bin_centers': bin_centers,

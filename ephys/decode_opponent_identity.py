@@ -47,9 +47,9 @@ from ephys._lda_decoding import (
     extract_firing_rate_features,
     run_population_per_cell_decode,
     run_time_resolved_population_decode,
-    select_quality_cells,
     single_cell_lda_decode,
 )
+from ingestion.kilosort_data_import import _DEFAULT_QUALITY_THRESHOLDS
 from ephys.decoding_plots import (
     plot_best_cells_decoding,
     plot_decoding_accuracy_distribution,
@@ -149,12 +149,13 @@ def decode_opponent_identity_population(ks_data,
         event_times = event_times[mask]
         opponent_labels = opponent_labels[mask]
 
-    selected_cell_indices, selected_cluster_ids, quality_thresholds = select_quality_cells(
-        ks_data, use_quality_cells=use_quality_cells, quality_thresholds=quality_thresholds,
-    )
     if use_quality_cells:
+        quality_thresholds = dict(_DEFAULT_QUALITY_THRESHOLDS) if quality_thresholds is None else quality_thresholds
+        selected_cluster_ids, spike_times_list = ks_data.get_filtered_cells_spike_times(**quality_thresholds)
         print(f"Using {len(selected_cluster_ids)} quality-filtered cells")
     else:
+        selected_cluster_ids = list(ks_data.ks_ids)
+        spike_times_list = list(ks_data.spike_times_by_cell)
         print(f"Using all {len(selected_cluster_ids)} cells")
 
     if len(selected_cluster_ids) == 0:
@@ -162,11 +163,10 @@ def decode_opponent_identity_population(ks_data,
         return {'error': 'No cells selected', 'status': 'failed'}
 
     cell_results, successful_cluster_ids, accuracies = run_population_per_cell_decode(
-        ks_data=ks_data,
+        spike_times_list=spike_times_list,
+        cluster_ids=selected_cluster_ids,
         event_times=event_times,
         labels=opponent_labels,
-        selected_cell_indices=selected_cell_indices,
-        selected_cluster_ids=selected_cluster_ids,
         time_window=time_window,
         time_bin_size=time_bin_size,
         cv_folds=cv_folds,
@@ -251,18 +251,20 @@ def decode_opponent_identity_time_resolved(ks_data,
         event_times = event_times[mask]
         opponent_labels = opponent_labels[mask]
 
-    selected_cell_indices, selected_cluster_ids, _ = select_quality_cells(
-        ks_data, use_quality_cells=use_quality_cells, quality_thresholds=quality_thresholds,
-    )
+    if use_quality_cells:
+        thresholds = dict(_DEFAULT_QUALITY_THRESHOLDS) if quality_thresholds is None else quality_thresholds
+        selected_cluster_ids, spike_times_list = ks_data.get_filtered_cells_spike_times(**thresholds)
+    else:
+        selected_cluster_ids = list(ks_data.ks_ids)
+        spike_times_list = list(ks_data.spike_times_by_cell)
     if len(selected_cluster_ids) == 0:
         return {'error': 'No cells selected', 'status': 'failed'}
 
     core = run_time_resolved_population_decode(
-        ks_data=ks_data,
+        spike_times_list=spike_times_list,
+        cluster_ids=selected_cluster_ids,
         event_times=event_times,
         labels=opponent_labels,
-        selected_cell_indices=selected_cell_indices,
-        selected_cluster_ids=selected_cluster_ids,
         time_window=time_window,
         time_bin_size=time_bin_size,
         time_bin_step=time_bin_step,

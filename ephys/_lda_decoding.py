@@ -31,6 +31,7 @@ import warnings
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+from ephys._rate_tensor import event_aligned_rates
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import (
@@ -230,19 +231,11 @@ def _build_rates_tensor(spike_times_list: Sequence[np.ndarray],
                         bin_ends: np.ndarray,
                         time_bin_size: float) -> np.ndarray:
     """Return a (n_cells, n_events, n_bins) firing-rate tensor."""
-    n_cells = len(spike_times_list)
-    n_events = len(event_times)
-    n_bins = len(bin_starts)
-    rates = np.zeros((n_cells, n_events, n_bins), dtype=np.float32)
-    for ci, spike_times in enumerate(spike_times_list):
-        for ei, et in enumerate(event_times):
-            in_window = (spike_times >= et + time_window[0]) & (spike_times < et + time_window[1])
-            rel = np.sort(spike_times[in_window] - et)
-            if len(rel) > 0:
-                lo = np.searchsorted(rel, bin_starts, side='left')
-                hi = np.searchsorted(rel, bin_ends, side='left')
-                rates[ci, ei, :] = (hi - lo) / time_bin_size
-    return rates
+    rates = event_aligned_rates(
+        spike_times_list, event_times, time_window,
+        bin_starts, bin_ends, time_bin_size,
+    )
+    return np.transpose(rates, (1, 0, 2))
 
 
 def run_time_resolved_population_decode(spike_times_list: Sequence[np.ndarray],

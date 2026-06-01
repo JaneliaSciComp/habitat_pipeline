@@ -25,7 +25,15 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-__all__ = ["SharedSubspaceFit", "fit_shared_subspace"]
+__all__ = [
+    "SharedSubspaceFit",
+    "fit_shared_subspace",
+    "shuffle_null_subspace",
+    "choose_n_components",
+    "project_onto_shared",
+    "time_lagged_cca",
+    "cross_animal_correlation_matrix",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -395,3 +403,244 @@ def _unique_basis(X: np.ndarray, Q: np.ndarray) -> np.ndarray:
     _, _, Vt = np.linalg.svd(R, full_matrices=False)
     rank = min(R.shape[0], N - K)
     return Vt[:rank].T
+
+
+# ---------------------------------------------------------------------------
+# Nulls and helpers
+# ---------------------------------------------------------------------------
+
+def shuffle_null_subspace(
+    X_A: np.ndarray,
+    X_B: np.ndarray,
+    n_components: int,
+    n_shuffles: int = 200,
+    reg: float = 1e-3,
+    method: str = "regularized",
+    kind: str = "circular_shift",
+    seed: int = 0,
+) -> np.ndarray:
+    """Compute a shuffle null for canonical correlations.
+
+    For ``kind="circular_shift"`` (the only currently-supported null),
+    draw a random integer shift from ``[0.1*T, 0.9*T]`` per shuffle, roll
+    ``X_B`` along time by that shift, refit, and record the train
+    canonical correlations. Returns ``(n_shuffles, n_components)``.
+
+    Circular shifting preserves each animal's within-recording
+    autocorrelation, which a simple per-bin permutation would destroy —
+    that would inflate any significance test built against the resulting
+    null because the data themselves are autocorrelated.
+    """
+    X_A = np.asarray(X_A, dtype=np.float64)
+    X_B = np.asarray(X_B, dtype=np.float64)
+    if X_A.shape[0] != X_B.shape[0]:
+        raise ValueError(
+            f"Time dimension mismatch: X_A T={X_A.shape[0]}, X_B T={X_B.shape[0]}"
+        )
+    if kind != "circular_shift":
+        raise NotImplementedError(
+            f"Only kind='circular_shift' is supported (got {kind!r})"
+        )
+
+    valid_mask = ~(np.isnan(X_A).any(axis=1) | np.isnan(X_B).any(axis=1))
+    X_A_clean = X_A[valid_mask]
+    X_B_clean = X_B[valid_mask]
+    T = X_A_clean.shape[0]
+    if T < n_components + 2:
+        raise ValueError(
+            f"Not enough valid bins ({T}) for n_components={n_components}"
+        )
+
+    # Circular shifting commutes with per-column z-scoring; z-score once.
+    X_A_z, _, _ = _zscore(X_A_clean)
+    X_B_z, _, _ = _zscore(X_B_clean)
+
+    rng = np.random.default_rng(seed)
+    low = max(1, int(0.1 * T))
+    high = max(low + 1, int(0.9 * T))
+
+    null = np.full((n_shuffles, n_components), np.nan)
+    for i in range(n_shuffles):
+        shift = int(rng.integers(low, high))
+        X_B_shift = np.roll(X_B_z, shift, axis=0)
+        try:
+            U_A, U_B, _ = _fit_method(X_A_z, X_B_shift, n_components, method, reg)
+        except Exception as e:  # pragma: no cover — defensive
+            logger.warning("Shuffle %d failed: %s", i, e)
+            continue
+        null[i] = _pearson_per_column(X_A_z @ U_A, X_B_shift @ U_B)
+    return null
+
+
+def choose_n_components(
+    X_A: np.ndarray,
+    X_B: np.ndarray,
+    max_K: int = 20,
+    reg: float = 1e-3,
+    method: str = "regularized",
+    cv_folds: int = 5,
+    n_shuffles: int = 200,
+    seed: int = 0,
+) -> Dict:
+    """Pick a recommended K by comparing CCs against the shuffle null.
+
+    Fits once at ``K = max_K`` (canonical correlations are nested: the
+    top-k of a max-K fit equal a separate K-fit's top-k), draws a
+    circular-shift null at the same K, and recommends the largest k
+    such that the top-k CCs all exceed their per-dim 95th-percentile
+    null. Two recommendations are returned:
+
+    * ``recommended_K`` — the prompt's rule, using observed **train** CCs
+      against the null's 95th percentile. Lax (5% per-dim false-positive
+      rate, which compounds across dims) but matches the spec.
+    * ``recommended_K_cv`` — the same rule but using held-out **CV-mean**
+      CCs instead of train. More conservative — CV-mean is near zero for
+      noise dims, so it cuts more sharply at the true K.
+
+    Returns
+    -------
+    dict
+        ``train_ccs``         (max_K,) observed train canonical correlations
+        ``cv_ccs``            (cv_folds, max_K) per-fold held-out CCs
+        ``cv_mean``           (max_K,)
+        ``shuffle_null``      (n_shuffles, max_K)
+        ``shuffle_p95``       (max_K,)
+        ``recommended_K``     int — train-CC selection rule above (0 if none)
+        ``recommended_K_cv``  int — CV-mean selection rule (0 if none)
+        ``parameters``        echo of inputs.
+    """
+    fit = fit_shared_subspace(
+        X_A, X_B,
+        n_components=max_K, reg=reg, method=method, cv_folds=cv_folds,
+    )
+    train_ccs = fit.canonical_correlations["train"]
+    cv_ccs = fit.canonical_correlations["cv"]
+    cv_mean = fit.canonical_correlations["cv_mean"]
+
+    null = shuffle_null_subspace(
+        X_A, X_B,
+        n_components=max_K, n_shuffles=n_shuffles,
+        reg=reg, method=method, seed=seed,
+    )
+    p95 = np.nanpercentile(null, 95, axis=0)
+
+    def _largest_prefix_exceeding(stat: np.ndarray) -> int:
+        out = 0
+        for k in range(int(max_K)):
+            if not (stat[k] > p95[k]):
+                break
+            out = k + 1
+        return out
+
+    recommended_K = _largest_prefix_exceeding(train_ccs)
+    recommended_K_cv = _largest_prefix_exceeding(cv_mean)
+
+    return {
+        "train_ccs": train_ccs,
+        "cv_ccs": cv_ccs,
+        "cv_mean": cv_mean,
+        "shuffle_null": null,
+        "shuffle_p95": p95,
+        "recommended_K": int(recommended_K),
+        "recommended_K_cv": int(recommended_K_cv),
+        "parameters": {
+            "max_K": int(max_K),
+            "reg": reg,
+            "method": method,
+            "cv_folds": int(cv_folds),
+            "n_shuffles": int(n_shuffles),
+            "seed": int(seed),
+        },
+    }
+
+
+def project_onto_shared(X: np.ndarray, U: np.ndarray) -> np.ndarray:
+    """Project ``(T, N)`` cell-space activity onto loadings ``U`` (N, K).
+
+    Returns ``X @ U`` of shape ``(T, K)``. The caller is responsible for
+    z-scoring ``X`` consistently with how ``U`` was fit (``S_A`` in
+    ``SharedSubspaceFit`` is computed on z-scored input).
+    """
+    return np.asarray(X) @ np.asarray(U)
+
+
+def time_lagged_cca(
+    X_A: np.ndarray,
+    X_B: np.ndarray,
+    max_lag_bins: int,
+    n_components: int,
+    reg: float = 1e-3,
+    method: str = "regularized",
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Sweep integer lags and refit; report canonical correlations vs lag.
+
+    For each ``lag`` in ``[-max_lag_bins, +max_lag_bins]``, pair
+    ``X_A[t]`` with ``X_B[t - lag]`` on the truncated (non-wrapped)
+    overlap and fit. Positive ``lag`` means X_B leads X_A by ``lag``
+    bins (X_A reads X_B's past); the lag maximizing the top canonical
+    correlation indicates the leader.
+
+    Returns
+    -------
+    lags : np.ndarray
+        Integer lags, shape ``(2*max_lag_bins + 1,)``.
+    ccs : np.ndarray
+        Canonical correlations at each lag, shape ``(2*max_lag_bins + 1, K)``.
+        NaN where the truncated overlap is too short to fit.
+    """
+    X_A = np.asarray(X_A, dtype=np.float64)
+    X_B = np.asarray(X_B, dtype=np.float64)
+    if X_A.shape[0] != X_B.shape[0]:
+        raise ValueError(
+            f"Time dimension mismatch: X_A T={X_A.shape[0]}, X_B T={X_B.shape[0]}"
+        )
+
+    lags = np.arange(-max_lag_bins, max_lag_bins + 1)
+    ccs = np.full((len(lags), n_components), np.nan)
+
+    for i, lag in enumerate(lags):
+        if lag > 0:
+            X_A_l = X_A[lag:]
+            X_B_l = X_B[:-lag]
+        elif lag < 0:
+            X_A_l = X_A[:lag]
+            X_B_l = X_B[-lag:]
+        else:
+            X_A_l, X_B_l = X_A, X_B
+        if X_A_l.shape[0] < n_components + 2:
+            continue
+        mask = ~(np.isnan(X_A_l).any(axis=1) | np.isnan(X_B_l).any(axis=1))
+        if mask.sum() < n_components + 2:
+            continue
+        X_A_z, _, _ = _zscore(X_A_l[mask])
+        X_B_z, _, _ = _zscore(X_B_l[mask])
+        try:
+            U_A, U_B, _ = _fit_method(X_A_z, X_B_z, n_components, method, reg)
+        except Exception:  # pragma: no cover — defensive
+            continue
+        ccs[i] = _pearson_per_column(X_A_z @ U_A, X_B_z @ U_B)
+    return lags, ccs
+
+
+def cross_animal_correlation_matrix(X_A: np.ndarray, X_B: np.ndarray) -> np.ndarray:
+    """Full ``(N_A, N_B)`` Pearson cross-correlation matrix.
+
+    Entry ``[i, j]`` is the Pearson correlation between cell ``i`` of
+    animal A and cell ``j`` of animal B across time bins. NaN bins (in
+    either animal) are dropped before computing.
+    """
+    X_A = np.asarray(X_A, dtype=np.float64)
+    X_B = np.asarray(X_B, dtype=np.float64)
+    if X_A.shape[0] != X_B.shape[0]:
+        raise ValueError(
+            f"Time dimension mismatch: X_A T={X_A.shape[0]}, X_B T={X_B.shape[0]}"
+        )
+    mask = ~(np.isnan(X_A).any(axis=1) | np.isnan(X_B).any(axis=1))
+    X_A_c = X_A[mask]
+    X_B_c = X_B[mask]
+    T = X_A_c.shape[0]
+    if T < 2:
+        raise ValueError("Need at least 2 valid bins to compute correlation")
+    X_A_z, _, _ = _zscore(X_A_c)
+    X_B_z, _, _ = _zscore(X_B_c)
+    return (X_A_z.T @ X_B_z) / (T - 1)

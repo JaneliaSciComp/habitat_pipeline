@@ -11,7 +11,15 @@ LDA-decoder convention.
 import numpy as np
 import pytest
 
-from ephys.inter_brain_dynamics import SharedSubspaceFit, fit_shared_subspace
+from ephys.inter_brain_dynamics import (
+    SharedSubspaceFit,
+    choose_n_components,
+    cross_animal_correlation_matrix,
+    fit_shared_subspace,
+    project_onto_shared,
+    shuffle_null_subspace,
+    time_lagged_cca,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -260,3 +268,214 @@ class TestParametersDict:
         assert fit.parameters["smoothing_sigma_sec"] == 0.25
         assert fit.parameters["n_components"] == 2
         assert fit.parameters["method"] == "regularized"
+
+
+# ---------------------------------------------------------------------------
+# Shuffle null
+# ---------------------------------------------------------------------------
+
+class TestShuffleNull:
+    def test_null_shape_and_dtype(self):
+        X_A, X_B, _, _ = _generate_shared_data(
+            T=400, N_A=20, N_B=20, K_true=3, noise_scale=0.5, seed=20,
+        )
+        null = shuffle_null_subspace(
+            X_A, X_B, n_components=3, n_shuffles=15, seed=0,
+        )
+        assert null.shape == (15, 3)
+        assert null.dtype == np.float64
+
+    def test_seed_reproducibility(self):
+        X_A, X_B, _, _ = _generate_shared_data(
+            T=400, N_A=20, N_B=20, K_true=3, noise_scale=0.5, seed=21,
+        )
+        null1 = shuffle_null_subspace(X_A, X_B, n_components=3, n_shuffles=15, seed=42)
+        null2 = shuffle_null_subspace(X_A, X_B, n_components=3, n_shuffles=15, seed=42)
+        np.testing.assert_array_equal(null1, null2)
+
+    def test_observed_exceeds_null_with_planted_structure(self):
+        X_A, X_B, _, _ = _generate_shared_data(
+            T=2000, N_A=30, N_B=30, K_true=3, noise_scale=0.5, seed=22,
+        )
+        fit = fit_shared_subspace(X_A, X_B, n_components=3, method="regularized")
+        null = shuffle_null_subspace(
+            X_A, X_B, n_components=3, n_shuffles=50, seed=22,
+        )
+        # Top observed CC should be far above the top null CCs.
+        observed_top = fit.canonical_correlations["train"][0]
+        null_top = null[:, 0]
+        margin = (observed_top - null_top.mean()) / (null_top.std() + 1e-12)
+        assert margin > 3.0, f"observed not >3 SD above null (got {margin:.2f})"
+        assert observed_top > np.percentile(null_top, 95)
+
+    def test_null_distribution_independent_of_observed_with_no_structure(self):
+        rng = np.random.default_rng(23)
+        X_A = rng.standard_normal((1500, 20))
+        X_B = rng.standard_normal((1500, 20))
+        fit = fit_shared_subspace(X_A, X_B, n_components=2, method="regularized")
+        null = shuffle_null_subspace(
+            X_A, X_B, n_components=2, n_shuffles=50, seed=23,
+        )
+        observed_top = fit.canonical_correlations["train"][0]
+        null_top = null[:, 0]
+        # With no real structure, observed should fall well within null bulk.
+        assert observed_top < np.percentile(null_top, 99)
+
+    def test_unsupported_kind_raises(self):
+        rng = np.random.default_rng(24)
+        X_A = rng.standard_normal((200, 5))
+        X_B = rng.standard_normal((200, 5))
+        with pytest.raises(NotImplementedError):
+            shuffle_null_subspace(X_A, X_B, n_components=2, n_shuffles=5,
+                                  kind="permute")
+
+
+# ---------------------------------------------------------------------------
+# choose_n_components
+# ---------------------------------------------------------------------------
+
+class TestChooseNComponents:
+    def test_recovers_planted_K(self):
+        X_A, X_B, _, _ = _generate_shared_data(
+            T=2000, N_A=30, N_B=30, K_true=3, noise_scale=0.3, seed=30,
+        )
+        result = choose_n_components(
+            X_A, X_B, max_K=6, n_shuffles=40, cv_folds=3, seed=30,
+        )
+        # The prompt's selection rule (train-CC > 95th-pctl null) has a 5%
+        # per-dim false-positive rate, so recommended_K can drift above
+        # K_true when noise-dim CCs marginally exceed the null. The robust
+        # checks are: (a) recommend at least K_true, (b) the first K_true
+        # train CCs are clearly large and (c) cv_mean separates signal
+        # from noise cleanly.
+        assert result["recommended_K"] >= 3
+        assert (result["train_ccs"][:3] > 0.9).all()
+        assert (result["train_ccs"][:3] > result["shuffle_p95"][:3] + 0.3).all()
+        assert (result["cv_mean"][:3] > 0.9).all()
+        assert (np.abs(result["cv_mean"][3:]) < 0.3).all()
+        assert result["train_ccs"].shape == (6,)
+        assert result["shuffle_null"].shape == (40, 6)
+        assert result["shuffle_p95"].shape == (6,)
+        # CV-based recommendation is the conservative selector and must
+        # pin K_true exactly when noise-dim cv_mean is near zero.
+        assert result["recommended_K_cv"] == 3
+
+    def test_zero_K_with_no_structure(self):
+        rng = np.random.default_rng(31)
+        X_A = rng.standard_normal((1000, 20))
+        X_B = rng.standard_normal((1000, 20))
+        result = choose_n_components(
+            X_A, X_B, max_K=5, n_shuffles=40, cv_folds=3, seed=31,
+        )
+        # With no real structure, both recommendations should be small;
+        # the CV-based one should be 0 since cv_mean is near zero.
+        assert result["recommended_K"] <= 2
+        assert result["recommended_K_cv"] == 0
+
+    def test_parameters_echoed(self):
+        X_A, X_B, _, _ = _generate_shared_data(
+            T=400, N_A=10, N_B=10, K_true=2, noise_scale=0.3, seed=32,
+        )
+        result = choose_n_components(
+            X_A, X_B, max_K=4, n_shuffles=10, cv_folds=2, seed=99, reg=1e-2,
+        )
+        p = result["parameters"]
+        assert p["max_K"] == 4
+        assert p["n_shuffles"] == 10
+        assert p["cv_folds"] == 2
+        assert p["seed"] == 99
+        assert p["reg"] == 1e-2
+
+
+# ---------------------------------------------------------------------------
+# project_onto_shared
+# ---------------------------------------------------------------------------
+
+class TestProjectOntoShared:
+    def test_shape(self):
+        X = np.zeros((100, 10))
+        U = np.zeros((10, 3))
+        S = project_onto_shared(X, U)
+        assert S.shape == (100, 3)
+
+    def test_matches_S_A_on_z_scored_input(self):
+        X_A, X_B, _, _ = _generate_shared_data(
+            T=300, N_A=15, N_B=15, K_true=2, noise_scale=0.5, seed=40,
+        )
+        fit = fit_shared_subspace(X_A, X_B, n_components=2, method="regularized")
+        mu = X_A.mean(axis=0, keepdims=True)
+        sd = X_A.std(axis=0, ddof=1, keepdims=True)
+        sd = np.where(sd > 0, sd, 1.0)
+        X_A_z = (X_A - mu) / sd
+        S_proj = project_onto_shared(X_A_z, fit.U_A)
+        np.testing.assert_allclose(S_proj, fit.S_A, atol=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# time_lagged_cca
+# ---------------------------------------------------------------------------
+
+class TestTimeLaggedCCA:
+    def test_peak_at_planted_lag(self):
+        rng = np.random.default_rng(50)
+        T = 800
+        delay = 5  # X_A reads Z[t+delay] → X_A leads X_B by `delay`
+        N_A = N_B = 20
+        K_true = 2
+        Z = rng.standard_normal((T + delay + 5, K_true))
+        W_A = rng.standard_normal((K_true, N_A))
+        W_B = rng.standard_normal((K_true, N_B))
+        X_A = Z[delay : delay + T] @ W_A + 0.2 * rng.standard_normal((T, N_A))
+        X_B = Z[:T] @ W_B + 0.2 * rng.standard_normal((T, N_B))
+
+        lags, ccs = time_lagged_cca(
+            X_A, X_B, max_lag_bins=10, n_components=2, method="regularized",
+        )
+        # X_A[t] uses Z[t+delay], X_B[t-lag] uses Z[t-lag] → match at lag = -delay.
+        peak_lag = lags[np.nanargmax(ccs[:, 0])]
+        assert peak_lag == -delay
+
+    def test_output_shapes(self):
+        X_A, X_B, _, _ = _generate_shared_data(
+            T=300, N_A=10, N_B=10, K_true=2, noise_scale=0.5, seed=51,
+        )
+        lags, ccs = time_lagged_cca(
+            X_A, X_B, max_lag_bins=5, n_components=2, method="regularized",
+        )
+        assert lags.shape == (11,)
+        assert ccs.shape == (11, 2)
+
+
+# ---------------------------------------------------------------------------
+# cross_animal_correlation_matrix
+# ---------------------------------------------------------------------------
+
+class TestCrossAnimalCorrelation:
+    def test_shape(self):
+        rng = np.random.default_rng(60)
+        X_A = rng.standard_normal((200, 7))
+        X_B = rng.standard_normal((200, 11))
+        C = cross_animal_correlation_matrix(X_A, X_B)
+        assert C.shape == (7, 11)
+
+    def test_self_correlation_diagonal_is_one(self):
+        rng = np.random.default_rng(61)
+        X = rng.standard_normal((1000, 5))
+        C = cross_animal_correlation_matrix(X, X)
+        np.testing.assert_allclose(np.diag(C), np.ones(5), atol=1e-9)
+
+    def test_matches_numpy_corrcoef(self):
+        rng = np.random.default_rng(62)
+        X_A = rng.standard_normal((500, 4))
+        X_B = rng.standard_normal((500, 6))
+        C = cross_animal_correlation_matrix(X_A, X_B)
+        # Build reference via np.corrcoef on stacked columns.
+        ref = np.corrcoef(X_A.T, X_B.T)[:4, 4:]
+        np.testing.assert_allclose(C, ref, atol=1e-12)
+
+    def test_mismatched_T_raises(self):
+        rng = np.random.default_rng(63)
+        X_A = rng.standard_normal((100, 5))
+        X_B = rng.standard_normal((200, 5))
+        with pytest.raises(ValueError, match="Time dimension"):
+            cross_animal_correlation_matrix(X_A, X_B)

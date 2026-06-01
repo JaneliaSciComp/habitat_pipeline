@@ -32,8 +32,9 @@ def run_tests():
     # Test categories to run
     test_files = [
         "test_kilosort_data_loading.py",
-        "test_kilosort_data_analysis.py", 
-        "test_integration.py"
+        "test_kilosort_data_analysis.py",
+        "test_integration.py",
+        "test_multi_animal_session.py",
     ]
     
     all_passed = True
@@ -81,6 +82,7 @@ def run_specific_category(category: str):
         "loading": "test_kilosort_data_loading.py",
         "analysis": "test_kilosort_data_analysis.py",
         "integration": "test_integration.py",
+        "multi_animal": "test_multi_animal_session.py",
         "all": None  # Run all tests
     }
     

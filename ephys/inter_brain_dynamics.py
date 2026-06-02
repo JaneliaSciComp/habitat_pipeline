@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ __all__ = [
     "project_onto_shared",
     "time_lagged_cca",
     "cross_animal_correlation_matrix",
+    "regress_shared_on_behavior",
 ]
 
 
@@ -644,3 +646,203 @@ def cross_animal_correlation_matrix(X_A: np.ndarray, X_B: np.ndarray) -> np.ndar
     X_A_z, _, _ = _zscore(X_A_c)
     X_B_z, _, _ = _zscore(X_B_c)
     return (X_A_z.T @ X_B_z) / (T - 1)
+
+
+# ---------------------------------------------------------------------------
+# Behavior regression
+# ---------------------------------------------------------------------------
+
+def regress_shared_on_behavior(
+    fit: SharedSubspaceFit,
+    behavior_by_animal: Dict[str, pd.DataFrame],
+    alpha: float = 1.0,
+    cv_folds: int = 5,
+) -> Dict:
+    """Ridge-regress each shared dim onto self vs partner behavior.
+
+    For each animal in ``fit.parameters['animal_ids']``, regresses each
+    column of that animal's shared time courses (``fit.S_A`` or
+    ``fit.S_B``) onto three regressor sets:
+
+    * **self** — the feature DataFrame built with this animal as focal
+    * **partner** — the feature DataFrame built with the *other* animal
+      as focal (i.e. the partner's own kinematics and the partner's view
+      of this animal)
+    * **both** — the column-concatenation of the two sets
+
+    R² is computed via contiguous-block time-series CV (no shuffling)
+    with ``cv_folds`` folds. Per-fold features are z-scored on the
+    training portion only. Reports CV-mean R² and the two
+    "unique-variance" deltas that match Fig. 4 of the paper:
+    ``R2_partner_unique = R2_both - R2_self`` and
+    ``R2_self_unique = R2_both - R2_partner``.
+
+    The prompt's nominal signature is ``(S_A, S_B, behavior_features,
+    alpha)``; we deviate by taking the full ``SharedSubspaceFit`` (so
+    ``S_A``/``S_B``/``valid_mask``/``animal_ids`` are read off it) and a
+    dict of per-focal feature DataFrames so "self" vs "partner" can be
+    resolved per animal.
+
+    Parameters
+    ----------
+    fit : SharedSubspaceFit
+        Must carry ``parameters['animal_ids']`` as a 2-tuple.
+    behavior_by_animal : dict of str → pd.DataFrame
+        ``behavior_by_animal[A_id]`` must be the feature matrix built
+        with A as focal; ``behavior_by_animal[B_id]`` is the matrix
+        built with B as focal. Lengths must equal either ``len(S_A)``
+        (already-masked) or ``len(fit.valid_mask)`` (pre-mask).
+    alpha : float
+        Ridge regularization strength.
+    cv_folds : int
+        Number of contiguous CV folds. When ``cv_folds <= 1`` or
+        ``cv_folds + 2 > n_valid_bins``, falls back to in-sample R².
+
+    Returns
+    -------
+    dict
+        ``{A_id: {k: {R2_self, R2_partner, R2_both,
+        R2_partner_unique, R2_self_unique}}, B_id: {...},
+        'feature_names': {...}, 'parameters': {...}}``
+    """
+    animal_ids = fit.parameters.get("animal_ids")
+    if not animal_ids or len(animal_ids) != 2:
+        raise ValueError(
+            "fit.parameters must have 'animal_ids' as a 2-tuple to do per-animal "
+            f"regression; got {animal_ids!r}"
+        )
+    a_id, b_id = animal_ids
+    for needed in (a_id, b_id):
+        if needed not in behavior_by_animal:
+            raise KeyError(
+                f"behavior_by_animal missing entry for animal {needed!r}; "
+                f"have {sorted(behavior_by_animal.keys())}"
+            )
+
+    return {
+        a_id: _regress_one_animal(
+            fit.S_A,
+            behavior_by_animal[a_id], behavior_by_animal[b_id],
+            fit.valid_mask, alpha, cv_folds,
+        ),
+        b_id: _regress_one_animal(
+            fit.S_B,
+            behavior_by_animal[b_id], behavior_by_animal[a_id],
+            fit.valid_mask, alpha, cv_folds,
+        ),
+        "feature_names": {
+            a_id: {
+                "self": list(behavior_by_animal[a_id].columns),
+                "partner": list(behavior_by_animal[b_id].columns),
+            },
+            b_id: {
+                "self": list(behavior_by_animal[b_id].columns),
+                "partner": list(behavior_by_animal[a_id].columns),
+            },
+        },
+        "parameters": {
+            "alpha": float(alpha),
+            "cv_folds": int(cv_folds),
+            "animal_ids": tuple(animal_ids),
+            "class_label": fit.parameters.get("class_label", "Shared dim"),
+            "analysis_title": fit.parameters.get(
+                "analysis_title", "Inter-brain behavior regression"
+            ),
+        },
+    }
+
+
+def _regress_one_animal(
+    S: np.ndarray,
+    self_df: pd.DataFrame,
+    partner_df: pd.DataFrame,
+    valid_mask: np.ndarray,
+    alpha: float,
+    cv_folds: int,
+) -> Dict[int, Dict[str, float]]:
+    self_arr = _apply_valid_mask(self_df, valid_mask, S.shape[0])
+    partner_arr = _apply_valid_mask(partner_df, valid_mask, S.shape[0])
+
+    nan_mask = (
+        np.isnan(self_arr).any(axis=1)
+        | np.isnan(partner_arr).any(axis=1)
+        | np.isnan(S).any(axis=1)
+    )
+    keep = ~nan_mask
+    if keep.sum() < max(cv_folds + 2, 4):
+        raise ValueError(
+            f"Too few valid bins ({int(keep.sum())}) for cv_folds={cv_folds} "
+            "after dropping NaN rows"
+        )
+    self_arr = self_arr[keep]
+    partner_arr = partner_arr[keep]
+    S = S[keep]
+    both_arr = np.hstack([self_arr, partner_arr])
+
+    K = S.shape[1]
+    out: Dict[int, Dict[str, float]] = {}
+    for k in range(K):
+        y = S[:, k]
+        r2_self = _fit_r2(self_arr, y, alpha, cv_folds)
+        r2_partner = _fit_r2(partner_arr, y, alpha, cv_folds)
+        r2_both = _fit_r2(both_arr, y, alpha, cv_folds)
+        out[k] = {
+            "R2_self": r2_self,
+            "R2_partner": r2_partner,
+            "R2_both": r2_both,
+            "R2_partner_unique": r2_both - r2_self,
+            "R2_self_unique": r2_both - r2_partner,
+        }
+    return out
+
+
+def _apply_valid_mask(
+    df: pd.DataFrame, valid_mask: Optional[np.ndarray], expected_T: int,
+) -> np.ndarray:
+    """Align a behavior DataFrame's rows to a shared-subspace S matrix.
+
+    ``df`` may already be masked (length ``expected_T``) or may carry the
+    full pre-mask length (length ``len(valid_mask)``); applies the mask
+    only in the latter case.
+    """
+    arr = df.to_numpy(dtype=np.float64)
+    if valid_mask is not None and len(arr) == len(valid_mask):
+        arr = arr[valid_mask]
+    if len(arr) != expected_T:
+        valid_count = int(np.sum(valid_mask)) if valid_mask is not None else None
+        raise ValueError(
+            f"behavior length ({df.shape[0]}, valid_count={valid_count}) "
+            f"doesn't align with S length ({expected_T})"
+        )
+    return arr
+
+
+def _fit_r2(X: np.ndarray, y: np.ndarray, alpha: float, cv_folds: int) -> float:
+    """Z-score features on train fold, ridge-regress, return CV-mean R²."""
+    from sklearn.linear_model import Ridge
+    from sklearn.model_selection import KFold
+
+    n = len(y)
+    if cv_folds and cv_folds > 1 and n >= cv_folds + 2:
+        kf = KFold(n_splits=cv_folds, shuffle=False)
+        scores = []
+        for tr_idx, te_idx in kf.split(X):
+            X_tr, X_te = X[tr_idx], X[te_idx]
+            y_tr, y_te = y[tr_idx], y[te_idx]
+            mu = X_tr.mean(axis=0)
+            sd = X_tr.std(axis=0, ddof=1)
+            sd = np.where(sd > 0, sd, 1.0)
+            X_tr_z = (X_tr - mu) / sd
+            X_te_z = (X_te - mu) / sd
+            try:
+                model = Ridge(alpha=alpha).fit(X_tr_z, y_tr)
+                scores.append(model.score(X_te_z, y_te))
+            except Exception:  # pragma: no cover — defensive
+                scores.append(np.nan)
+        return float(np.nanmean(scores)) if scores else float("nan")
+    mu = X.mean(axis=0)
+    sd = X.std(axis=0, ddof=1)
+    sd = np.where(sd > 0, sd, 1.0)
+    Xz = (X - mu) / sd
+    model = Ridge(alpha=alpha).fit(Xz, y)
+    return float(model.score(Xz, y))

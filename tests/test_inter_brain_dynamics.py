@@ -9,6 +9,7 @@ LDA-decoder convention.
 """
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from ephys.inter_brain_dynamics import (
@@ -17,6 +18,7 @@ from ephys.inter_brain_dynamics import (
     cross_animal_correlation_matrix,
     fit_shared_subspace,
     project_onto_shared,
+    regress_shared_on_behavior,
     shuffle_null_subspace,
     time_lagged_cca,
 )
@@ -479,3 +481,217 @@ class TestCrossAnimalCorrelation:
         X_B = rng.standard_normal((200, 5))
         with pytest.raises(ValueError, match="Time dimension"):
             cross_animal_correlation_matrix(X_A, X_B)
+
+
+# ---------------------------------------------------------------------------
+# regress_shared_on_behavior
+# ---------------------------------------------------------------------------
+
+def _make_regression_setup(seed: int):
+    """Build (S_A, S_B, behavior_A, behavior_B, T) with known structure.
+
+    S_A dim 0 is driven by A's "speed"; dim 1 by B's "speed"; dim 2 by both;
+    dim 3 is independent noise. S_B mirrors the dependency on swapped sides.
+    """
+    rng = np.random.default_rng(seed)
+    T = 600
+    regs = [rng.standard_normal(T) for _ in range(6)]
+    behavior_A = pd.DataFrame({
+        "speed": regs[0],
+        "angular_speed": regs[1],
+        "distance": regs[2],
+    })
+    behavior_B = pd.DataFrame({
+        "speed": regs[3],
+        "angular_speed": regs[4],
+        "distance": regs[5],
+    })
+    noise = 0.3
+    S_A = np.column_stack([
+        regs[0] + noise * rng.standard_normal(T),
+        regs[3] + noise * rng.standard_normal(T),
+        regs[0] + regs[3] + noise * rng.standard_normal(T),
+        rng.standard_normal(T),
+    ])
+    S_B = np.column_stack([
+        regs[3] + noise * rng.standard_normal(T),
+        regs[0] + noise * rng.standard_normal(T),
+        regs[3] + regs[0] + noise * rng.standard_normal(T),
+        rng.standard_normal(T),
+    ])
+    return S_A, S_B, behavior_A, behavior_B, T
+
+
+def _make_fit_for_regression(
+    S_A: np.ndarray, S_B: np.ndarray, T: int,
+    animal_ids=("631", "632"), valid_mask=None,
+) -> SharedSubspaceFit:
+    if valid_mask is None:
+        valid_mask = np.ones(T, dtype=bool)
+    K = S_A.shape[1]
+    return SharedSubspaceFit(
+        U_A=np.zeros((1, K)),
+        U_B=np.zeros((1, K)),
+        S_A=S_A, S_B=S_B,
+        V_A_unique=np.zeros((1, 0)),
+        V_B_unique=np.zeros((1, 0)),
+        canonical_correlations={
+            "train": np.zeros(K), "cv": np.zeros((1, K)),
+            "cv_mean": np.zeros(K), "cv_std": np.zeros(K),
+        },
+        variance_partition={},
+        parameters={
+            "animal_ids": animal_ids,
+            "class_label": "Shared dim",
+            "analysis_title": "Test",
+        },
+        valid_mask=valid_mask,
+    )
+
+
+class TestRegressSharedOnBehavior:
+    def test_self_dominated_dim(self):
+        S_A, S_B, beh_A, beh_B, T = _make_regression_setup(seed=70)
+        fit = _make_fit_for_regression(S_A, S_B, T)
+        res = regress_shared_on_behavior(
+            fit, {"631": beh_A, "632": beh_B}, alpha=1.0, cv_folds=5,
+        )
+        d0 = res["631"][0]
+        assert d0["R2_self"] > 0.7
+        assert d0["R2_partner"] < 0.2
+        assert d0["R2_self_unique"] > 0.5
+        assert d0["R2_partner_unique"] < 0.2
+
+    def test_partner_dominated_dim(self):
+        S_A, S_B, beh_A, beh_B, T = _make_regression_setup(seed=71)
+        fit = _make_fit_for_regression(S_A, S_B, T)
+        res = regress_shared_on_behavior(
+            fit, {"631": beh_A, "632": beh_B}, alpha=1.0, cv_folds=5,
+        )
+        d1 = res["631"][1]
+        assert d1["R2_partner"] > 0.7
+        assert d1["R2_self"] < 0.2
+        assert d1["R2_partner_unique"] > 0.5
+        assert d1["R2_self_unique"] < 0.2
+
+    def test_mixed_dim_both_above_either(self):
+        S_A, S_B, beh_A, beh_B, T = _make_regression_setup(seed=72)
+        fit = _make_fit_for_regression(S_A, S_B, T)
+        res = regress_shared_on_behavior(
+            fit, {"631": beh_A, "632": beh_B}, alpha=1.0, cv_folds=5,
+        )
+        d2 = res["631"][2]
+        assert d2["R2_both"] > d2["R2_self"] + 0.1
+        assert d2["R2_both"] > d2["R2_partner"] + 0.1
+        # Both unique components should be substantial.
+        assert d2["R2_partner_unique"] > 0.3
+        assert d2["R2_self_unique"] > 0.3
+
+    def test_noise_dim_low_R2(self):
+        S_A, S_B, beh_A, beh_B, T = _make_regression_setup(seed=73)
+        fit = _make_fit_for_regression(S_A, S_B, T)
+        res = regress_shared_on_behavior(
+            fit, {"631": beh_A, "632": beh_B}, alpha=1.0, cv_folds=5,
+        )
+        d3 = res["631"][3]
+        assert d3["R2_self"] < 0.1
+        assert d3["R2_partner"] < 0.1
+        assert d3["R2_both"] < 0.1
+
+    def test_animal_B_results_mirror_A(self):
+        S_A, S_B, beh_A, beh_B, T = _make_regression_setup(seed=74)
+        fit = _make_fit_for_regression(S_A, S_B, T)
+        res = regress_shared_on_behavior(
+            fit, {"631": beh_A, "632": beh_B}, alpha=1.0, cv_folds=5,
+        )
+        # S_B dim 0 is driven by B's own speed (animal 632's "self").
+        d0_B = res["632"][0]
+        assert d0_B["R2_self"] > 0.7
+        assert d0_B["R2_partner"] < 0.2
+
+    def test_missing_animal_raises(self):
+        S_A, S_B, beh_A, _, T = _make_regression_setup(seed=75)
+        fit = _make_fit_for_regression(S_A, S_B, T)
+        with pytest.raises(KeyError, match="632"):
+            regress_shared_on_behavior(
+                fit, {"631": beh_A}, alpha=1.0, cv_folds=5,
+            )
+
+    def test_no_animal_ids_in_fit_raises(self):
+        S_A, S_B, beh_A, beh_B, T = _make_regression_setup(seed=76)
+        fit = _make_fit_for_regression(S_A, S_B, T, animal_ids=None)
+        with pytest.raises(ValueError, match="animal_ids"):
+            regress_shared_on_behavior(
+                fit, {"631": beh_A, "632": beh_B}, alpha=1.0, cv_folds=5,
+            )
+
+    def test_output_dict_structure(self):
+        S_A, S_B, beh_A, beh_B, T = _make_regression_setup(seed=77)
+        fit = _make_fit_for_regression(S_A, S_B, T)
+        res = regress_shared_on_behavior(
+            fit, {"631": beh_A, "632": beh_B}, alpha=1.0, cv_folds=5,
+        )
+        assert set(res.keys()) >= {"631", "632", "parameters", "feature_names"}
+        K = S_A.shape[1]
+        for aid in ("631", "632"):
+            assert set(res[aid].keys()) == set(range(K))
+            for k in range(K):
+                assert set(res[aid][k].keys()) == {
+                    "R2_self", "R2_partner", "R2_both",
+                    "R2_partner_unique", "R2_self_unique",
+                }
+        assert res["parameters"]["alpha"] == 1.0
+        assert res["parameters"]["cv_folds"] == 5
+        assert res["parameters"]["animal_ids"] == ("631", "632")
+        assert res["parameters"]["class_label"] == "Shared dim"
+        assert res["feature_names"]["631"]["self"] == list(beh_A.columns)
+        assert res["feature_names"]["631"]["partner"] == list(beh_B.columns)
+        assert res["feature_names"]["632"]["self"] == list(beh_B.columns)
+        assert res["feature_names"]["632"]["partner"] == list(beh_A.columns)
+
+    def test_valid_mask_applied_to_unmasked_behavior(self):
+        S_A, S_B, beh_A, beh_B, T = _make_regression_setup(seed=78)
+        # Pretend the first 100 bins were dropped during fit; S is shorter.
+        valid_mask = np.ones(T, dtype=bool)
+        valid_mask[:100] = False
+        S_A_short = S_A[100:]
+        S_B_short = S_B[100:]
+        fit = _make_fit_for_regression(
+            S_A_short, S_B_short, T, valid_mask=valid_mask,
+        )
+        # behavior dfs still have length T; function should apply valid_mask.
+        res = regress_shared_on_behavior(
+            fit, {"631": beh_A, "632": beh_B}, alpha=1.0, cv_folds=5,
+        )
+        # Self-dominated dim 0 should still have high R² after dropping bins.
+        assert res["631"][0]["R2_self"] > 0.7
+
+    def test_pre_masked_behavior_accepted(self):
+        S_A, S_B, beh_A, beh_B, T = _make_regression_setup(seed=79)
+        # Caller may pre-mask behavior to match S length.
+        valid_mask = np.ones(T, dtype=bool)
+        valid_mask[:50] = False
+        S_A_short = S_A[50:]
+        S_B_short = S_B[50:]
+        beh_A_short = beh_A.iloc[50:].reset_index(drop=True)
+        beh_B_short = beh_B.iloc[50:].reset_index(drop=True)
+        fit = _make_fit_for_regression(
+            S_A_short, S_B_short, T, valid_mask=valid_mask,
+        )
+        res = regress_shared_on_behavior(
+            fit, {"631": beh_A_short, "632": beh_B_short},
+            alpha=1.0, cv_folds=5,
+        )
+        assert res["631"][0]["R2_self"] > 0.7
+
+    def test_nan_rows_in_behavior_dropped(self):
+        S_A, S_B, beh_A, beh_B, T = _make_regression_setup(seed=80)
+        beh_A_nan = beh_A.copy()
+        beh_A_nan.iloc[200:220] = np.nan
+        fit = _make_fit_for_regression(S_A, S_B, T)
+        res = regress_shared_on_behavior(
+            fit, {"631": beh_A_nan, "632": beh_B}, alpha=1.0, cv_folds=5,
+        )
+        # 20 dropped rows out of 600; self-dominated dim 0 should still
+        # come through cleanly.
+        assert res["631"][0]["R2_self"] > 0.6

@@ -42,6 +42,7 @@ The decoding modules went through a recent refactor (commits `9eab430`, `797de45
 - **DIO channel 1 is the sync channel** by default. There are channels 1–4 in `dsm.dio_paths`.
 - **Two cohorts have their own config files** ([config/default_paths.json](config/default_paths.json) = cohort 7, [config/cohort5_paths.json](config/cohort5_paths.json) = cohort 5). The GUI lets you pick between them; the API takes `config_path=` on `DataStorageManager`.
 - **`spike_times_by_cell` indexes parallel to `ks_ids`** — `spike_times_by_cell[i]` is the spike-time array for cluster `ks_ids[i]`. Several places build a `cluster_id → index` map (`_cluster_index_map` in [ephys/decoding_plots.py](ephys/decoding_plots.py)); reuse rather than reinventing.
+- **All animals in a session share one ephys clock.** Kilosort spike times across animal directories are already comparable in seconds. For multi-animal analyses, bin them on a common ephys-second grid via [`MultiAnimalSession.get_common_binned_rates`](ingestion/multi_animal_session.py) — do **not** attempt cross-animal clock conversion. Behavior↔ephys sync still goes through a single per-session [`DataSyncManager`](ingestion/ephys_sync.py); any animal's DIO + pulse log works because they all share the clock. See [ephys/README.md](ephys/README.md) for the full inter-brain module.
 
 ## Where to look first
 
@@ -56,6 +57,7 @@ The decoding modules went through a recent refactor (commits `9eab430`, `797de45
 | Result-dict schema | [ephys/_lda_decoding.py](ephys/_lda_decoding.py) returns; wrappers in [ephys/decode_opponent_identity.py](ephys/decode_opponent_identity.py) and [ephys/decode_event_outcome.py](ephys/decode_event_outcome.py) add `parameters` and `behavioral_summary` |
 | Streamlit GUI plumbing | [gui/state.py](gui/state.py) (typed `SessionKey`/`AnalysisParams`), [gui/loaders.py](gui/loaders.py), [gui/runners.py](gui/runners.py) (`cached_step`) |
 | Adding a new analysis tab | Pattern: write a `render(session_key, params)` in [gui/tabs/](gui/tabs/), wire it into [gui/app.py](gui/app.py) |
+| Inter-brain shared subspace (multi-animal CCA, nulls, behavior regression) | [ephys/README.md](ephys/README.md) is the entry point; modules in [ephys/inter_brain_dynamics.py](ephys/inter_brain_dynamics.py), [ephys/inter_brain_plots.py](ephys/inter_brain_plots.py), [ephys/run_inter_brain.py](ephys/run_inter_brain.py), [ingestion/multi_animal_session.py](ingestion/multi_animal_session.py), [video/behavior_features.py](video/behavior_features.py), [gui/tabs/inter_brain.py](gui/tabs/inter_brain.py) |
 
 ## Test data note
 
@@ -73,6 +75,11 @@ cd tests && python run_tests.py
 # Run a decoding analysis from the CLI
 python -m ephys.decode_opponent_identity --animal_id 631 --session_id 20251216 --use_quality_cells
 python -m ephys.decode_event_outcome    --animal_id 631 --session_id 20251216 --use_quality_cells
+
+# Run inter-brain shared-subspace analysis (two animals)
+python -m ephys.run_inter_brain --session_id 20251216 --animal_ids 631 632 \
+    --bin_size 0.5 --smoothing 0.25 --max_K 20 --n_shuffles 200 \
+    --output_dir ./results
 ```
 
 ## What I should NOT do without asking

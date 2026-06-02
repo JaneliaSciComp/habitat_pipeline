@@ -165,6 +165,15 @@ Decoding modules share a label-agnostic core plus a shared plotting module:
 
 [ephys/rastermap_viz.py](ephys/rastermap_viz.py) — Rastermap-based population visualization (Stringer et al., 2024): `run_rastermap`, `plot_rastermap`, `plot_rastermap_interactive`, `plot_rastermap_with_events`. Also exposes a `bin_spikes_matrix` helper used by the Panel app.
 
+[ephys/inter_brain_dynamics.py](ephys/inter_brain_dynamics.py), [ephys/inter_brain_plots.py](ephys/inter_brain_plots.py), [ephys/run_inter_brain.py](ephys/run_inter_brain.py) — Inter-brain shared subspace between two simultaneously-recorded animals (Zhang et al., *Nature* 645, 2025). Backed by [ingestion/multi_animal_session.py](ingestion/multi_animal_session.py) (common ephys-second binning across animals) and [video/behavior_features.py](video/behavior_features.py) (per-bin self / partner / event features for the regression). Streamlit tab at [gui/tabs/inter_brain.py](gui/tabs/inter_brain.py); CLI `python -m ephys.run_inter_brain`. See [ephys/README.md](ephys/README.md) for the full API.
+
+| Symbol | Purpose |
+|---|---|
+| `MultiAnimalSession(session_id, animal_ids, ...)` ([ingestion/multi_animal_session.py](ingestion/multi_animal_session.py)) | Orchestrator over per-animal `DataStorageManager`s; `get_common_binned_rates` returns identical bin edges across animals on the shared ephys clock. |
+| `fit_shared_subspace(X_A, X_B, n_components, method='regularized', ...)` ([ephys/inter_brain_dynamics.py](ephys/inter_brain_dynamics.py)) | Ridge-whitened SVD of the cross-covariance (default; sklearn `cca` / `pls` also available). Returns a `SharedSubspaceFit` dataclass mirroring the LDA result-dict convention (`parameters['class_label'/'analysis_title']`). |
+| `shuffle_null_subspace`, `choose_n_components`, `time_lagged_cca`, `cross_animal_correlation_matrix`, `regress_shared_on_behavior` | Null distribution (circular shifts), K selection (train-CC vs CV-mean rules), leader/follower sweep, full Pearson cross-correlation matrix, and self/partner/both behavior regression. |
+| `plot_inter_brain_summary(fit, ...)` ([ephys/inter_brain_plots.py](ephys/inter_brain_plots.py)) | Six-panel dashboard combining all seven individual plots. |
+
 ### `database/` — Metadata Persistence
 
 [database/database_core.py](database/database_core.py) — SQLAlchemy ORM over `habitat_pipeline.db`.
@@ -271,6 +280,7 @@ Variants:
 | Panel GUI | `panel serve gui/interactive_app.py --show` — linked timeline + Rastermap + PCA. |
 | Opponent decoder CLI | `python -m ephys.decode_opponent_identity --animal_id <id> --session_id <id>`. |
 | Outcome decoder CLI | `python -m ephys.decode_event_outcome --animal_id <id> --session_id <id>`. |
+| Inter-brain CLI | `python -m ephys.run_inter_brain --session_id <id> --animal_ids <id1> <id2> --output_dir <dir>`. |
 | QA stats CLI | `python -m ephys.plot_ephys_qa_stats --animal_id <id> --session_id <id>`. |
 | Legacy workflow | `python workflow.py --animal_id <id> --session_id <id>`. |
 | Database CLI | `python -m database.database_cli <subcommand>`. |
@@ -291,6 +301,7 @@ Variants:
 | Location decoding | [ephys/decode_location.py](ephys/decode_location.py) |
 | Population geometry (PCA/UMAP/trajectories) | [ephys/population_geometry.py](ephys/population_geometry.py) |
 | Rastermap visualization | [ephys/rastermap_viz.py](ephys/rastermap_viz.py) |
+| Inter-brain shared subspace (multi-animal CCA, nulls, behavior regression) | [ephys/inter_brain_dynamics.py](ephys/inter_brain_dynamics.py), [ephys/inter_brain_plots.py](ephys/inter_brain_plots.py), [ephys/run_inter_brain.py](ephys/run_inter_brain.py), [ingestion/multi_animal_session.py](ingestion/multi_animal_session.py), [video/behavior_features.py](video/behavior_features.py), [gui/tabs/inter_brain.py](gui/tabs/inter_brain.py) — see [ephys/README.md](ephys/README.md) |
 | Streamlit + Panel dashboards | [gui/app.py](gui/app.py), [gui/interactive_app.py](gui/interactive_app.py) |
 | CLI orchestration | [workflow.py](workflow.py), per-module `main()` entries |
 | Metadata database (SQLite) | [database/](database/) |

@@ -167,6 +167,40 @@ The decoding modules share a single label-agnostic core ([ephys/_lda_decoding.py
 
 **`plot_ephys_qa_stats.py`** — Quality-assessment plots: `plot_firing_pattern_histograms`, `plot_pass_fail_histograms`, `test_threshold_combinations`, `load_and_analyze_data` (+ CLI).
 
+**`inter_brain_dynamics.py`** / **`inter_brain_plots.py`** / **`run_inter_brain.py`** — Inter-brain shared subspace between two simultaneously-recorded animals (Zhang, Phi, Li et al., *Nature* 645, 991–1001 (2025)). See [ephys/README.md](ephys/README.md) for the full module map.
+
+| Symbol | Description |
+|--------|-------------|
+| `MultiAnimalSession(session_id, animal_ids, ...)` in [ingestion/multi_animal_session.py](ingestion/multi_animal_session.py) | Orchestrator over per-animal DSMs that exposes `get_common_binned_rates(bin_size, ...)` on a shared ephys-second grid (all animals' Kilosort spike times share one clock — no cross-clock arithmetic needed). |
+| `fit_shared_subspace(X_A, X_B, n_components, method='regularized', ...)` | Ridge-whitened SVD of the cross-covariance (default; robust when N ≳ T); also offers sklearn `cca`/`pls` paths. Returns a `SharedSubspaceFit` dataclass with loadings, time courses, canonical correlations (train + CV), variance partition, and orthonormal unique-subspace bases. |
+| `shuffle_null_subspace(...)`, `choose_n_components(...)` | Circular-shift shuffle null and per-dim K recommendation (both train-CC and CV-mean rules). |
+| `time_lagged_cca(...)`, `cross_animal_correlation_matrix(...)` | Leader/follower lag sweep and full cell-pair Pearson cross-correlation. |
+| `regress_shared_on_behavior(fit, behavior_by_animal, ...)` | Ridge regression of each shared dim onto self / partner / both behavior feature sets; reports `R²_self`, `R²_partner`, `R²_both` and the two unique-variance decompositions. |
+| `build_behavior_feature_matrix(...)` in [video/behavior_features.py](video/behavior_features.py) | Per-bin behavior features (speed, angular speed, distance, relative bearing, relative speed, ± event indicators) for the regression. |
+| `python -m ephys.run_inter_brain --session_id ... --animal_ids ... ...` | Full pipeline → results pickle + 6-panel summary PNG. |
+
+Six-line example:
+
+```python
+from ingestion.multi_animal_session import MultiAnimalSession
+from ephys.inter_brain_dynamics import fit_shared_subspace
+
+session = MultiAnimalSession("20251216", ["631", "632"])
+bin_centers, rates = session.get_common_binned_rates(bin_size_sec=0.5, smoothing_sigma_sec=0.25)
+fit = fit_shared_subspace(rates["631"].T, rates["632"].T, n_components=5,
+                          animal_ids=("631", "632"), bin_size_sec=0.5)
+```
+
+CLI:
+
+```bash
+python -m ephys.run_inter_brain \
+    --session_id 20251216 --animal_ids 631 632 \
+    --bin_size 0.5 --smoothing 0.25 \
+    --max_K 20 --n_shuffles 200 \
+    --behavior_type EC --output_dir ./results
+```
+
 **`decoding_plots.py`** — Shared plots for both opponent and outcome decoders. Result-dict-driven titles (`results['parameters']['class_label']` / `['analysis_title']`):
 
 - `plot_decoding_accuracy_distribution` — histogram + boxplot of per-cell CV accuracies

@@ -117,12 +117,11 @@ def _build_parser() -> argparse.ArgumentParser:
 # Inner pipeline (factored so it is testable without disk-backed sessions)
 # ---------------------------------------------------------------------------
 
-def _analyze_and_save(
+def _analyze(
     X_A: np.ndarray,
     X_B: np.ndarray,
     bin_centers: np.ndarray,
     animal_ids: Tuple[str, str],
-    output_dir: Path,
     *,
     bin_size: float,
     smoothing: Optional[float],
@@ -138,9 +137,10 @@ def _analyze_and_save(
     behavior_by_animal: Optional[Dict[str, "object"]] = None,
     seed: int = 0,
 ) -> Dict:
-    """Run the full inter-brain analysis and write pickle + PNG.
+    """Pure-compute analysis pipeline (no I/O). Returns the result payload.
 
-    Returns the same payload that is pickled.
+    Used directly by the GUI tab; the CLI's :func:`_analyze_and_save`
+    wraps this with pickle + PNG output.
     """
     if n_components is None:
         n_components = max(
@@ -185,10 +185,7 @@ def _analyze_and_save(
         except Exception as e:
             logger.warning("Behavior regression failed: %s", e)
 
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    payload = {
+    return {
         "fit": fit,
         "shuffle_null": null,
         "time_lagged": (lags, ccs),
@@ -210,19 +207,62 @@ def _analyze_and_save(
             "seed": int(seed),
         },
     }
+
+
+def _analyze_and_save(
+    X_A: np.ndarray,
+    X_B: np.ndarray,
+    bin_centers: np.ndarray,
+    animal_ids: Tuple[str, str],
+    output_dir: Path,
+    *,
+    bin_size: float,
+    smoothing: Optional[float],
+    t_window: Optional[Tuple[float, float]],
+    n_components: Optional[int],
+    max_K: int,
+    method: str,
+    reg: float,
+    cv_folds: int,
+    n_shuffles: int,
+    max_lag_bins: int,
+    alpha: float,
+    behavior_by_animal: Optional[Dict[str, "object"]] = None,
+    seed: int = 0,
+) -> Dict:
+    """Run the full inter-brain analysis and write pickle + PNG.
+
+    Thin wrapper around :func:`_analyze` that additionally pickles the
+    payload and saves the six-panel summary PNG.
+    """
+    payload = _analyze(
+        X_A, X_B, bin_centers, animal_ids,
+        bin_size=bin_size, smoothing=smoothing, t_window=t_window,
+        n_components=n_components, max_K=max_K,
+        method=method, reg=reg, cv_folds=cv_folds,
+        n_shuffles=n_shuffles, max_lag_bins=max_lag_bins, alpha=alpha,
+        behavior_by_animal=behavior_by_animal, seed=seed,
+    )
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     pkl_path = output_dir / "results.pkl"
     with open(pkl_path, "wb") as f:
         pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
     logger.info("Wrote %s", pkl_path)
 
-    t_bins = np.asarray(bin_centers)[fit.valid_mask] if bin_centers is not None else None
+    fit = payload["fit"]
+    t_bins = (
+        np.asarray(bin_centers)[fit.valid_mask] if bin_centers is not None else None
+    )
     fig = plot_inter_brain_summary(
         fit,
-        shuffle_null=null,
+        shuffle_null=payload["shuffle_null"],
         t_bins=t_bins,
-        cross_corr=cross_corr,
-        time_lagged=(lags, ccs),
-        regression_results=regression_results,
+        cross_corr=payload["cross_corr"],
+        time_lagged=payload["time_lagged"],
+        regression_results=payload["regression_results"],
         bin_size_sec=bin_size,
     )
     png_path = output_dir / "summary.png"

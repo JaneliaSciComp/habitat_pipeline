@@ -36,6 +36,7 @@ def run_tests():
         "test_integration.py",
         "test_multi_animal_session.py",
         "test_inter_brain_dynamics.py",
+        "test_behavior_features.py",
     ]
     
     all_passed = True
@@ -85,6 +86,7 @@ def run_specific_category(category: str):
         "integration": "test_integration.py",
         "multi_animal": "test_multi_animal_session.py",
         "inter_brain": "test_inter_brain_dynamics.py",
+        "behavior_features": "test_behavior_features.py",
         "all": None  # Run all tests
     }
     

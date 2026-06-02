@@ -37,7 +37,7 @@ _HEAD_DIR_COLUMNS = ("head_dir", "heading", "head_direction", "orientation")
 
 def build_behavior_feature_matrix(
     tracking: VideoTrackingData,
-    events: BehavioralEventsData,
+    events: Optional[BehavioralEventsData],
     sync: DataSyncManager,
     t_grid_ephys: np.ndarray,
     focal: str,
@@ -264,11 +264,16 @@ def _interp(
 
 def _populate_event_indicators(
     out: dict,
-    events: BehavioralEventsData,
+    events: Optional[BehavioralEventsData],
     t_grid_ephys: np.ndarray,
     event_window_sec: float,
     event_types: Optional[Iterable[str]],
 ) -> None:
+    if events is None:
+        logger.warning(
+            "events is None — skipping event indicator columns."
+        )
+        return
     df = events.events_data
     if df is None or len(df) == 0:
         return

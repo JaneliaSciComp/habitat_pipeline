@@ -147,13 +147,20 @@ class MultiAnimalSession:
         return self._sync
 
     @property
-    def events(self) -> BehavioralEventsData:
-        """Shared session-level ``BehavioralEventsData``, ephys-synchronized."""
+    def events(self) -> Optional[BehavioralEventsData]:
+        """Shared session-level ``BehavioralEventsData``, ephys-synchronized.
+
+        Returns ``None`` if the behavioral events fail to load.
+        """
         if self._events is None:
             dsm = self.dsm_by_animal[self.sync_from_animal]
-            self._events = load_behavioral_events(
-                dsm.get_behavioral_event_files(), session_id=self.session_id
-            )
+            try:
+                self._events = load_behavioral_events(
+                    dsm.get_behavioral_event_files(), session_id=self.session_id
+                )
+            except Exception as e:
+                logger.warning("Failed to load behavioral events: %s", e)
+                return None
             try:
                 self._events.synchronize_with_ephys(self.sync, create_new_columns=True)
             except Exception as e:

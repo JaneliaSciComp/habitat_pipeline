@@ -56,6 +56,36 @@ class PopulationParams:
         }}
 
 
+@dataclass(frozen=True)
+class InterBrainParams:
+    """Parameters for the Inter-Brain tab.
+
+    The *focal* animal is supplied via the surrounding :class:`SessionKey`;
+    ``partner_animal_ids`` lists the other animals recorded simultaneously
+    in the same session. Keeping the focal on ``SessionKey`` and partners
+    in params means the four existing tabs are unaffected by this addition
+    and the disk cache key (``SessionKey`` + ``params``) invalidates
+    correctly when the partner set or any analysis parameter changes.
+    """
+
+    partner_animal_ids: Tuple[str, ...]
+    bin_size: float
+    smoothing_sigma_sec: float
+    n_components: int
+    n_shuffles: int
+    t_window: Optional[Tuple[float, float]]
+    method: str
+    reg: float
+    cv_folds: int
+    max_lag_bins: int
+    alpha: float
+    event_window: float
+    behavior_type: Optional[str]
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
 def set_loaded_session(key: SessionKey) -> None:
     st.session_state[SESSION_STATE_KEY] = key
 

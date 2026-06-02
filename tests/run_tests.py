@@ -39,6 +39,7 @@ def run_tests():
         "test_behavior_features.py",
         "test_inter_brain_plots.py",
         "test_run_inter_brain.py",
+        "test_gui_inter_brain.py",
     ]
     
     all_passed = True
@@ -91,6 +92,7 @@ def run_specific_category(category: str):
         "behavior_features": "test_behavior_features.py",
         "inter_brain_plots": "test_inter_brain_plots.py",
         "run_inter_brain": "test_run_inter_brain.py",
+        "gui_inter_brain": "test_gui_inter_brain.py",
         "all": None  # Run all tests
     }
     

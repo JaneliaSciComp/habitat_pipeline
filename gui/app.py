@@ -16,7 +16,7 @@ from gui.loaders import (
     get_tracking_data,
 )
 from gui.state import is_session_loaded, set_loaded_session
-from gui.tabs import behavioral, decoding, population, tracking
+from gui.tabs import behavioral, decoding, inter_brain, population, tracking
 from gui.widgets import (
     analysis_param_widgets,
     cache_controls,
@@ -106,8 +106,9 @@ if not loaded:
 
 session_info_header(summary, session_key)
 
-tab_t, tab_b, tab_d, tab_p = st.tabs(
-    ["Tracking & Spatial", "Behavioral Events", "Neural Decoding", "Population Geometry"]
+tab_t, tab_b, tab_d, tab_p, tab_ib = st.tabs(
+    ["Tracking & Spatial", "Behavioral Events", "Neural Decoding",
+     "Population Geometry", "Inter-Brain"]
 )
 
 with tab_t:
@@ -121,3 +122,6 @@ with tab_d:
 
 with tab_p:
     population.render(session_key, pop_params)
+
+with tab_ib:
+    inter_brain.render(session_key)

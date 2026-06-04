@@ -35,6 +35,7 @@ def run_tests():
         "test_kilosort_data_analysis.py",
         "test_integration.py",
         "test_multi_animal_session.py",
+        "test_multi_animal_tracking.py",
         "test_inter_brain_dynamics.py",
         "test_behavior_features.py",
         "test_inter_brain_plots.py",

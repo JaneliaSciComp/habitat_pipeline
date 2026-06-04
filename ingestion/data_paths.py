@@ -692,6 +692,21 @@ class DataStorageManager:
         """Get pulse log path."""
         return self.pulse_log_path
 
+    def get_pixels_per_cm(self) -> Optional[float]:
+        """Pixels-per-cm calibration from the cohort config, or None if unset.
+
+        Tracking ``center_x`` / ``center_y`` are stored in pixels. When the
+        optional ``"pixels_per_cm"`` key is present (and non-null) in the cohort
+        config, callers convert positions to cm by dividing by this value. When
+        the key is absent or null, positions stay in pixels. The single place
+        this conversion happens is
+        :meth:`ingestion.multi_animal_session.MultiAnimalSession.get_tracking_on_ephys_clock`.
+        """
+        val = self._config.get("pixels_per_cm")
+        if val is None:
+            return None
+        return float(val)
+
     def __repr__(self) -> str:
         return (f"DataStorageManager({self.animal_id}/{self.session_id}, "
                 f"ephys:{'Y' if self.kilosort_path else 'N'}, "

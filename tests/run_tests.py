@@ -38,6 +38,7 @@ def run_tests():
         "test_multi_animal_tracking.py",
         "test_social_spatial_fields.py",
         "test_social_spatial_plots.py",
+        "test_run_social_spatial.py",
         "test_inter_brain_dynamics.py",
         "test_behavior_features.py",
         "test_inter_brain_plots.py",

@@ -11,6 +11,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from types import SimpleNamespace
+
 from ephys.social_spatial_fields import (
     RateMap,
     compute_rate_map,
@@ -19,6 +21,9 @@ from ephys.social_spatial_fields import (
     spatial_coherence,
     split_half_stability,
     field_significance,
+    compute_social_place_fields,
+    field_similarity_across_targets,
+    _benjamini_hochberg,
 )
 
 ARENA = ((0.0, 80.0), (0.0, 80.0))
@@ -47,7 +52,9 @@ def _random_walk(n, bounds, step_sd, seed):
 def _make_xy(n=25000, bounds=ARENA, step_sd=3.0, seed=0, t0=0.0):
     x, y = _random_walk(n, bounds, step_sd, seed)
     t = t0 + np.arange(n) * DT
-    return pd.DataFrame({"t": t, "x": x, "y": y})
+    # 'speed' column mirrors what get_tracking_on_ephys_clock returns.
+    speed = np.sqrt(np.gradient(x, t) ** 2 + np.gradient(y, t) ** 2)
+    return pd.DataFrame({"t": t, "x": x, "y": y, "speed": speed})
 
 
 def _poisson_spikes_from_field(xy, center, sigma, peak_hz, base_hz, seed):
@@ -70,6 +77,49 @@ def _poisson_spikes_from_field(xy, center, sigma, peak_hz, base_hz, seed):
 
 def _bin_center(edges, idx):
     return 0.5 * (edges[idx] + edges[idx + 1])
+
+
+def _conjunctive_spikes(xy_self, xy_partner, c_self, c_partner, sigma,
+                        peak_hz, base_hz, seed):
+    """Spikes whose rate is the product of a self-bump and a partner-bump."""
+    rng = np.random.default_rng(seed)
+    t = xy_self["t"].to_numpy()
+    gs = np.exp(-(((xy_self["x"] - c_self[0]) ** 2 + (xy_self["y"] - c_self[1]) ** 2)
+                  / (2 * sigma ** 2)).to_numpy())
+    gp = np.exp(-(((xy_partner["x"] - c_partner[0]) ** 2 + (xy_partner["y"] - c_partner[1]) ** 2)
+                  / (2 * sigma ** 2)).to_numpy())
+    rate = base_hz + peak_hz * gs * gp
+    counts = rng.poisson(rate * DT)
+    spikes = [ti + rng.uniform(0, DT, size=c) for ti, c in zip(t, counts) if c]
+    return np.sort(np.concatenate(spikes)) if spikes else np.array([])
+
+
+class _StubMAS:
+    """Minimal MultiAnimalSession stand-in for compute_social_place_fields."""
+
+    def __init__(self, tracking, session_id="20251216"):
+        self._tracking = tracking
+        self.animal_ids = list(tracking.keys())
+        self.session_id = session_id
+
+    def get_tracking_on_ephys_clock(self, t_start_ephys=None, t_end_ephys=None):
+        out = {}
+        for aid, df in self._tracking.items():
+            d = df
+            if t_start_ephys is not None:
+                d = d[d["t"] >= t_start_ephys]
+            if t_end_ephys is not None:
+                d = d[d["t"] <= t_end_ephys]
+            out[aid] = d.reset_index(drop=True)
+        return out
+
+
+def _make_ks(spike_lists):
+    """SimpleNamespace standing in for KilosortData (use_quality_cells=False path)."""
+    return SimpleNamespace(
+        ks_ids=list(range(len(spike_lists))),
+        spike_times_by_cell=list(spike_lists),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -201,3 +251,111 @@ class TestSignificance:
         )
         assert sig.null_method == "position_shuffle"
         assert sig.p_skaggs < 0.05
+
+
+def _three_animal_tracking(n=12000):
+    return {
+        "A": _make_xy(n=n, seed=100),
+        "B": _make_xy(n=n, seed=200),
+        "C": _make_xy(n=n, seed=300),
+    }
+
+
+def _sweep(ks, tracking, focal="A", **kw):
+    mas = _StubMAS(tracking)
+    defaults = dict(
+        target_animals=list(tracking.keys()),
+        bin_size_cm=BIN, smoothing_sigma_cm=5.0,
+        speed_filter_subject="none", n_shuffles=100, min_n_spikes=50,
+        use_quality_cells=False, arena_bounds=ARENA, seed=0,
+    )
+    defaults.update(kw)
+    return compute_social_place_fields(ks, mas, focal_animal=focal, **defaults)
+
+
+class TestBenjaminiHochberg:
+    def test_zero_stays_zero_and_bounded(self):
+        q = _benjamini_hochberg(np.array([0.0, 0.5, 0.9]))
+        assert q[0] == 0.0
+        assert np.all(q <= 1.0) and np.all(q >= 0.0)
+
+    def test_nan_maps_to_one(self):
+        q = _benjamini_hochberg(np.array([np.nan, 0.01]))
+        assert q[0] == 1.0
+
+
+class TestMultiTargetSweep:
+    def test_self_only_classification(self):
+        tr = _three_animal_tracking()
+        spikes = _poisson_spikes_from_field(
+            tr["A"], center=(40.0, 40.0), sigma=7.0, peak_hz=25.0, base_hz=0.2, seed=400)
+        res = _sweep(_make_ks([spikes]), tr, focal="A")
+        row = res.cell_classification.iloc[0]
+        assert row["category"] == "self_only"
+        assert row["dominant_target"] == "A"
+
+    def test_partner_only_classification(self):
+        tr = _three_animal_tracking()
+        spikes = _poisson_spikes_from_field(
+            tr["B"], center=(40.0, 40.0), sigma=7.0, peak_hz=25.0, base_hz=0.2, seed=401)
+        res = _sweep(_make_ks([spikes]), tr, focal="A")
+        row = res.cell_classification.iloc[0]
+        assert row["category"] == "partner_only"
+        assert row["dominant_target"] == "B"
+
+    def test_flat_cell_classified_none(self):
+        tr = _three_animal_tracking()
+        rng = np.random.default_rng(402)
+        spikes = np.sort(rng.uniform(tr["A"]["t"].min(), tr["A"]["t"].max(), size=6000))
+        res = _sweep(_make_ks([spikes]), tr, focal="A")
+        assert res.cell_classification.iloc[0]["category"] == "none"
+
+    def test_conjunctive_classification(self):
+        tr = _three_animal_tracking(n=16000)
+        spikes = _conjunctive_spikes(
+            tr["A"], tr["B"], c_self=(40.0, 40.0), c_partner=(40.0, 40.0),
+            sigma=11.0, peak_hz=80.0, base_hz=0.1, seed=403)
+        res = _sweep(_make_ks([spikes]), tr, focal="A")
+        row = res.cell_classification.iloc[0]
+        assert row["category"] == "conjunctive"
+
+    def test_low_spike_cell_flagged(self):
+        tr = _three_animal_tracking(n=4000)
+        spikes = np.array([1.0, 2.0, 3.0, 4.0, 5.0])  # < min_n_spikes
+        res = _sweep(_make_ks([spikes]), tr, focal="A", min_n_spikes=50)
+        sig = res.signif["A"][0]
+        assert sig.n_shuffles == 0
+        assert 0 in res.stats["A"]  # stats still present
+
+    def test_speed_filter_removes_everything(self):
+        tr = _three_animal_tracking(n=4000)
+        spikes = _poisson_spikes_from_field(
+            tr["A"], center=(40.0, 40.0), sigma=7.0, peak_hz=25.0, base_hz=0.2, seed=404)
+        res = _sweep(_make_ks([spikes]), tr, focal="A",
+                     speed_filter_subject="target", speed_threshold_cms=1e9)
+        # Zero occupancy ⇒ all-NaN maps, nothing significant, runs gracefully.
+        assert np.all(np.isnan(res.rate_maps["A"][0].rates))
+        assert res.cell_classification.iloc[0]["category"] == "none"
+
+    def test_similarity_helpers(self):
+        tr = _three_animal_tracking(n=6000)
+        spikes = _poisson_spikes_from_field(
+            tr["A"], center=(40.0, 40.0), sigma=8.0, peak_hz=25.0, base_hz=0.2, seed=405)
+        res = _sweep(_make_ks([spikes]), tr, focal="A")
+        sim = field_similarity_across_targets(
+            {t: res.rate_maps[t][0] for t in ["A", "B", "C"]})
+        assert sim.shape == (3, 3)
+        assert sim.loc["A", "A"] == 1.0
+        # Population similarity keyed by (focal, partner).
+        assert set(res.population_field_similarity.keys()) == {"A__B", "A__C"}
+        m = res.population_field_similarity["A__B"]["similarity_matrix"]
+        assert m.shape == (1, 1)
+
+    def test_parameters_carry_contract(self):
+        tr = _three_animal_tracking(n=3000)
+        spikes = np.sort(np.random.default_rng(406).uniform(
+            tr["A"]["t"].min(), tr["A"]["t"].max(), size=3000))
+        res = _sweep(_make_ks([spikes]), tr, focal="A", n_shuffles=10)
+        assert res.parameters["class_label"] == "target_position"
+        assert res.parameters["analysis_title"]
+        assert res.parameters["focal_animal"] == "A"

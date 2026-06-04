@@ -489,6 +489,11 @@ def compute_arena_bounds_from_tracking(mas: "MultiAnimalSession",
                                        pad_cm: float = 5.0) -> ArenaBounds:
     """Aggregate (min, max) x and y across all animals' tracking, padded."""
     tracking = mas.get_tracking_on_ephys_clock()
+    return _bounds_from_tracking_dict(tracking, pad_cm)
+
+
+def _bounds_from_tracking_dict(tracking: Dict[str, pd.DataFrame],
+                               pad_cm: float = 5.0) -> ArenaBounds:
     xs, ys = [], []
     for df in tracking.values():
         if df.shape[0]:
@@ -502,3 +507,293 @@ def compute_arena_bounds_from_tracking(mas: "MultiAnimalSession",
         (float(np.nanmin(x)) - pad_cm, float(np.nanmax(x)) + pad_cm),
         (float(np.nanmin(y)) - pad_cm, float(np.nanmax(y)) + pad_cm),
     )
+
+
+# ---------------------------------------------------------------------------
+# Cross-target field similarity
+# ---------------------------------------------------------------------------
+
+def _masked_corr(a: np.ndarray, b: np.ndarray) -> float:
+    """Pearson correlation over entries where both arrays are finite."""
+    both = np.isfinite(a) & np.isfinite(b)
+    if both.sum() < 3:
+        return np.nan
+    av, bv = a[both], b[both]
+    if np.std(av) == 0 or np.std(bv) == 0:
+        return np.nan
+    return float(np.corrcoef(av, bv)[0, 1])
+
+
+def field_similarity_across_targets(rate_maps: Dict[str, RateMap]) -> pd.DataFrame:
+    """Pairwise Pearson r between one cluster's rate maps under each target.
+
+    Correlations use only bins where both maps have valid (non-NaN) occupancy.
+    Returns a square DataFrame indexed and columned by target animal.
+    """
+    targets = list(rate_maps.keys())
+    n = len(targets)
+    mat = np.full((n, n), np.nan)
+    flats = {t: rate_maps[t].rates.ravel() for t in targets}
+    for i, ti in enumerate(targets):
+        for j, tj in enumerate(targets):
+            if i == j:
+                mat[i, j] = 1.0
+            elif j > i:
+                r = _masked_corr(flats[ti], flats[tj])
+                mat[i, j] = mat[j, i] = r
+    return pd.DataFrame(mat, index=targets, columns=targets)
+
+
+# ---------------------------------------------------------------------------
+# Multiple-comparison correction
+# ---------------------------------------------------------------------------
+
+def _benjamini_hochberg(pvals: np.ndarray) -> np.ndarray:
+    """Benjamini–Hochberg adjusted p-values (q-values). NaNs map to 1.0."""
+    p = np.asarray(pvals, dtype=np.float64).copy()
+    nan_mask = ~np.isfinite(p)
+    p[nan_mask] = 1.0
+    n = p.size
+    if n == 0:
+        return p
+    order = np.argsort(p)
+    ranked = p[order] * n / (np.arange(n) + 1)
+    # Enforce monotonicity from the largest rank down.
+    ranked = np.minimum.accumulate(ranked[::-1])[::-1]
+    q = np.empty(n, dtype=np.float64)
+    q[order] = np.clip(ranked, 0.0, 1.0)
+    return q
+
+
+# ---------------------------------------------------------------------------
+# Multi-target sweep
+# ---------------------------------------------------------------------------
+
+def compute_social_place_fields(
+    ks: "KilosortData",
+    mas: "MultiAnimalSession",
+    focal_animal: str,
+    target_animals: Optional[List[str]] = None,
+    bin_size_cm: float = 5.0,
+    smoothing_sigma_cm: float = 5.0,
+    speed_threshold_cms: float = 5.0,
+    speed_filter_subject: Literal["focal", "target", "none"] = "target",
+    n_shuffles: int = 500,
+    min_n_spikes: int = 50,
+    min_occupancy_sec: float = 0.1,
+    use_quality_cells: bool = True,
+    quality_thresholds: Optional[dict] = None,
+    t_window_ephys: Optional[Tuple[float, float]] = None,
+    arena_bounds: Optional[ArenaBounds] = None,
+    null_method: Literal["circular_shift", "position_shuffle"] = "circular_shift",
+    sig_alpha: float = 0.01,
+    seed: int = 0,
+) -> SocialFieldResults:
+    """Compute social place fields for every focal cell over every target animal.
+
+    ``target_animals`` defaults to all animals in ``mas`` (including the focal
+    animal, whose map is the self place field). For each focal cluster and each
+    target the function builds a :class:`RateMap`, :class:`FieldStats`, and
+    :class:`FieldSignificance`, then classifies each cell by which targets it is
+    significantly tuned to (Benjamini–Hochberg FDR across targets on Skaggs
+    bits/spike).
+    """
+    from ingestion.kilosort_data_import import _DEFAULT_QUALITY_THRESHOLDS
+
+    if target_animals is None:
+        target_animals = list(mas.animal_ids)
+
+    t_start = t_window_ephys[0] if t_window_ephys else None
+    t_end = t_window_ephys[1] if t_window_ephys else None
+    tracking = mas.get_tracking_on_ephys_clock(t_start_ephys=t_start, t_end_ephys=t_end)
+
+    if arena_bounds is None:
+        arena_bounds = _bounds_from_tracking_dict(tracking)
+
+    # Focal cells and their spike trains.
+    if use_quality_cells:
+        thresholds = quality_thresholds or dict(_DEFAULT_QUALITY_THRESHOLDS)
+        cluster_ids, spike_lists = ks.get_filtered_cells_spike_times(**thresholds)
+    else:
+        thresholds = None
+        cluster_ids = list(ks.ks_ids)
+        spike_lists = list(ks.spike_times_by_cell)
+
+    if focal_animal not in tracking:
+        logger.warning("Focal animal %s has no tracking; self-map unavailable.", focal_animal)
+
+    rate_maps: Dict[str, Dict[int, RateMap]] = {}
+    stats: Dict[str, Dict[int, FieldStats]] = {}
+    signif: Dict[str, Dict[int, FieldSignificance]] = {}
+
+    for target in target_animals:
+        target_xy = tracking.get(target)
+        if target_xy is None or target_xy.shape[0] < 2:
+            logger.warning("No usable tracking for target %s; skipping.", target)
+            continue
+
+        if speed_filter_subject == "none":
+            speed_xy = None
+            thr = None
+        elif speed_filter_subject == "focal":
+            fdf = tracking.get(focal_animal)
+            speed_xy = fdf[["t", "speed"]] if fdf is not None else None
+            thr = speed_threshold_cms if speed_xy is not None else None
+        else:  # 'target'
+            speed_xy = target_xy[["t", "speed"]]
+            thr = speed_threshold_cms
+
+        bin_kwargs = dict(
+            bin_size_cm=bin_size_cm,
+            arena_bounds=arena_bounds,
+            smoothing_sigma_cm=smoothing_sigma_cm,
+            min_occupancy_sec=min_occupancy_sec,
+            speed_xy=speed_xy,
+            speed_threshold_cms=thr,
+            t_window_ephys=t_window_ephys,
+            speed_filter_subject=speed_filter_subject,
+        )
+
+        rate_maps[target] = {}
+        stats[target] = {}
+        signif[target] = {}
+        for cid, st in zip(cluster_ids, spike_lists):
+            rm = compute_rate_map(st, target_xy, focal_animal=focal_animal,
+                                  target_animal=target, cluster_id=cid, **bin_kwargs)
+            fs = compute_field_stats(rm, st, target_xy, **bin_kwargs)
+            rate_maps[target][cid] = rm
+            stats[target][cid] = fs
+
+            if fs.n_spikes_in_window < min_n_spikes:
+                signif[target][cid] = FieldSignificance(
+                    cluster_id=cid, target_animal=target, null_method=null_method,
+                    n_shuffles=0, p_skaggs=np.nan, p_sparsity=np.nan,
+                    p_split_half=np.nan, shuffle_skaggs=np.array([]),
+                )
+            else:
+                signif[target][cid] = field_significance(
+                    st, target_xy, n_shuffles=n_shuffles, null_method=null_method,
+                    seed=seed, cluster_id=cid, target_animal=target, **bin_kwargs,
+                )
+
+        # Informative warning when speed gating leaves no occupancy.
+        if rate_maps[target]:
+            probe = next(iter(rate_maps[target].values()))
+            if probe.occupancy.sum() <= 0:
+                logger.warning(
+                    "Target %s has zero occupancy after speed gating "
+                    "(subject=%s, threshold=%s); all rate maps are empty.",
+                    target, speed_filter_subject, thr,
+                )
+
+    used_targets = list(rate_maps.keys())
+    cell_classification = _classify_cells(
+        cluster_ids, used_targets, focal_animal, stats, signif, sig_alpha,
+    )
+    population_field_similarity = _population_similarity(
+        cluster_ids, used_targets, focal_animal, rate_maps,
+    )
+
+    parameters = {
+        "focal_animal": focal_animal,
+        "target_animals": used_targets,
+        "session_id": mas.session_id,
+        "bin_size_cm": bin_size_cm,
+        "smoothing_sigma_cm": smoothing_sigma_cm,
+        "speed_threshold_cms": speed_threshold_cms,
+        "speed_filter_subject": speed_filter_subject,
+        "n_shuffles": n_shuffles,
+        "min_n_spikes": min_n_spikes,
+        "min_occupancy_sec": min_occupancy_sec,
+        "use_quality_cells": use_quality_cells,
+        "quality_thresholds": thresholds,
+        "t_window_ephys": t_window_ephys,
+        "arena_bounds": arena_bounds,
+        "null_method": null_method,
+        "sig_alpha": sig_alpha,
+        "class_label": CLASS_LABEL,
+        "analysis_title": ANALYSIS_TITLE,
+    }
+    return SocialFieldResults(
+        rate_maps=rate_maps,
+        stats=stats,
+        signif=signif,
+        cell_classification=cell_classification,
+        population_field_similarity=population_field_similarity,
+        parameters=parameters,
+    )
+
+
+def _classify_cells(cluster_ids, targets, focal_animal, stats, signif, sig_alpha):
+    """Build the cell-classification DataFrame (FDR across targets per cell)."""
+    rows = []
+    for cid in cluster_ids:
+        p_by_target = {t: signif[t][cid].p_skaggs for t in targets if cid in signif[t]}
+        target_list = list(p_by_target.keys())
+        pvals = np.array([p_by_target[t] for t in target_list], dtype=np.float64)
+        qvals = _benjamini_hochberg(pvals) if pvals.size else np.array([])
+        sig_targets = {t for t, q in zip(target_list, qvals) if np.isfinite(q) and q < sig_alpha}
+
+        self_sig = focal_animal in sig_targets
+        partner_sig = sig_targets - {focal_animal}
+        n_partner = len(partner_sig)
+
+        if not sig_targets:
+            category = "none"
+        elif self_sig and n_partner == 0:
+            category = "self_only"
+        elif self_sig and n_partner >= 1:
+            category = "conjunctive"
+        elif not self_sig and n_partner >= 2:
+            category = "broadcast"
+        else:  # exactly one partner, no self
+            category = "partner_only"
+
+        # Dominant target: argmax Skaggs among significant targets.
+        dominant = np.nan
+        if sig_targets:
+            dominant = max(
+                sig_targets, key=lambda t: stats[t][cid].skaggs_bits_per_spike,
+            )
+
+        row = {
+            "cluster_id": cid,
+            "n_target_significant": len(sig_targets),
+            "category": category,
+            "dominant_target": dominant,
+        }
+        for t in targets:
+            if cid in stats[t]:
+                fs = stats[t][cid]
+                row[f"bits_per_spike_{t}"] = fs.skaggs_bits_per_spike
+                row[f"sparsity_{t}"] = fs.sparsity
+                row[f"split_half_{t}"] = fs.split_half_corr
+                row[f"p_value_{t}"] = signif[t][cid].p_skaggs
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _population_similarity(cluster_ids, targets, focal_animal, rate_maps):
+    """(n_cells, n_cells) rate-map correlation between cells under target pairs.
+
+    Pairs are (focal/self, partner) so the plot module can sort by the self
+    target. Returns ``{f'{focal}__{partner}': {'similarity_matrix', 'diag_distribution'}}``.
+    """
+    out: Dict[str, Dict[str, np.ndarray]] = {}
+    if focal_animal not in rate_maps:
+        return out
+    self_flats = [rate_maps[focal_animal][c].rates.ravel() for c in cluster_ids]
+    n = len(cluster_ids)
+    for partner in targets:
+        if partner == focal_animal:
+            continue
+        partner_flats = [rate_maps[partner][c].rates.ravel() for c in cluster_ids]
+        mat = np.full((n, n), np.nan)
+        for i in range(n):
+            for j in range(n):
+                mat[i, j] = _masked_corr(self_flats[i], partner_flats[j])
+        out[f"{focal_animal}__{partner}"] = {
+            "similarity_matrix": mat,
+            "diag_distribution": np.diag(mat).copy(),
+        }
+    return out

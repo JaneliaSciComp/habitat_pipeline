@@ -152,7 +152,7 @@ The decoding modules share a single label-agnostic core ([ephys/_lda_decoding.py
 
 **`decode_event_outcome.py`** — Winner vs loser decoding (mirrors the opponent module). `behavior_type=None` includes every event with both `winner` and `loser` populated.
 
-**`decode_location.py`** — Bayesian decoding of `(x, y)` for tracked objects: `build_binned_data`, `decode_location_single_cell`, `decode_location_population`, `decode_all_locations`, `plot_decoding_results`, `plot_all_decoding_summary`.
+**`decode_location.py`** — Bayesian decoding of `(x, y)` for tracked objects: `build_binned_data`, `decode_location`, `decode_all_locations`, `plot_decoding_results`, `plot_all_decoding_summary`.
 
 **`population_geometry.py`** — PCA/UMAP on event-aligned population activity.
 

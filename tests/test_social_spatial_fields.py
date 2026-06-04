@@ -18,6 +18,7 @@ from ephys.social_spatial_fields import (
     spatial_sparsity,
     spatial_coherence,
     split_half_stability,
+    field_significance,
 )
 
 ARENA = ((0.0, 80.0), (0.0, 80.0))
@@ -158,3 +159,45 @@ class TestSpatialStats:
         rm = compute_rate_map(spikes, partner_xy, bin_size_cm=BIN, arena_bounds=ARENA,
                               speed_threshold_cms=None)
         assert np.isfinite(spatial_coherence(rm))
+
+
+class TestSignificance:
+    def test_planted_field_significant(self):
+        partner_xy = _make_xy(seed=13)
+        spikes = _poisson_spikes_from_field(
+            partner_xy, center=(45.0, 35.0), sigma=7.0, peak_hz=25.0,
+            base_hz=0.2, seed=14,
+        )
+        sig = field_significance(
+            spikes, partner_xy, n_shuffles=500, null_method="circular_shift",
+            seed=0, cluster_id=3, target_animal="B",
+            bin_size_cm=BIN, arena_bounds=ARENA, speed_threshold_cms=None,
+        )
+        assert sig.n_shuffles == 500
+        assert len(sig.shuffle_skaggs) == 500
+        assert sig.p_skaggs < 0.001
+
+    def test_flat_field_not_significant(self):
+        xy = _make_xy(seed=15)
+        rng = np.random.default_rng(16)
+        spikes = np.sort(rng.uniform(xy["t"].min(), xy["t"].max(), size=8000))
+        sig = field_significance(
+            spikes, xy, n_shuffles=200, null_method="circular_shift", seed=0,
+            cluster_id=4, target_animal="B",
+            bin_size_cm=BIN, arena_bounds=ARENA, speed_threshold_cms=None,
+        )
+        assert sig.p_skaggs > 0.05
+
+    def test_position_shuffle_null_runs(self):
+        partner_xy = _make_xy(n=8000, seed=17)
+        spikes = _poisson_spikes_from_field(
+            partner_xy, center=(40.0, 40.0), sigma=8.0, peak_hz=25.0,
+            base_hz=0.2, seed=18,
+        )
+        sig = field_significance(
+            spikes, partner_xy, n_shuffles=100, null_method="position_shuffle",
+            seed=0, cluster_id=5, target_animal="B",
+            bin_size_cm=BIN, arena_bounds=ARENA, speed_threshold_cms=None,
+        )
+        assert sig.null_method == "position_shuffle"
+        assert sig.p_skaggs < 0.05

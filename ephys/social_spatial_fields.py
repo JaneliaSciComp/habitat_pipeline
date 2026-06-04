@@ -389,6 +389,99 @@ def compute_field_stats(rate_map: RateMap, spike_times: np.ndarray,
 
 
 # ---------------------------------------------------------------------------
+# Shuffle significance
+# ---------------------------------------------------------------------------
+
+def field_significance(
+    spike_times: np.ndarray,
+    target_xy: pd.DataFrame,
+    n_shuffles: int = 500,
+    null_method: Literal["circular_shift", "position_shuffle"] = "circular_shift",
+    seed: int = 0,
+    cluster_id: int = -1,
+    target_animal: str = "",
+    **rate_map_kwargs,
+) -> FieldSignificance:
+    """Shuffle-based significance for a single rate map.
+
+    ``circular_shift`` rigidly time-shifts the spike train within the window
+    (preserves firing rate + autocorrelation); ``position_shuffle`` cyclically
+    rolls the target ``(x, y)`` relative to the spikes. In both cases the shift
+    magnitude is drawn from ``[0.1 T, 0.9 T]`` of the window.
+
+    For each shuffle the Skaggs bits/spike, sparsity, and split-half correlation
+    are recomputed. P-values are one-tailed in the meaningful direction:
+    ``p_skaggs`` and ``p_split`` are ``fraction(shuffle >= true)``; ``p_sparsity``
+    is ``fraction(shuffle <= true)`` because lower sparsity = more selective.
+    """
+    rng = np.random.default_rng(seed)
+
+    if rate_map_kwargs.get("arena_bounds") is None:
+        rate_map_kwargs = {**rate_map_kwargs, "arena_bounds": _infer_bounds(target_xy)}
+
+    t = target_xy["t"].to_numpy(dtype=np.float64)
+    t_window = rate_map_kwargs.get("t_window_ephys")
+    if t_window is None:
+        w0, w1 = float(t.min()), float(t.max())
+    else:
+        w0, w1 = t_window
+    span = max(w1 - w0, 1e-9)
+    median_dt = float(np.median(np.diff(t))) if t.size > 1 else 1.0
+
+    def _stats(sp, xy):
+        rm = compute_rate_map(sp, xy, cluster_id=cluster_id,
+                              target_animal=target_animal, **rate_map_kwargs)
+        bits, _ = spatial_information(rm)
+        return bits, spatial_sparsity(rm), split_half_stability(sp, xy, **rate_map_kwargs)
+
+    st = np.asarray(spike_times, dtype=np.float64)
+    true_skaggs, true_sparsity, true_split = _stats(st, target_xy)
+
+    sh_skaggs = np.full(n_shuffles, np.nan)
+    sh_sparsity = np.full(n_shuffles, np.nan)
+    sh_split = np.full(n_shuffles, np.nan)
+    x0 = target_xy["x"].to_numpy()
+    y0 = target_xy["y"].to_numpy()
+    for i in range(n_shuffles):
+        tau = rng.uniform(0.1 * span, 0.9 * span)
+        if null_method == "circular_shift":
+            sp_i = w0 + np.mod(st - w0 + tau, span)
+            xy_i = target_xy
+        elif null_method == "position_shuffle":
+            k = int(round(tau / max(median_dt, 1e-9)))
+            xy_i = target_xy.copy()
+            xy_i["x"] = np.roll(x0, k)
+            xy_i["y"] = np.roll(y0, k)
+            sp_i = st
+        else:
+            raise ValueError(f"Unknown null_method: {null_method!r}")
+        sh_skaggs[i], sh_sparsity[i], sh_split[i] = _stats(sp_i, xy_i)
+
+    def _p_geq(true_val, shuffles):
+        valid = shuffles[np.isfinite(shuffles)]
+        if not np.isfinite(true_val) or valid.size == 0:
+            return np.nan
+        return float(np.mean(valid >= true_val))
+
+    def _p_leq(true_val, shuffles):
+        valid = shuffles[np.isfinite(shuffles)]
+        if not np.isfinite(true_val) or valid.size == 0:
+            return np.nan
+        return float(np.mean(valid <= true_val))
+
+    return FieldSignificance(
+        cluster_id=cluster_id,
+        target_animal=target_animal,
+        null_method=null_method,
+        n_shuffles=n_shuffles,
+        p_skaggs=_p_geq(true_skaggs, sh_skaggs),
+        p_sparsity=_p_leq(true_sparsity, sh_sparsity),
+        p_split_half=_p_geq(true_split, sh_split),
+        shuffle_skaggs=sh_skaggs,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Arena bounds from a whole session
 # ---------------------------------------------------------------------------
 

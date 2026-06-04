@@ -6,7 +6,7 @@ tabs can take a single typed argument instead of unpacking by string keys.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, replace
-from typing import Optional, Tuple
+from typing import Literal, Optional, Tuple
 
 import streamlit as st
 
@@ -81,6 +81,29 @@ class InterBrainParams:
     alpha: float
     event_window: float
     behavior_type: Optional[str]
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class SocialSpatialParams:
+    """Parameters for the Social Place Fields tab.
+
+    ``focal`` is the animal whose spikes generate the rate maps; ``targets``
+    are the animals (self + partners) whose positions the maps are built over.
+    Both live in params (not only on :class:`SessionKey`) so the disk cache key
+    invalidates when either changes.
+    """
+
+    focal: str
+    targets: Tuple[str, ...]
+    bin_size_cm: float
+    smoothing_sigma_cm: float
+    speed_threshold_cms: float
+    speed_filter_subject: Literal["focal", "target", "none"]
+    n_shuffles: int
+    use_quality_cells: bool
 
     def as_dict(self) -> dict:
         return asdict(self)

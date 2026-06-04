@@ -301,6 +301,7 @@ Variants:
 | Population geometry (PCA/UMAP/trajectories) | [ephys/population_geometry.py](ephys/population_geometry.py) |
 | Rastermap visualization | [ephys/rastermap_viz.py](ephys/rastermap_viz.py) |
 | Inter-brain shared subspace (multi-animal CCA, nulls, behavior regression) | [ephys/inter_brain_dynamics.py](ephys/inter_brain_dynamics.py), [ephys/inter_brain_plots.py](ephys/inter_brain_plots.py), [ephys/run_inter_brain.py](ephys/run_inter_brain.py), [ingestion/multi_animal_session.py](ingestion/multi_animal_session.py), [video/behavior_features.py](video/behavior_features.py), [gui/tabs/inter_brain.py](gui/tabs/inter_brain.py) — see [ephys/README.md](ephys/README.md) |
+| Allocentric social place fields (per-cell rate maps over each animal's position, multi-target tuning + shuffle significance) | [ephys/social_spatial_fields.py](ephys/social_spatial_fields.py), [ephys/social_spatial_plots.py](ephys/social_spatial_plots.py), [ephys/run_social_spatial.py](ephys/run_social_spatial.py), [gui/tabs/social_spatial.py](gui/tabs/social_spatial.py) — tracking on the ephys clock via [ingestion/multi_animal_session.py](ingestion/multi_animal_session.py) |
 | Streamlit + Panel dashboards | [gui/app.py](gui/app.py), [gui/interactive_app.py](gui/interactive_app.py) |
 | CLI orchestration | [workflow.py](workflow.py), per-module `main()` entries |
 | Metadata database (SQLite) | [database/](database/) |

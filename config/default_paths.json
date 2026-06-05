@@ -2,5 +2,6 @@
   "video": "//nearline/karpova/TervoLab/data/RatCity/cohort7/",
   "ephys": "//nearline/karpova/TervoLab/data/RatCity/cohort7/ephys/",
   "tracking": "//nearline/karpova/TervoLab/analysis/Tracking/manual_tracking/cohort7",
-  "events": "//nearline/karpova/TervoLab/analysis/RatCityBehavior/cohort7"
+  "events": "//nearline/karpova/TervoLab/analysis/RatCityBehavior/cohort7",
+  "pixels_per_cm": null
 }

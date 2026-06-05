@@ -152,7 +152,7 @@ The decoding modules share a single label-agnostic core ([ephys/_lda_decoding.py
 
 **`decode_event_outcome.py`** — Winner vs loser decoding (mirrors the opponent module). `behavior_type=None` includes every event with both `winner` and `loser` populated.
 
-**`decode_location.py`** — Bayesian decoding of `(x, y)` for tracked objects: `build_binned_data`, `decode_location_single_cell`, `decode_location_population`, `decode_all_locations`, `plot_decoding_results`, `plot_all_decoding_summary`.
+**`decode_location.py`** — Bayesian decoding of `(x, y)` for tracked objects: `build_binned_data`, `decode_location`, `decode_all_locations`, `plot_decoding_results`, `plot_all_decoding_summary`.
 
 **`population_geometry.py`** — PCA/UMAP on event-aligned population activity.
 
@@ -199,6 +199,38 @@ python -m ephys.run_inter_brain \
     --bin_size 0.5 --smoothing 0.25 \
     --max_K 20 --n_shuffles 200 \
     --behavior_type EC --output_dir ./results
+```
+
+**`social_spatial_fields.py`** / **`social_spatial_plots.py`** / **`run_social_spatial.py`** — Allocentric **social place fields**: occupancy-normalized firing-rate maps of a focal animal's cells over *each other* animal's `(x, y)`, with multi-target tuning classification and shuffle significance (informed by Ray et al., *Science* 2025; Danjo/Omer *Science* 2018; Skaggs *NIPS* 1993).
+
+| Symbol | Description |
+|--------|-------------|
+| `MultiAnimalSession.get_tracking_on_ephys_clock(...)` in [ingestion/multi_animal_session.py](ingestion/multi_animal_session.py) | Per-animal `(t, x, y, speed)` on the shared ephys clock. **The only place tracking↔ephys conversion happens.** Positions are cm when `pixels_per_cm` is configured, else pixels (warned). |
+| `compute_rate_map(spike_times, target_xy, bin_size_cm, ...)` | Occupancy (dwell-seconds) normalized rate map over a target animal's position; smooth-then-divide, NaN below `min_occupancy_sec`, optional speed gating. |
+| `spatial_information` / `spatial_sparsity` / `spatial_coherence` / `split_half_stability` | Skaggs bits/spike + bits/sec, occupancy-weighted sparsity, neighborhood coherence, first-vs-second-half stability. |
+| `field_significance(..., null_method='circular_shift'|'position_shuffle')` | Shuffle null (default circular-shift of the spike train). |
+| `compute_social_place_fields(ks, mas, focal_animal, target_animals=None, ...)` | Sweep every focal cell over every target → `SocialFieldResults` with rate maps, stats, significance, `cell_classification` (BH-FDR; `self_only`/`partner_only`/`conjunctive`/`broadcast`/`none`), and population field-similarity. `parameters` carry `class_label='target_position'`. |
+| `python -m ephys.run_social_spatial --session_id ... --animal_ids ... --focal ... ...` | Full pipeline → results pickle + 6-panel summary PNG + per-cluster grid PDF. |
+
+Six-line example:
+
+```python
+from ingestion.multi_animal_session import MultiAnimalSession
+from ephys.social_spatial_fields import compute_social_place_fields
+
+session = MultiAnimalSession("20251216", ["631", "632", "633"])
+ks = session.get_ks("631")
+results = compute_social_place_fields(ks, session, focal_animal="631", n_shuffles=500)
+print(results.cell_classification["category"].value_counts())
+```
+
+CLI:
+
+```bash
+python -m ephys.run_social_spatial \
+    --session_id 20251216 --animal_ids 631 632 633 --focal 631 \
+    --bin_size 5 --smoothing 5 --speed_threshold 5 \
+    --speed_filter_subject target --n_shuffles 500 --output_dir ./results
 ```
 
 **`decoding_plots.py`** — Shared plots for both opponent and outcome decoders. Result-dict-driven titles (`results['parameters']['class_label']` / `['analysis_title']`):

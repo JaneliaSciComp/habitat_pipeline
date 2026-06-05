@@ -23,11 +23,13 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 
 from ingestion.data_paths import DataStorageManager
 from ingestion.ephys_sync import DataSyncManager
 from ingestion.kilosort_data_import import KilosortData, load_kilosort_data
 from video.behavioral_events import BehavioralEventsData, load_behavioral_events
+from video.tracking_import import load_tracking_data
 
 logger = logging.getLogger(__name__)
 
@@ -268,6 +270,114 @@ class MultiAnimalSession:
                 )
 
         return bin_centers_ref, rates_by_animal
+
+    # ----------------------------------------------------------------------
+    # Tracking on the ephys clock
+    # ----------------------------------------------------------------------
+
+    def get_tracking_on_ephys_clock(
+        self,
+        t_start_ephys: Optional[float] = None,
+        t_end_ephys: Optional[float] = None,
+        speed_smoothing_sec: float = 0.1,
+    ) -> Dict[str, pd.DataFrame]:
+        """Per-animal ``(t, x, y, speed)`` tracking on the shared ephys clock.
+
+        Returns ``{animal_id: DataFrame}`` where each frame has columns:
+
+        - ``t``     : ephys seconds,
+        - ``x``,``y``: position in cm (or pixels if no calibration; see below),
+        - ``speed`` : speed in cm/s (or px/s), the Gaussian-smoothed gradient of
+          ``(x, y)`` with respect to ``t`` (sigma ``speed_smoothing_sec``).
+
+        This is the **only** place tracking↔ephys time conversion happens. A
+        single session tracking file already contains every animal, so it is
+        loaded once (from the ``sync_from_animal``'s ``DataStorageManager``) and
+        each animal's object is pulled out of it by its (numeric) id, using the
+        substring-fallback resolver in :class:`VideoTrackingData`.
+
+        Pixels→cm conversion uses ``DataStorageManager.get_pixels_per_cm()``.
+        If that calibration is unset, positions are passed through in pixels and
+        a single warning is logged; downstream ``*_cm`` parameters then mean
+        pixels.
+
+        Parameters
+        ----------
+        t_start_ephys, t_end_ephys : float, optional
+            Restrict each returned frame to this ephys-second window. Defaults
+            to no restriction (all synchronized frames).
+        speed_smoothing_sec : float
+            Gaussian sigma (seconds) for smoothing position before
+            differentiating to get speed.
+        """
+        from scipy.ndimage import gaussian_filter1d
+
+        sync_dsm = self.dsm_by_animal[self.sync_from_animal]
+        tracking = load_tracking_data(sync_dsm)
+        if not tracking.synchronize_with_ephys(self.sync):
+            raise RuntimeError(
+                "Could not synchronize tracking with the ephys clock "
+                f"(session {self.session_id}); no frame timestamps available."
+            )
+
+        pixels_per_cm = sync_dsm.get_pixels_per_cm()
+        if pixels_per_cm is None:
+            logger.warning(
+                "No 'pixels_per_cm' calibration in config for session %s; "
+                "tracking positions are left in PIXELS. All *_cm parameters in "
+                "social-spatial analyses then refer to pixels.",
+                self.session_id,
+            )
+            scale = 1.0
+        else:
+            scale = 1.0 / float(pixels_per_cm)
+
+        out: Dict[str, pd.DataFrame] = {}
+        for aid in self.animal_ids:
+            traj = tracking.get_object_trajectory(aid)
+            if traj is None or "ephys_timestamps" not in traj.columns:
+                logger.warning(
+                    "No tracking object resolved for animal %s in session %s; "
+                    "skipping.", aid, self.session_id,
+                )
+                continue
+
+            t = traj["ephys_timestamps"].to_numpy(dtype=np.float64)
+            x = traj["center_x"].to_numpy(dtype=np.float64) * scale
+            y = traj["center_y"].to_numpy(dtype=np.float64) * scale
+
+            valid = np.isfinite(t) & np.isfinite(x) & np.isfinite(y)
+            t, x, y = t[valid], x[valid], y[valid]
+            order = np.argsort(t, kind="stable")
+            t, x, y = t[order], x[order], y[order]
+
+            speed = self._compute_speed(t, x, y, speed_smoothing_sec, gaussian_filter1d)
+
+            df = pd.DataFrame({"t": t, "x": x, "y": y, "speed": speed})
+            if t_start_ephys is not None:
+                df = df[df["t"] >= t_start_ephys]
+            if t_end_ephys is not None:
+                df = df[df["t"] <= t_end_ephys]
+            out[aid] = df.reset_index(drop=True)
+
+        return out
+
+    @staticmethod
+    def _compute_speed(t, x, y, smoothing_sec, gaussian_filter1d) -> np.ndarray:
+        """Gaussian-smoothed speed (units/s) from a position time series."""
+        n = len(t)
+        if n < 2:
+            return np.zeros(n, dtype=np.float64)
+        dt = np.diff(t)
+        median_dt = float(np.median(dt[dt > 0])) if np.any(dt > 0) else 0.0
+        if smoothing_sec > 0 and median_dt > 0:
+            sigma_frames = smoothing_sec / median_dt
+            if sigma_frames > 0:
+                x = gaussian_filter1d(x, sigma=sigma_frames, mode="nearest")
+                y = gaussian_filter1d(y, sigma=sigma_frames, mode="nearest")
+        vx = np.gradient(x, t)
+        vy = np.gradient(y, t)
+        return np.sqrt(vx ** 2 + vy ** 2)
 
     # ----------------------------------------------------------------------
     # Sync consistency

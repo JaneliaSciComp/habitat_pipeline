@@ -145,10 +145,9 @@ Decoding modules share a label-agnostic core plus a shared plotting module:
 
 | Symbol | Purpose |
 |---|---|
-| `build_binned_data(ks_data, tracking_data, object_name, bin_size)` ([ephys/decode_location.py:40](ephys/decode_location.py#L40)) | Aligned firing-rate × position matrix. |
-| `decode_location_single_cell(...)` ([ephys/decode_location.py:146](ephys/decode_location.py#L146)) | Tuning-curve-based single-cell decoder. |
-| `decode_location_population(...)` ([ephys/decode_location.py:370](ephys/decode_location.py#L370)) | Bayesian population decoder. |
-| `decode_all_locations(...)` ([ephys/decode_location.py:483](ephys/decode_location.py#L483)) | Sweep over tracked objects. |
+| `build_binned_data(ks_data, tracking_data, object_name, bin_size)` ([ephys/decode_location.py:28](ephys/decode_location.py#L28)) | Aligned firing-rate × position matrix. |
+| `decode_location(...)` ([ephys/decode_location.py:248](ephys/decode_location.py#L248)) | Bayesian population decoder (posterior-mean or MAP). |
+| `decode_all_locations(...)` ([ephys/decode_location.py:386](ephys/decode_location.py#L386)) | Sweep over tracked objects. |
 | `plot_decoding_results` / `plot_all_decoding_summary` | Reporting plots. |
 
 [ephys/population_geometry.py](ephys/population_geometry.py) — population dynamics and dimensionality reduction.
@@ -267,7 +266,7 @@ Variants:
 - Outcome (winner/loser): `decode_event_outcome_population(ks, be, animal_of_interest="631")` — `behavior_type` defaults to "any event with both winner and loser populated".
 - Time-resolved: append `_time_resolved` to either decoder; pass `time_bin_step` for sliding windows and `n_shuffles>0` for a chance band.
 - ID groups: pass `label_mode="group"` to the opponent decoder to pool opponents into `low`/`high` halves.
-- Location: `decode_location_population(ks, tracking_data, object_name)`.
+- Location: `decode_location(ks, tracking_data, object_name)`.
 - Population geometry: `PopulationGeometryAnalyzer(ks, be)` or `run_population_analysis_pipeline(ks, be, ...)`.
 - Rastermap: `plot_rastermap(ks, bin_size=0.5)` or `plot_rastermap_with_events(ks, be, animal_of_interest=..., behavior_type=...)`.
 
@@ -302,6 +301,7 @@ Variants:
 | Population geometry (PCA/UMAP/trajectories) | [ephys/population_geometry.py](ephys/population_geometry.py) |
 | Rastermap visualization | [ephys/rastermap_viz.py](ephys/rastermap_viz.py) |
 | Inter-brain shared subspace (multi-animal CCA, nulls, behavior regression) | [ephys/inter_brain_dynamics.py](ephys/inter_brain_dynamics.py), [ephys/inter_brain_plots.py](ephys/inter_brain_plots.py), [ephys/run_inter_brain.py](ephys/run_inter_brain.py), [ingestion/multi_animal_session.py](ingestion/multi_animal_session.py), [video/behavior_features.py](video/behavior_features.py), [gui/tabs/inter_brain.py](gui/tabs/inter_brain.py) — see [ephys/README.md](ephys/README.md) |
+| Allocentric social place fields (per-cell rate maps over each animal's position, multi-target tuning + shuffle significance) | [ephys/social_spatial_fields.py](ephys/social_spatial_fields.py), [ephys/social_spatial_plots.py](ephys/social_spatial_plots.py), [ephys/run_social_spatial.py](ephys/run_social_spatial.py), [gui/tabs/social_spatial.py](gui/tabs/social_spatial.py) — tracking on the ephys clock via [ingestion/multi_animal_session.py](ingestion/multi_animal_session.py) |
 | Streamlit + Panel dashboards | [gui/app.py](gui/app.py), [gui/interactive_app.py](gui/interactive_app.py) |
 | CLI orchestration | [workflow.py](workflow.py), per-module `main()` entries |
 | Metadata database (SQLite) | [database/](database/) |

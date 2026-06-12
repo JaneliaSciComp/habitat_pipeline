@@ -83,7 +83,7 @@ def plot_rate_maps_grid(results: SocialFieldResults, cluster_id: int,
     used = [t for t in targets if cluster_id in results.rate_maps[t]]
     if not maps:
         raise ValueError(f"No rate maps for cluster {cluster_id}.")
-
+    
     vmax = np.nanmax([np.nanmax(m.rates) if np.isfinite(m.rates).any() else 0.0 for m in maps])
     vmax = float(vmax) if vmax > 0 else None
 
@@ -107,6 +107,7 @@ def plot_rate_maps_grid(results: SocialFieldResults, cluster_id: int,
         fig.colorbar(im, ax=list(axes), shrink=0.8, label="Hz")
     fig.suptitle(f"{_analysis_title(results)} — focal {_focal(results)}, cluster {cluster_id}",
                  fontsize=11)
+    plt.show()
     return _maybe_save(fig, save_path)
 
 

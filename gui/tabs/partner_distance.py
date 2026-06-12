@@ -13,7 +13,11 @@ import logging
 
 import streamlit as st
 
-from ephys.decode_partner_distance import _analyze, build_distance_binned_data
+from ephys.decode_partner_distance import (
+    _analyze,
+    build_distance_binned_data,
+    load_partner_distance_inputs,
+)
 from ephys.decode_partner_distance_plots import (
     plot_distance_tuning_curves,
     plot_partner_distance_summary,
@@ -26,7 +30,6 @@ from gui.runners import cached_step
 from gui.state import PartnerDistanceParams, SessionKey
 from gui.tabs.inter_brain import _session_animals
 from gui.widgets import plot_picker
-from ingestion.multi_animal_session import MultiAnimalSession
 
 log = logging.getLogger(__name__)
 
@@ -146,17 +149,15 @@ def render(key: SessionKey, params: PartnerDistanceParams | None = None) -> None
 
 
 def _run(key: SessionKey, p: PartnerDistanceParams) -> dict:
-    """Build the MultiAnimalSession, bin rates + distance, run the decode."""
-    session = MultiAnimalSession(
-        session_id=key.session_id,
-        animal_ids=[key.animal_id, p.partner],
-        config_path=key.config_path,
+    """Load focal ephys + session tracking, bin rates + distance, run the decode."""
+    inputs = load_partner_distance_inputs(
+        key.session_id, key.animal_id, config_path=key.config_path,
     )
     data = build_distance_binned_data(
-        session, key.animal_id, p.partner,
+        inputs.ks_focal, inputs.tracking, inputs.sync, key.animal_id, p.partner,
+        pixels_per_cm=inputs.pixels_per_cm,
         bin_size=p.bin_size,
         smoothing_sigma_sec=(p.smoothing_sigma_sec if p.smoothing_sigma_sec > 0 else None),
-        use_cache=True,
     )
     return _analyze(
         data["firing_rates"], data["distance"], data["nuisance"],

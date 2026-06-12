@@ -16,8 +16,14 @@ This is the *regression* analogue of :mod:`ephys.decode_location` (which does
 continuous 2-D position decoding with a Bayesian decoder). Distance is a
 continuous variable defined over the whole session, so the analysis is
 **whole-session, time-binned**: firing rates and distance are binned onto the
-same common ephys-second grid (via
-:meth:`MultiAnimalSession.get_common_binned_rates`) and regressed.
+same ephys-second grid and regressed.
+
+Only the **focal** animal needs ephys; the partner contributes a tracking
+trajectory only. The data path therefore takes a plain
+:class:`~ingestion.kilosort_data_import.KilosortData` for the focal animal and a
+session-level :class:`~video.tracking_import.VideoTrackingData` (which already
+contains every animal), rather than a ``MultiAnimalSession`` (which would demand
+ephys for the partner too).
 
 Confound control
 ----------------
@@ -42,14 +48,14 @@ Units
 -----
 Distances (and RMSE) are in **cm** when the cohort config sets
 ``pixels_per_cm``, otherwise in **pixels** (``units`` field). Tracking is
-pulled through :meth:`MultiAnimalSession.get_tracking_on_ephys_clock`, the
-single canonical place where the pixels→cm scaling and tracking↔ephys clock
+pulled through :func:`video.tracking_import.resolve_tracking_on_ephys_clock`,
+the single canonical place where the pixels→cm scaling and tracking↔ephys clock
 conversion happen.
 """
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Sequence
+from typing import Dict, NamedTuple, Optional, Sequence
 
 import numpy as np
 
@@ -401,56 +407,75 @@ def _analyze(firing_rates: np.ndarray, distance: np.ndarray,
 # Data assembly (I/O) + top-level convenience
 # ---------------------------------------------------------------------------
 
-def build_distance_binned_data(session, focal: str, partner: str, *,
+def build_distance_binned_data(ks_focal, tracking, sync, focal: str, partner: str, *,
+                               pixels_per_cm: Optional[float] = None,
                                bin_size: float = 0.5,
                                smoothing_sigma_sec: Optional[float] = None,
                                t_start: Optional[float] = None,
                                t_end: Optional[float] = None,
-                               filter_kwargs: Optional[dict] = None,
-                               use_cache: bool = True) -> Dict:
+                               filter_kwargs: Optional[dict] = None) -> Dict:
     """Bin focal firing rates, focal↔partner distance, and self-motion nuisance.
 
-    Reuses :meth:`MultiAnimalSession.get_common_binned_rates` for the rate
-    matrix + common grid and :meth:`MultiAnimalSession.get_tracking_on_ephys_clock`
-    (the single canonical tracking↔ephys / pixels→cm path) for positions. The
+    Takes plain data objects — a focal-animal
+    :class:`~ingestion.kilosort_data_import.KilosortData`, the session
+    :class:`~video.tracking_import.VideoTrackingData` (all animals), and a
+    :class:`~ingestion.ephys_sync.DataSyncManager` — so the partner needs no
+    ephys. Firing rates come from ``KilosortData.bin_spike_times``; the
     partner-distance target and the focal (speed, x, y) nuisance block are both
-    derived from that one tracking source, so units are consistent.
+    derived from
+    :func:`~video.tracking_import.resolve_tracking_on_ephys_clock` (the single
+    canonical tracking↔ephys / pixels→cm path), so units are consistent.
 
     Bins where the distance, any cell's rate, or any nuisance column is NaN
     (e.g. outside the tracked range) are dropped, mirroring
     ``ephys.decode_location.build_binned_data``.
+
+    Parameters
+    ----------
+    ks_focal : KilosortData
+        Spike-sorting results for the focal (implanted) animal.
+    tracking : VideoTrackingData
+        Session tracking (every animal); not required to be pre-synchronized.
+    sync : DataSyncManager
+        Behavior↔ephys clock map for the session.
+    focal, partner : str
+        Animal ids (resolved against tracking by the substring-fallback resolver).
+    pixels_per_cm : float, optional
+        Calibration forwarded to ``resolve_tracking_on_ephys_clock``.
 
     Returns ``firing_rates`` (n_bins, n_cells), ``distance`` (n_bins,),
     ``nuisance`` (n_bins, 3), ``nuisance_names``, ``bin_centers``, ``n_cells``,
     ``bin_size``, ``units``, ``focal``, ``partner``.
     """
     from video.behavior_features import _interp
+    from video.tracking_import import resolve_tracking_on_ephys_clock
 
-    bin_centers, rates_by_animal = session.get_common_binned_rates(
-        bin_size_sec=bin_size,
-        t_start_ephys=t_start, t_end_ephys=t_end,
-        filter_kwargs=filter_kwargs,
-        smoothing_sigma_sec=smoothing_sigma_sec,
-        use_cache=use_cache,
+    if filter_kwargs:
+        ks_focal.filter_cells_by_firing_patterns(**filter_kwargs)
+    rates, bin_centers = ks_focal.bin_spike_times(
+        bin_size_sec=bin_size, t_start=t_start, t_end=t_end, filtered_only=True,
     )
-    if focal not in rates_by_animal:
-        raise KeyError(f"Focal animal {focal!r} has no binned rates in session "
-                       f"{session.session_id}.")
-    X_full = np.asarray(rates_by_animal[focal], dtype=np.float64).T  # (n_bins, n_cells)
+    if smoothing_sigma_sec is not None and smoothing_sigma_sec > 0:
+        from scipy.ndimage import gaussian_filter1d
+        rates = gaussian_filter1d(
+            rates, sigma=smoothing_sigma_sec / bin_size, axis=1, mode="reflect",
+        )
+    X_full = np.asarray(rates, dtype=np.float64).T  # (n_bins, n_cells)
     bin_centers = np.asarray(bin_centers, dtype=np.float64)
 
-    tracking = session.get_tracking_on_ephys_clock(
+    tracking_by_animal = resolve_tracking_on_ephys_clock(
+        tracking, sync, [focal, partner],
+        pixels_per_cm=pixels_per_cm,
         t_start_ephys=t_start, t_end_ephys=t_end,
     )
-    missing = [a for a in (focal, partner) if a not in tracking]
+    missing = [a for a in (focal, partner) if a not in tracking_by_animal]
     if missing:
         raise KeyError(f"No tracking resolved for {missing} in session "
-                       f"{session.session_id}.")
+                       f"{tracking.session_id}.")
 
-    sync_dsm = session.dsm_by_animal[session.sync_from_animal]
-    units = "cm" if sync_dsm.get_pixels_per_cm() else "pixels"
+    units = "cm" if pixels_per_cm else "pixels"
 
-    fdf, pdf = tracking[focal], tracking[partner]
+    fdf, pdf = tracking_by_animal[focal], tracking_by_animal[partner]
     ft = fdf["t"].to_numpy(dtype=np.float64)
     pt = pdf["t"].to_numpy(dtype=np.float64)
     fx = _interp(ft, fdf["x"].to_numpy(dtype=np.float64), bin_centers)
@@ -481,7 +506,42 @@ def build_distance_binned_data(session, focal: str, partner: str, *,
     }
 
 
-def decode_partner_distance(session, focal: str, partner: str, *,
+class PartnerDistanceInputs(NamedTuple):
+    """Loaded objects needed to decode partner distance for a focal animal."""
+    ks_focal: "object"          # KilosortData
+    tracking: "object"          # VideoTrackingData
+    sync: "object"              # DataSyncManager
+    pixels_per_cm: Optional[float]
+
+
+def load_partner_distance_inputs(session_id: str, focal: str, *,
+                                 config_path: Optional[str] = None,
+                                 dio_channel: int = 1) -> PartnerDistanceInputs:
+    """Load the focal-only objects needed for partner-distance decoding.
+
+    Builds only the **focal** animal's :class:`DataStorageManager` — no partner
+    is ever loaded as ephys (the partner id is supplied later to
+    :func:`build_distance_binned_data`). The session tracking file (resolved
+    through the focal DSM) already contains every animal's trajectory.
+
+    Returns a :class:`PartnerDistanceInputs` ``(ks_focal, tracking, sync,
+    pixels_per_cm)`` to feed straight into :func:`build_distance_binned_data`.
+    """
+    from ingestion.data_paths import DataStorageManager
+    from ingestion.ephys_sync import DataSyncManager
+    from ingestion.kilosort_data_import import load_kilosort_data
+    from video.tracking_import import load_tracking_data
+
+    dsm = DataStorageManager(focal, session_id, config_path=config_path)
+    ks_focal = load_kilosort_data(dsm.get_kilosort_path())
+    sync = DataSyncManager(dsm, dio_channel=dio_channel)
+    tracking = load_tracking_data(dsm)
+    return PartnerDistanceInputs(ks_focal, tracking, sync, dsm.get_pixels_per_cm())
+
+
+def decode_partner_distance(session_id: str, focal: str, partner: str, *,
+                            config_path: Optional[str] = None,
+                            dio_channel: int = 1,
                             bin_size: float = 0.5,
                             smoothing_sigma_sec: Optional[float] = None,
                             n_distance_bins: int = 15,
@@ -491,16 +551,20 @@ def decode_partner_distance(session, focal: str, partner: str, *,
                             t_start: Optional[float] = None,
                             t_end: Optional[float] = None,
                             filter_kwargs: Optional[dict] = None,
-                            use_cache: bool = True, seed: int = 0) -> Dict:
-    """End-to-end: bin from a :class:`MultiAnimalSession`, then decode.
+                            seed: int = 0) -> Dict:
+    """End-to-end: load focal KilosortData + session tracking, then decode.
 
-    Thin convenience wrapper = ``build_distance_binned_data`` + ``_analyze``.
+    Thin convenience wrapper = ``load_partner_distance_inputs`` +
+    ``build_distance_binned_data`` + ``_analyze``. The partner needs no ephys.
     """
+    inputs = load_partner_distance_inputs(
+        session_id, focal, config_path=config_path, dio_channel=dio_channel,
+    )
     data = build_distance_binned_data(
-        session, focal, partner,
+        inputs.ks_focal, inputs.tracking, inputs.sync, focal, partner,
+        pixels_per_cm=inputs.pixels_per_cm,
         bin_size=bin_size, smoothing_sigma_sec=smoothing_sigma_sec,
         t_start=t_start, t_end=t_end, filter_kwargs=filter_kwargs,
-        use_cache=use_cache,
     )
     return _analyze(
         data["firing_rates"], data["distance"], data["nuisance"],

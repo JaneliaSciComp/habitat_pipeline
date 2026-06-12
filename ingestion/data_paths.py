@@ -700,7 +700,9 @@ class DataStorageManager:
         config, callers convert positions to cm by dividing by this value. When
         the key is absent or null, positions stay in pixels. The single place
         this conversion happens is
-        :meth:`ingestion.multi_animal_session.MultiAnimalSession.get_tracking_on_ephys_clock`.
+        :func:`video.tracking_import.resolve_tracking_on_ephys_clock` (to which
+        :meth:`ingestion.multi_animal_session.MultiAnimalSession.get_tracking_on_ephys_clock`
+        delegates).
         """
         val = self._config.get("pixels_per_cm")
         if val is None:

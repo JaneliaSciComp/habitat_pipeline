@@ -2,11 +2,12 @@
 """
 Partner-distance decoding — command-line entry point.
 
-Loads a focal (implanted) animal and a specific partner via
-:class:`MultiAnimalSession`, bins the focal's spike trains and the
-focal↔partner distance onto a common ephys-second grid, and runs the
+Loads the focal (implanted) animal's ``KilosortData`` plus the session
+tracking (which already contains the partner), bins the focal's spike trains
+and the focal↔partner distance onto a common ephys-second grid, and runs the
 single-cell + population regression decode (with focal self-motion partialled
-out and a circular-shift null). Writes a results pickle and a summary PNG.
+out and a circular-shift null). Only the focal animal needs ephys. Writes a
+results pickle and a summary PNG.
 
 Mirrors the CLI structure of ``ephys/run_inter_brain.py``.
 
@@ -32,7 +33,11 @@ from typing import Optional
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ephys.decode_partner_distance import _analyze, build_distance_binned_data
+from ephys.decode_partner_distance import (
+    _analyze,
+    build_distance_binned_data,
+    load_partner_distance_inputs,
+)
 from ephys.decode_partner_distance_plots import plot_partner_distance_summary
 
 logger = logging.getLogger(__name__)
@@ -55,6 +60,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--config_path", type=str, default=None,
                    help="Path to a cohort config JSON (default: "
                         "config/default_paths.json).")
+    p.add_argument("--dio_channel", type=int, default=1,
+                   help="DIO channel for the focal animal's ephys↔behavior sync.")
     p.add_argument("--bin_size", type=float, default=0.5,
                    help="Spike-bin width in seconds.")
     p.add_argument("--smoothing", type=float, default=None,
@@ -145,29 +152,24 @@ def main(argv: Optional[list] = None) -> int:
     focal, partner = args.animal_ids
 
     sys.path.append(str(Path(__file__).parent.parent))
-    try:
-        from ingestion.multi_animal_session import MultiAnimalSession
-    except ImportError as e:  # pragma: no cover — defensive
-        logger.error("Import error: %s", e)
-        return 1
 
-    logger.info("Building MultiAnimalSession for %s / %s + %s",
-                args.session_id, focal, partner)
+    logger.info("Loading focal %s ephys + session tracking for %s (partner %s)",
+                focal, args.session_id, partner)
     try:
-        session = MultiAnimalSession(
-            session_id=args.session_id,
-            animal_ids=[focal, partner],
-            config_path=args.config_path,
+        inputs = load_partner_distance_inputs(
+            args.session_id, focal,
+            config_path=args.config_path, dio_channel=args.dio_channel,
         )
     except Exception as e:
-        logger.error("Failed to build MultiAnimalSession: %s", e)
+        logger.error("Failed to load inputs: %s", e)
         return 1
 
     try:
         data = build_distance_binned_data(
-            session, focal, partner,
+            inputs.ks_focal, inputs.tracking, inputs.sync, focal, partner,
+            pixels_per_cm=inputs.pixels_per_cm,
             bin_size=args.bin_size, smoothing_sigma_sec=args.smoothing,
-            t_start=args.t_start, t_end=args.t_end, use_cache=True,
+            t_start=args.t_start, t_end=args.t_end,
         )
     except Exception as e:
         logger.error("Failed to build binned data: %s", e)

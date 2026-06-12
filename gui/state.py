@@ -109,6 +109,31 @@ class SocialSpatialParams:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class PartnerDistanceParams:
+    """Parameters for the Partner Distance tab.
+
+    The *focal* (implanted) animal is supplied via the surrounding
+    :class:`SessionKey`; ``partner`` is the specific other animal whose
+    distance is decoded. ``partner`` lives in params (not only on
+    :class:`SessionKey`) so the disk cache key invalidates when it changes,
+    matching :class:`InterBrainParams` and :class:`SocialSpatialParams`.
+    """
+
+    partner: str
+    bin_size: float
+    smoothing_sigma_sec: float
+    n_distance_bins: int
+    tuning_smoothing_sigma: float
+    alpha: float
+    cv_folds: int
+    null: Optional[str]
+    n_shuffles: int
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
 def set_loaded_session(key: SessionKey) -> None:
     st.session_state[SESSION_STATE_KEY] = key
 

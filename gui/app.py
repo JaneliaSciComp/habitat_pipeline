@@ -20,6 +20,7 @@ from gui.tabs import (
     behavioral,
     decoding,
     inter_brain,
+    partner_distance,
     population,
     social_spatial,
     tracking,
@@ -113,9 +114,10 @@ if not loaded:
 
 session_info_header(summary, session_key)
 
-tab_t, tab_b, tab_d, tab_p, tab_ib, tab_sp = st.tabs(
+tab_t, tab_b, tab_d, tab_p, tab_ib, tab_sp, tab_pd = st.tabs(
     ["Tracking & Spatial", "Behavioral Events", "Neural Decoding",
-     "Population Geometry", "Inter-Brain", "Social Place Fields"]
+     "Population Geometry", "Inter-Brain", "Social Place Fields",
+     "Partner Distance"]
 )
 
 with tab_t:
@@ -135,3 +137,6 @@ with tab_ib:
 
 with tab_sp:
     social_spatial.render(session_key)
+
+with tab_pd:
+    partner_distance.render(session_key)

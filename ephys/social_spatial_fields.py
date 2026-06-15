@@ -12,10 +12,11 @@ This module is label-agnostic in the same spirit as :mod:`ephys._lda_decoding`:
 the low-level ``compute_rate_map`` / ``spatial_*`` / ``field_significance``
 functions take plain arrays and DataFrames, and the multi-target sweep
 ``compute_social_place_fields`` is the wrapper that knows about
-``KilosortData`` / ``MultiAnimalSession`` and stamps the result-dict
-``parameters`` with ``class_label='target_position'`` and ``analysis_title`` so
-the plot module ([ephys/social_spatial_plots.py]) can be driven from the
-dataclass without per-target branches.
+``KilosortData`` (focal) / ``VideoTrackingData`` (session) and stamps the
+result-dict ``parameters`` with ``class_label='target_position'`` and
+``analysis_title`` so the plot module ([ephys/social_spatial_plots.py]) can be
+driven from the dataclass without per-target branches. Only the focal animal
+needs ephys; the target animals contribute tracking trajectories only.
 
 Conventions
 -----------
@@ -24,7 +25,7 @@ Conventions
 - Occupancy is **dwell time in seconds** (the per-spatial-bin sum of frame
   intervals), not a count of time bins.
 - All times are ephys seconds. Tracking↔ephys conversion lives only in
-  :meth:`ingestion.multi_animal_session.MultiAnimalSession.get_tracking_on_ephys_clock`.
+  :func:`video.tracking_import.resolve_tracking_on_ephys_clock`.
 - "cm" parameter names refer to whatever spatial unit the tracking is in; if no
   ``pixels_per_cm`` calibration is configured, that unit is pixels.
 """
@@ -41,7 +42,7 @@ from scipy.ndimage import gaussian_filter
 
 if TYPE_CHECKING:
     from ingestion.kilosort_data_import import KilosortData
-    from ingestion.multi_animal_session import MultiAnimalSession
+    from video.tracking_import import VideoTrackingData
 
 logger = logging.getLogger(__name__)
 
@@ -485,11 +486,14 @@ def field_significance(
 # Arena bounds from a whole session
 # ---------------------------------------------------------------------------
 
-def compute_arena_bounds_from_tracking(mas: "MultiAnimalSession",
+def compute_arena_bounds_from_tracking(tracking_by_animal: Dict[str, pd.DataFrame],
                                        pad_cm: float = 5.0) -> ArenaBounds:
-    """Aggregate (min, max) x and y across all animals' tracking, padded."""
-    tracking = mas.get_tracking_on_ephys_clock()
-    return _bounds_from_tracking_dict(tracking, pad_cm)
+    """Aggregate (min, max) x and y across all animals' tracking, padded.
+
+    ``tracking_by_animal`` is a resolved ``{animal_id: (t, x, y, speed) df}`` dict
+    (e.g. from :func:`video.tracking_import.resolve_tracking_on_ephys_clock`).
+    """
+    return _bounds_from_tracking_dict(tracking_by_animal, pad_cm)
 
 
 def _bounds_from_tracking_dict(tracking: Dict[str, pd.DataFrame],
@@ -571,9 +575,12 @@ def _benjamini_hochberg(pvals: np.ndarray) -> np.ndarray:
 
 def compute_social_place_fields(
     ks: "KilosortData",
-    mas: "MultiAnimalSession",
+    tracking: "VideoTrackingData",
+    sync,
     focal_animal: str,
     target_animals: Optional[List[str]] = None,
+    *,
+    pixels_per_cm: Optional[float] = None,
     bin_size_cm: float = 5.0,
     smoothing_sigma_cm: float = 5.0,
     speed_threshold_cms: float = 5.0,
@@ -591,24 +598,37 @@ def compute_social_place_fields(
 ) -> SocialFieldResults:
     """Compute social place fields for every focal cell over every target animal.
 
-    ``target_animals`` defaults to all animals in ``mas`` (including the focal
-    animal, whose map is the self place field). For each focal cluster and each
-    target the function builds a :class:`RateMap`, :class:`FieldStats`, and
-    :class:`FieldSignificance`, then classifies each cell by which targets it is
-    significantly tuned to (Benjamini–Hochberg FDR across targets on Skaggs
-    bits/spike).
+    Takes the **focal** animal's :class:`KilosortData` (only the focal needs
+    ephys), the session :class:`~video.tracking_import.VideoTrackingData` (which
+    already contains every animal), and a
+    :class:`~ingestion.ephys_sync.DataSyncManager`; tracking is resolved onto the
+    ephys clock once via :func:`video.tracking_import.resolve_tracking_on_ephys_clock`.
+
+    ``target_animals`` defaults to every animal present in the tracking file
+    (including the focal animal, whose map is the self place field). For each
+    focal cluster and each target the function builds a :class:`RateMap`,
+    :class:`FieldStats`, and :class:`FieldSignificance`, then classifies each cell
+    by which targets it is significantly tuned to (Benjamini–Hochberg FDR across
+    targets on Skaggs bits/spike).
     """
     from ingestion.kilosort_data_import import _DEFAULT_QUALITY_THRESHOLDS
+    from video.tracking_import import resolve_tracking_on_ephys_clock
+
+    session_id = tracking.session_id
 
     if target_animals is None:
-        target_animals = list(mas.animal_ids)
+        target_animals = list(tracking.parsed_data.keys())
 
     t_start = t_window_ephys[0] if t_window_ephys else None
     t_end = t_window_ephys[1] if t_window_ephys else None
-    tracking = mas.get_tracking_on_ephys_clock(t_start_ephys=t_start, t_end_ephys=t_end)
+    animals = list(dict.fromkeys([focal_animal, *target_animals]))
+    tracking_by_animal = resolve_tracking_on_ephys_clock(
+        tracking, sync, animals, pixels_per_cm=pixels_per_cm,
+        t_start_ephys=t_start, t_end_ephys=t_end,
+    )
 
     if arena_bounds is None:
-        arena_bounds = _bounds_from_tracking_dict(tracking)
+        arena_bounds = _bounds_from_tracking_dict(tracking_by_animal)
 
     # Focal cells and their spike trains.
     if use_quality_cells:
@@ -619,7 +639,7 @@ def compute_social_place_fields(
         cluster_ids = list(ks.ks_ids)
         spike_lists = list(ks.spike_times_by_cell)
 
-    if focal_animal not in tracking:
+    if focal_animal not in tracking_by_animal:
         logger.warning("Focal animal %s has no tracking; self-map unavailable.", focal_animal)
 
     rate_maps: Dict[str, Dict[int, RateMap]] = {}
@@ -627,7 +647,7 @@ def compute_social_place_fields(
     signif: Dict[str, Dict[int, FieldSignificance]] = {}
 
     for target in target_animals:
-        target_xy = tracking.get(target)
+        target_xy = tracking_by_animal.get(target)
         if target_xy is None or target_xy.shape[0] < 2:
             logger.warning("No usable tracking for target %s; skipping.", target)
             continue
@@ -636,7 +656,7 @@ def compute_social_place_fields(
             speed_xy = None
             thr = None
         elif speed_filter_subject == "focal":
-            fdf = tracking.get(focal_animal)
+            fdf = tracking_by_animal.get(focal_animal)
             speed_xy = fdf[["t", "speed"]] if fdf is not None else None
             thr = speed_threshold_cms if speed_xy is not None else None
         else:  # 'target'
@@ -697,7 +717,7 @@ def compute_social_place_fields(
     parameters = {
         "focal_animal": focal_animal,
         "target_animals": used_targets,
-        "session_id": mas.session_id,
+        "session_id": session_id,
         "bin_size_cm": bin_size_cm,
         "smoothing_sigma_cm": smoothing_sigma_cm,
         "speed_threshold_cms": speed_threshold_cms,

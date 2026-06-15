@@ -33,12 +33,9 @@ from typing import Optional
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ephys.decode_partner_distance import (
-    _analyze,
-    build_distance_binned_data,
-    load_partner_distance_inputs,
-)
+from ephys.decode_partner_distance import _analyze, build_distance_binned_data
 from ephys.decode_partner_distance_plots import plot_partner_distance_summary
+from ingestion.focal_session import load_focal_session_inputs
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +153,7 @@ def main(argv: Optional[list] = None) -> int:
     logger.info("Loading focal %s ephys + session tracking for %s (partner %s)",
                 focal, args.session_id, partner)
     try:
-        inputs = load_partner_distance_inputs(
+        inputs = load_focal_session_inputs(
             args.session_id, focal,
             config_path=args.config_path, dio_channel=args.dio_channel,
         )

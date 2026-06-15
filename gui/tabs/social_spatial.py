@@ -23,7 +23,7 @@ from gui.plotting import show_fig
 from gui.runners import cached_step
 from gui.state import SessionKey, SocialSpatialParams
 from gui.tabs.inter_brain import _session_animals
-from ingestion.multi_animal_session import MultiAnimalSession
+from ingestion.focal_session import load_focal_session_inputs
 
 log = logging.getLogger(__name__)
 
@@ -125,17 +125,15 @@ def render(key: SessionKey, params: SocialSpatialParams | None = None) -> None:
 
 
 def _run(key: SessionKey, params: SocialSpatialParams):
-    """Build the MultiAnimalSession and compute social place fields."""
-    animal_ids = list(dict.fromkeys([params.focal, *params.targets]))
-    session = MultiAnimalSession(
-        session_id=key.session_id,
-        animal_ids=animal_ids,
-        config_path=key.config_path,
+    """Load focal ephys + session tracking and compute social place fields."""
+    inputs = load_focal_session_inputs(
+        key.session_id, params.focal, config_path=key.config_path,
     )
-    ks = session.get_ks(params.focal)
     return compute_social_place_fields(
-        ks, session, focal_animal=params.focal,
+        inputs.ks_focal, inputs.tracking, inputs.sync,
+        focal_animal=params.focal,
         target_animals=list(params.targets),
+        pixels_per_cm=inputs.pixels_per_cm,
         bin_size_cm=params.bin_size_cm,
         smoothing_sigma_cm=params.smoothing_sigma_cm,
         speed_threshold_cms=params.speed_threshold_cms,

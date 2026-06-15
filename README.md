@@ -205,22 +205,26 @@ python -m ephys.run_inter_brain \
 
 | Symbol | Description |
 |--------|-------------|
-| `MultiAnimalSession.get_tracking_on_ephys_clock(...)` in [ingestion/multi_animal_session.py](ingestion/multi_animal_session.py) | Per-animal `(t, x, y, speed)` on the shared ephys clock. **The only place tracking↔ephys conversion happens.** Positions are cm when `pixels_per_cm` is configured, else pixels (warned). |
+| `resolve_tracking_on_ephys_clock(tracking, sync, animal_ids, ...)` in [video/tracking_import.py](video/tracking_import.py) | Per-animal `(t, x, y, speed)` on the ephys clock. **The only place tracking↔ephys conversion happens** (`MultiAnimalSession.get_tracking_on_ephys_clock` delegates to it). Positions are cm when `pixels_per_cm` is configured, else pixels (warned). |
 | `compute_rate_map(spike_times, target_xy, bin_size_cm, ...)` | Occupancy (dwell-seconds) normalized rate map over a target animal's position; smooth-then-divide, NaN below `min_occupancy_sec`, optional speed gating. |
 | `spatial_information` / `spatial_sparsity` / `spatial_coherence` / `split_half_stability` | Skaggs bits/spike + bits/sec, occupancy-weighted sparsity, neighborhood coherence, first-vs-second-half stability. |
 | `field_significance(..., null_method='circular_shift'|'position_shuffle')` | Shuffle null (default circular-shift of the spike train). |
-| `compute_social_place_fields(ks, mas, focal_animal, target_animals=None, ...)` | Sweep every focal cell over every target → `SocialFieldResults` with rate maps, stats, significance, `cell_classification` (BH-FDR; `self_only`/`partner_only`/`conjunctive`/`broadcast`/`none`), and population field-similarity. `parameters` carry `class_label='target_position'`. |
+| `compute_social_place_fields(ks_focal, tracking, sync, focal_animal, target_animals=None, *, pixels_per_cm=None, ...)` | Sweep every focal cell over every target → `SocialFieldResults` with rate maps, stats, significance, `cell_classification` (BH-FDR; `self_only`/`partner_only`/`conjunctive`/`broadcast`/`none`), and population field-similarity. Only the focal animal needs ephys. `parameters` carry `class_label='target_position'`. |
 | `python -m ephys.run_social_spatial --session_id ... --animal_ids ... --focal ... ...` | Full pipeline → results pickle + 6-panel summary PNG + per-cluster grid PDF. |
 
 Six-line example:
 
 ```python
-from ingestion.multi_animal_session import MultiAnimalSession
+from ingestion.focal_session import load_focal_session_inputs
 from ephys.social_spatial_fields import compute_social_place_fields
 
-session = MultiAnimalSession("20251216", ["631", "632", "633"])
-ks = session.get_ks("631")
-results = compute_social_place_fields(ks, session, focal_animal="631", n_shuffles=500)
+# Only the focal animal needs ephys; tracking (all animals) + sync come with it.
+inp = load_focal_session_inputs("20251216", "631")
+results = compute_social_place_fields(
+    inp.ks_focal, inp.tracking, inp.sync, focal_animal="631",
+    target_animals=["631", "632", "633"], pixels_per_cm=inp.pixels_per_cm,
+    n_shuffles=500,
+)
 print(results.cell_classification["category"].value_counts())
 ```
 

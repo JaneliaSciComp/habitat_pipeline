@@ -25,6 +25,7 @@ from ephys.social_spatial_fields import (
     field_similarity_across_targets,
     _benjamini_hochberg,
 )
+from video.tracking_import import VideoTrackingData
 
 ARENA = ((0.0, 80.0), (0.0, 80.0))
 DT = 0.04            # 25 Hz tracking
@@ -94,24 +95,38 @@ def _conjunctive_spikes(xy_self, xy_partner, c_self, c_partner, sigma,
     return np.sort(np.concatenate(spikes)) if spikes else np.array([])
 
 
-class _StubMAS:
-    """Minimal MultiAnimalSession stand-in for compute_social_place_fields."""
+class _StubSync:
+    """Identity behavior→ephys clock map (ephys seconds == behavior seconds)."""
 
-    def __init__(self, tracking, session_id="20251216"):
-        self._tracking = tracking
-        self.animal_ids = list(tracking.keys())
-        self.session_id = session_id
+    def convert_behavior_to_ephys(self, behav_seconds):
+        return np.asarray(behav_seconds, dtype=np.float64)
 
-    def get_tracking_on_ephys_clock(self, t_start_ephys=None, t_end_ephys=None):
-        out = {}
-        for aid, df in self._tracking.items():
-            d = df
-            if t_start_ephys is not None:
-                d = d[d["t"] >= t_start_ephys]
-            if t_end_ephys is not None:
-                d = d[d["t"] <= t_end_ephys]
-            out[aid] = d.reset_index(drop=True)
-        return out
+
+def _video_tracking(tracking, session_id="20251216") -> VideoTrackingData:
+    """Build a session VideoTrackingData from a ``{animal_id: (t,x,y,speed) df}`` dict.
+
+    Stores each animal's (frame, center_x, center_y) and a shared frame-timestamp
+    array (ns). With ``pixels_per_cm=None`` and the identity ``_StubSync``,
+    ``resolve_tracking_on_ephys_clock`` returns the same ``t``/``x``/``y`` (speed
+    is recomputed but unused by the speed_filter_subject="none" sweeps).
+    """
+    parsed = {}
+    timestamps_ns = None
+    for aid, df in tracking.items():
+        n = df.shape[0]
+        parsed[aid] = pd.DataFrame({
+            "frame": np.arange(n),
+            "center_x": df["x"].to_numpy(dtype=np.float64),
+            "center_y": df["y"].to_numpy(dtype=np.float64),
+        })
+        if timestamps_ns is None:
+            timestamps_ns = (df["t"].to_numpy(dtype=np.float64) * 1e9).astype(np.int64)
+    return VideoTrackingData(
+        animal_id=list(tracking.keys())[0],
+        session_id=session_id,
+        parsed_data=parsed,
+        timestamps=timestamps_ns,
+    )
 
 
 def _make_ks(spike_lists):
@@ -262,7 +277,7 @@ def _three_animal_tracking(n=12000):
 
 
 def _sweep(ks, tracking, focal="A", **kw):
-    mas = _StubMAS(tracking)
+    vt = _video_tracking(tracking)
     defaults = dict(
         target_animals=list(tracking.keys()),
         bin_size_cm=BIN, smoothing_sigma_cm=5.0,
@@ -270,7 +285,9 @@ def _sweep(ks, tracking, focal="A", **kw):
         use_quality_cells=False, arena_bounds=ARENA, seed=0,
     )
     defaults.update(kw)
-    return compute_social_place_fields(ks, mas, focal_animal=focal, **defaults)
+    return compute_social_place_fields(
+        ks, vt, _StubSync(), focal_animal=focal, pixels_per_cm=None, **defaults,
+    )
 
 
 class TestBenjaminiHochberg:

@@ -13,11 +13,7 @@ import logging
 
 import streamlit as st
 
-from ephys.decode_partner_distance import (
-    _analyze,
-    build_distance_binned_data,
-    load_partner_distance_inputs,
-)
+from ephys.decode_partner_distance import _analyze, build_distance_binned_data
 from ephys.decode_partner_distance_plots import (
     plot_distance_tuning_curves,
     plot_partner_distance_summary,
@@ -30,6 +26,7 @@ from gui.runners import cached_step
 from gui.state import PartnerDistanceParams, SessionKey
 from gui.tabs.inter_brain import _session_animals
 from gui.widgets import plot_picker
+from ingestion.focal_session import load_focal_session_inputs
 
 log = logging.getLogger(__name__)
 
@@ -150,7 +147,7 @@ def render(key: SessionKey, params: PartnerDistanceParams | None = None) -> None
 
 def _run(key: SessionKey, p: PartnerDistanceParams) -> dict:
     """Load focal ephys + session tracking, bin rates + distance, run the decode."""
-    inputs = load_partner_distance_inputs(
+    inputs = load_focal_session_inputs(
         key.session_id, key.animal_id, config_path=key.config_path,
     )
     data = build_distance_binned_data(

@@ -23,6 +23,7 @@ from ephys.run_social_spatial import (  # noqa: E402
     _write_outputs,
     _max_skaggs_by_cluster,
 )
+from video.tracking_import import VideoTrackingData  # noqa: E402
 
 ARENA = ((0.0, 80.0), (0.0, 80.0))
 DT = 0.04
@@ -81,14 +82,29 @@ def _spikes(xy, center, seed):
     return np.sort(np.concatenate(out)) if out else np.array([])
 
 
-class _StubMAS:
-    def __init__(self, tracking):
-        self._tracking = tracking
-        self.animal_ids = list(tracking)
-        self.session_id = "S"
+class _StubSync:
+    def convert_behavior_to_ephys(self, behav_seconds):
+        return np.asarray(behav_seconds, dtype=np.float64)
 
-    def get_tracking_on_ephys_clock(self, t_start_ephys=None, t_end_ephys=None):
-        return {k: v.copy() for k, v in self._tracking.items()}
+
+def _video_tracking(tracking, session_id="S") -> VideoTrackingData:
+    parsed = {}
+    timestamps_ns = None
+    for aid, df in tracking.items():
+        n = df.shape[0]
+        parsed[aid] = pd.DataFrame({
+            "frame": np.arange(n),
+            "center_x": df["x"].to_numpy(dtype=np.float64),
+            "center_y": df["y"].to_numpy(dtype=np.float64),
+        })
+        if timestamps_ns is None:
+            timestamps_ns = (df["t"].to_numpy(dtype=np.float64) * 1e9).astype(np.int64)
+    return VideoTrackingData(
+        animal_id=list(tracking.keys())[0],
+        session_id=session_id,
+        parsed_data=parsed,
+        timestamps=timestamps_ns,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -100,7 +116,9 @@ def results():
                              _spikes(tr["B"], (40, 40), 11)],
     )
     return compute_social_place_fields(
-        ks, _StubMAS(tr), focal_animal="A", bin_size_cm=5.0, smoothing_sigma_cm=5.0,
+        ks, _video_tracking(tr), _StubSync(), focal_animal="A",
+        target_animals=["A", "B"], pixels_per_cm=None,
+        bin_size_cm=5.0, smoothing_sigma_cm=5.0,
         speed_filter_subject="none", n_shuffles=30, min_n_spikes=20,
         use_quality_cells=False, arena_bounds=ARENA, seed=0,
     )

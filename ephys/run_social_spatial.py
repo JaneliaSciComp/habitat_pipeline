@@ -2,12 +2,13 @@
 """
 Allocentric social place fields — command-line entry point.
 
-Loads all requested animals from one session via :class:`MultiAnimalSession`,
-builds each animal's ``(t, x, y, speed)`` on the shared ephys clock, computes
-occupancy-normalized rate maps of every focal cell over every (self and partner)
-animal's position, classifies cells by which conspecific(s) they encode, and
-writes a results pickle, a six-panel summary PNG, and a multi-page PDF with the
-per-cluster rate-map grids for the top-N cells by Skaggs information.
+Loads the focal (implanted) animal's ``KilosortData`` plus the session tracking
+(which already contains every animal), builds each animal's ``(t, x, y, speed)``
+on the focal ephys clock, computes occupancy-normalized rate maps of every focal
+cell over every (self and partner) animal's position, classifies cells by which
+conspecific(s) they encode, and writes a results pickle, a six-panel summary PNG,
+and a multi-page PDF with the per-cluster rate-map grids for the top-N cells by
+Skaggs information. Only the focal animal needs ephys.
 
 Mirrors the CLI structure of ``ephys/run_inter_brain.py``.
 
@@ -58,6 +59,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Focal animal whose spikes generate the rate maps.")
     p.add_argument("--config_path", type=str, default=None,
                    help="Cohort config JSON (default: config/default_paths.json).")
+    p.add_argument("--dio_channel", type=int, default=1,
+                   help="DIO channel for the focal animal's ephys↔behavior sync.")
     p.add_argument("--bin_size", type=float, default=5.0,
                    help="Spatial bin size in cm (or pixels if uncalibrated).")
     p.add_argument("--smoothing", type=float, default=5.0,
@@ -157,7 +160,7 @@ def main(argv: Optional[list] = None) -> int:
 
     sys.path.append(str(Path(__file__).parent.parent))
     try:
-        from ingestion.multi_animal_session import MultiAnimalSession
+        from ingestion.focal_session import load_focal_session_inputs
         from ephys.social_spatial_fields import compute_social_place_fields
     except ImportError as e:
         logger.error("Import error: %s", e)
@@ -167,35 +170,29 @@ def main(argv: Optional[list] = None) -> int:
     if args.focal not in animal_ids:
         animal_ids.append(args.focal)
 
-    logger.info("Building MultiAnimalSession for %s / animals %s (focal %s)",
-                args.session_id, animal_ids, args.focal)
+    logger.info("Loading focal %s ephys + session tracking for %s (targets %s)",
+                args.focal, args.session_id, animal_ids)
     try:
-        session = MultiAnimalSession(
-            session_id=args.session_id,
-            animal_ids=animal_ids,
-            config_path=args.config_path,
+        inputs = load_focal_session_inputs(
+            args.session_id, args.focal,
+            config_path=args.config_path, dio_channel=args.dio_channel,
         )
     except Exception as e:
-        logger.error("Failed to build MultiAnimalSession: %s", e)
+        logger.error("Failed to load focal session inputs: %s", e)
         return 1
 
     t_window = None
     if args.t_start is not None or args.t_end is not None:
-        session_window = session.get_common_time_window()
-        t0 = args.t_start if args.t_start is not None else session_window[0]
-        t1 = args.t_end if args.t_end is not None else session_window[1]
+        t0 = args.t_start if args.t_start is not None else 0.0
+        t1 = args.t_end if args.t_end is not None else inputs.ks_focal.duration_seconds
         t_window = (t0, t1)
-
-    try:
-        ks = session.get_ks(args.focal)
-    except Exception as e:
-        logger.error("Failed to load focal KilosortData: %s", e)
-        return 1
 
     logger.info("Computing social place fields...")
     try:
         results = compute_social_place_fields(
-            ks, session, focal_animal=args.focal, target_animals=animal_ids,
+            inputs.ks_focal, inputs.tracking, inputs.sync,
+            focal_animal=args.focal, target_animals=animal_ids,
+            pixels_per_cm=inputs.pixels_per_cm,
             bin_size_cm=args.bin_size, smoothing_sigma_cm=args.smoothing,
             speed_threshold_cms=args.speed_threshold,
             speed_filter_subject=args.speed_filter_subject,

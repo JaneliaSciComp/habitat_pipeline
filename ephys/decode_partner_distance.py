@@ -55,7 +55,7 @@ conversion happen.
 
 from __future__ import annotations
 
-from typing import Dict, NamedTuple, Optional, Sequence
+from typing import Dict, Optional, Sequence
 
 import numpy as np
 
@@ -506,39 +506,6 @@ def build_distance_binned_data(ks_focal, tracking, sync, focal: str, partner: st
     }
 
 
-class PartnerDistanceInputs(NamedTuple):
-    """Loaded objects needed to decode partner distance for a focal animal."""
-    ks_focal: "object"          # KilosortData
-    tracking: "object"          # VideoTrackingData
-    sync: "object"              # DataSyncManager
-    pixels_per_cm: Optional[float]
-
-
-def load_partner_distance_inputs(session_id: str, focal: str, *,
-                                 config_path: Optional[str] = None,
-                                 dio_channel: int = 1) -> PartnerDistanceInputs:
-    """Load the focal-only objects needed for partner-distance decoding.
-
-    Builds only the **focal** animal's :class:`DataStorageManager` — no partner
-    is ever loaded as ephys (the partner id is supplied later to
-    :func:`build_distance_binned_data`). The session tracking file (resolved
-    through the focal DSM) already contains every animal's trajectory.
-
-    Returns a :class:`PartnerDistanceInputs` ``(ks_focal, tracking, sync,
-    pixels_per_cm)`` to feed straight into :func:`build_distance_binned_data`.
-    """
-    from ingestion.data_paths import DataStorageManager
-    from ingestion.ephys_sync import DataSyncManager
-    from ingestion.kilosort_data_import import load_kilosort_data
-    from video.tracking_import import load_tracking_data
-
-    dsm = DataStorageManager(focal, session_id, config_path=config_path)
-    ks_focal = load_kilosort_data(dsm.get_kilosort_path())
-    sync = DataSyncManager(dsm, dio_channel=dio_channel)
-    tracking = load_tracking_data(dsm)
-    return PartnerDistanceInputs(ks_focal, tracking, sync, dsm.get_pixels_per_cm())
-
-
 def decode_partner_distance(session_id: str, focal: str, partner: str, *,
                             config_path: Optional[str] = None,
                             dio_channel: int = 1,
@@ -554,10 +521,12 @@ def decode_partner_distance(session_id: str, focal: str, partner: str, *,
                             seed: int = 0) -> Dict:
     """End-to-end: load focal KilosortData + session tracking, then decode.
 
-    Thin convenience wrapper = ``load_partner_distance_inputs`` +
+    Thin convenience wrapper = ``load_focal_session_inputs`` +
     ``build_distance_binned_data`` + ``_analyze``. The partner needs no ephys.
     """
-    inputs = load_partner_distance_inputs(
+    from ingestion.focal_session import load_focal_session_inputs
+
+    inputs = load_focal_session_inputs(
         session_id, focal, config_path=config_path, dio_channel=dio_channel,
     )
     data = build_distance_binned_data(

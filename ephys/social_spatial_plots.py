@@ -52,12 +52,13 @@ def _masked_cmap():
     return cmap
 
 
-def _draw_rate_map(ax, rm, title: Optional[str] = None, vmax: Optional[float] = None):
+def _draw_rate_map(ax, rm, title: Optional[str] = None, vmax: Optional[float] = None,
+                   vmin: float = 0.0):
     """Draw one RateMap on ``ax`` with NaN bins masked. Returns the image."""
     masked = np.ma.masked_invalid(rm.rates)
     extent = [rm.x_edges[0], rm.x_edges[-1], rm.y_edges[0], rm.y_edges[-1]]
     im = ax.imshow(masked, origin="lower", extent=extent, aspect="auto",
-                   cmap=_masked_cmap(), vmin=0.0, vmax=vmax)
+                   cmap=_masked_cmap(), vmin=vmin, vmax=vmax)
     ax.set_xlabel("x (cm)")
     ax.set_ylabel("y (cm)")
     if title:
@@ -77,23 +78,24 @@ def _maybe_save(fig, save_path):
 
 def plot_rate_maps_grid(results: SocialFieldResults, cluster_id: int,
                         save_path=None, figsize: Optional[Tuple[int, int]] = None):
-    """One rate-map panel per target animal for a single cluster (shared colorbar)."""
+    """One rate-map panel per target animal for a single cluster.
+
+    Each panel is colour-scaled independently to its own min/max rate, so the
+    spatial structure of every map is visible regardless of overall firing-rate
+    differences across targets. Each panel therefore gets its own colorbar.
+    """
     targets = _targets(results)
     maps = [results.rate_maps[t][cluster_id] for t in targets if cluster_id in results.rate_maps[t]]
     used = [t for t in targets if cluster_id in results.rate_maps[t]]
     if not maps:
         raise ValueError(f"No rate maps for cluster {cluster_id}.")
-    
-    vmax = np.nanmax([np.nanmax(m.rates) if np.isfinite(m.rates).any() else 0.0 for m in maps])
-    vmax = float(vmax) if vmax > 0 else None
 
     n = len(maps)
     if figsize is None:
-        figsize = (3.2 * n + 1.2, 3.4)
+        figsize = (3.6 * n + 0.4, 3.8)
     fig, axes = plt.subplots(1, n, figsize=figsize, squeeze=False)
     axes = axes[0]
 
-    im = None
     for ax, t, m in zip(axes, used, maps):
         fs = results.stats[t][cluster_id]
         sig = results.signif[t][cluster_id]
@@ -101,12 +103,19 @@ def plot_rate_maps_grid(results: SocialFieldResults, cluster_id: int,
         self_tag = " (self)" if t == _focal(results) else ""
         title = (f"target {t}{self_tag}\n"
                  f"bits/spk={fs.skaggs_bits_per_spike:.2f}  p={p_txt}")
-        im = _draw_rate_map(ax, m, title=title, vmax=vmax)
+        # Per-neuron (per-target) scaling: normalize from this map's min to max.
+        if np.isfinite(m.rates).any():
+            vmin = float(np.nanmin(m.rates))
+            vmax = float(np.nanmax(m.rates))
+        else:
+            vmin, vmax = 0.0, None
+        im = _draw_rate_map(ax, m, title=title, vmin=vmin, vmax=vmax)
+        fig.colorbar(im, ax=ax, shrink=0.85, label="Hz")
 
-    if im is not None:
-        fig.colorbar(im, ax=list(axes), shrink=0.8, label="Hz")
     fig.suptitle(f"{_analysis_title(results)} — focal {_focal(results)}, cluster {cluster_id}",
                  fontsize=11)
+    # Reserve headroom so the suptitle clears the two-line subplot titles.
+    fig.tight_layout(rect=[0, 0, 1, 0.90])
     plt.show()
     return _maybe_save(fig, save_path)
 

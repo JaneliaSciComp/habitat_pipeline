@@ -125,6 +125,48 @@ def _cv_regress(X: np.ndarray, y: np.ndarray, *,
     return {"cv_r2": cv_r2, "r2_per_fold": r2_per_fold, "rmse": rmse, "y_pred": y_pred}
 
 
+def _regression_diagnostics(y_true: np.ndarray, y_pred: np.ndarray,
+                            r2_per_fold: Optional[Sequence[float]]) -> Dict:
+    """Robust scoring of an out-of-fold prediction (no model fitting).
+
+    ``cv_r2`` elsewhere is the *mean of per-fold* ``model.score()``, which is
+    fragile on strongly autocorrelated, non-stationary distance with contiguous
+    blocked folds: a test block can occupy a distance regime absent from
+    training, and R² there is measured against that block's *own* mean, so one
+    fold can plunge far negative and drag the mean down. The **pooled** R² —
+    ``r2_score`` computed once on the concatenated out-of-fold predictions
+    against the *global* mean — is far more stable, and the per-fold spread
+    (``r2_fold_min``/``max``/``std``) is itself the non-stationarity diagnostic.
+
+    Returns ``{pooled_r2, pearson_r, r2_fold_mean, r2_fold_std, r2_fold_min,
+    r2_fold_max}``.
+    """
+    from sklearn.metrics import r2_score
+
+    y_true = np.asarray(y_true, dtype=np.float64)
+    y_pred = np.asarray(y_pred, dtype=np.float64)
+    m = np.isfinite(y_true) & np.isfinite(y_pred)
+    if m.sum() >= 2 and np.std(y_true[m]) > 0:
+        pooled_r2 = float(r2_score(y_true[m], y_pred[m]))
+        pearson_r = (float(np.corrcoef(y_true[m], y_pred[m])[0, 1])
+                     if np.std(y_pred[m]) > 0 else float("nan"))
+    else:
+        pooled_r2 = float("nan")
+        pearson_r = float("nan")
+
+    folds = (np.asarray(list(r2_per_fold), dtype=np.float64)
+             if r2_per_fold is not None else np.empty(0))
+    folds = folds[np.isfinite(folds)]
+    return {
+        "pooled_r2": pooled_r2,
+        "pearson_r": pearson_r,
+        "r2_fold_mean": float(np.mean(folds)) if folds.size else float("nan"),
+        "r2_fold_std": float(np.std(folds)) if folds.size else float("nan"),
+        "r2_fold_min": float(np.min(folds)) if folds.size else float("nan"),
+        "r2_fold_max": float(np.max(folds)) if folds.size else float("nan"),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Single-cell: 1-D distance tuning curves
 # ---------------------------------------------------------------------------
@@ -268,7 +310,9 @@ def population_distance_regression(firing_rates: np.ndarray, distance: np.ndarra
 
     res = _cv_regress(fr, d, alpha=alpha, cv_folds=cv_folds)
     out = {"cv_r2": res["cv_r2"], "r2_per_fold": res["r2_per_fold"],
-           "rmse": res["rmse"], "y_pred": res["y_pred"], "cv_r2_partial": None}
+           "rmse": res["rmse"], "y_pred": res["y_pred"], "cv_r2_partial": None,
+           "diagnostics": _regression_diagnostics(d, res["y_pred"],
+                                                   res["r2_per_fold"])}
 
     if nuisance is not None:
         nuisance = np.asarray(nuisance, dtype=np.float64)
@@ -331,8 +375,222 @@ def _null_distance_regression(firing_rates: np.ndarray, distance: np.ndarray, *,
 
 
 # ---------------------------------------------------------------------------
+# Bayesian 1-D distance decoder (the 1-D analogue of decode_location)
+# ---------------------------------------------------------------------------
+
+def _bayesian_decode_1d(rates: np.ndarray, tuning: np.ndarray,
+                        occupancy: Optional[np.ndarray], time_bin_size: float,
+                        dist_centers: np.ndarray, *,
+                        use_occupancy_prior: bool = True,
+                        estimate: str = "expected") -> tuple:
+    """Poisson-likelihood Bayesian decode of distance from population rates.
+
+    The 1-D, distance-space analogue of
+    ``ephys.decode_location._bayesian_decode``. Unlike the linear ridge
+    decoder, this exploits the *shape* of each cell's distance tuning curve, so
+    a cell that fires maximally at an intermediate distance (a "distance field",
+    near-zero linear correlation) still contributes.
+
+    In log-space (dropping constant ``n_i!`` terms)::
+
+        log P(d | spikes) ∝ Σ_i [ n_i·log(λ_i(d)·Δt) − λ_i(d)·Δt ] + log P(d)
+
+    Parameters
+    ----------
+    rates : (n_time, n_cells) or (n_time,) — Hz
+    tuning : (n_dist_bins, n_cells) — mean Hz per distance bin (from
+        :func:`compute_distance_tuning`).
+    occupancy : (n_dist_bins,) or None — time-bin counts, used as the prior.
+    time_bin_size : float — seconds per time bin.
+    dist_centers : (n_dist_bins,) — distance-bin centres.
+    estimate : {'expected', 'map'} — posterior mean (continuous) or MAP bin.
+
+    Returns ``(predicted_distance (n_time,), posterior (n_time, n_dist_bins))``.
+    """
+    rates = np.asarray(rates, dtype=np.float64)
+    if rates.ndim == 1:
+        rates = rates[:, None]
+    tuning = np.asarray(tuning, dtype=np.float64)          # (n_dist, n_cells)
+    dist_centers = np.asarray(dist_centers, dtype=np.float64)
+    n_dist = tuning.shape[0]
+
+    lam_dt = tuning * time_bin_size                        # (n_dist, n_cells)
+    log_lam_dt = np.log(np.clip(lam_dt, 1e-10, None))      # avoid log(0)
+    neg_sum_lam = -lam_dt.sum(axis=1)                      # (n_dist,)
+
+    if (use_occupancy_prior and occupancy is not None
+            and np.sum(occupancy) > 0):
+        prior = np.clip(occupancy / np.sum(occupancy), 1e-10, None)
+    else:
+        prior = np.full(n_dist, 1.0 / n_dist)
+    log_prior = np.log(prior)
+
+    spike_counts = rates * time_bin_size                   # (n_time, n_cells)
+    log_post = spike_counts @ log_lam_dt.T                 # (n_time, n_dist)
+    log_post += neg_sum_lam + log_prior
+
+    log_post -= log_post.max(axis=1, keepdims=True)        # stability
+    post = np.exp(log_post)
+    post /= post.sum(axis=1, keepdims=True)
+
+    if estimate == "map":
+        predicted = dist_centers[post.argmax(axis=1)]
+    else:  # posterior mean — continuous, sub-bin resolution
+        predicted = post @ dist_centers
+    return predicted, post
+
+
+def _cv_bayesian_distance(firing_rates: np.ndarray, distance: np.ndarray, *,
+                          bin_size: float, n_distance_bins: int = 15,
+                          tuning_smoothing_sigma: float = 1.0, cv_folds: int = 5,
+                          dist_edges: Optional[np.ndarray] = None,
+                          use_occupancy_prior: bool = True,
+                          estimate: str = "expected",
+                          return_posterior: bool = False) -> Dict:
+    """Cross-validated Bayesian distance decode over a fixed distance grid.
+
+    Per **contiguous** fold (``KFold(shuffle=False)`` — this module's
+    convention for autocorrelated series), build distance tuning curves on the
+    training bins with :func:`compute_distance_tuning` and decode the test bins.
+    A **single** ``dist_edges`` grid spanning the full session is shared across
+    folds (mirroring the shared spatial grid in ``decode_location._cv_decode``).
+
+    ``cv_r2`` is the **pooled** out-of-fold R² (``r2_score`` on concatenated
+    predictions) rather than a mean-of-fold score, matching
+    :func:`_regression_diagnostics`. Falls back to an in-sample fit when there
+    are too few samples for CV.
+
+    Returns ``{y_pred, median_error, mean_error, error_per_fold, cv_r2,
+    dist_edges, dist_centers}`` (plus ``posterior`` if requested).
+    """
+    from sklearn.metrics import r2_score
+    from sklearn.model_selection import KFold
+
+    fr = np.asarray(firing_rates, dtype=np.float64)
+    if fr.ndim == 1:
+        fr = fr[:, None]
+    d = np.asarray(distance, dtype=np.float64)
+    n = len(d)
+
+    if dist_edges is None:
+        finite_d = d[np.isfinite(d)]
+        lo = float(np.min(finite_d)) if finite_d.size else 0.0
+        hi = float(np.max(finite_d)) if finite_d.size else 1.0
+        if hi <= lo:
+            hi = lo + 1.0
+        dist_edges = np.linspace(lo, hi, n_distance_bins + 1)
+    else:
+        dist_edges = np.asarray(dist_edges, dtype=np.float64)
+    dist_centers = 0.5 * (dist_edges[:-1] + dist_edges[1:])
+
+    y_pred = np.full(n, np.nan, dtype=np.float64)
+    posterior = (np.full((n, len(dist_centers)), np.nan, dtype=np.float64)
+                 if return_posterior else None)
+    fold_errors = []
+
+    if cv_folds and cv_folds > 1 and n >= cv_folds + 2:
+        splits = list(KFold(n_splits=cv_folds, shuffle=False).split(fr))
+    else:
+        splits = [(np.arange(n), np.arange(n))]  # in-sample fallback
+
+    for tr_idx, te_idx in splits:
+        tc = compute_distance_tuning(
+            fr[tr_idx], d[tr_idx], smoothing_sigma=tuning_smoothing_sigma,
+            dist_edges=dist_edges,
+        )
+        pred, post = _bayesian_decode_1d(
+            fr[te_idx], tc["tuning"], tc["occupancy"], bin_size, dist_centers,
+            use_occupancy_prior=use_occupancy_prior, estimate=estimate,
+        )
+        y_pred[te_idx] = pred
+        if return_posterior:
+            posterior[te_idx] = post
+        fold_errors.append(float(np.median(np.abs(d[te_idx] - pred))))
+
+    valid = np.isfinite(y_pred) & np.isfinite(d)
+    cv_r2 = (float(r2_score(d[valid], y_pred[valid]))
+             if valid.sum() >= 2 and np.std(d[valid]) > 0 else float("nan"))
+    abs_err = np.abs(d[valid] - y_pred[valid])
+    median_error = float(np.median(abs_err)) if valid.any() else float("nan")
+    mean_error = float(np.mean(abs_err)) if valid.any() else float("nan")
+
+    out = {"y_pred": y_pred, "median_error": median_error,
+           "mean_error": mean_error, "error_per_fold": fold_errors,
+           "cv_r2": cv_r2, "dist_edges": dist_edges, "dist_centers": dist_centers}
+    if return_posterior:
+        out["posterior"] = posterior
+    return out
+
+
+def _null_bayesian_distance(firing_rates: np.ndarray, distance: np.ndarray, *,
+                            bin_size: float, n_distance_bins: int = 15,
+                            tuning_smoothing_sigma: float = 1.0, cv_folds: int = 5,
+                            use_occupancy_prior: bool = True,
+                            estimate: str = "expected",
+                            null: str = "shuffle", n_shuffles: int = 100,
+                            seed: int = 0) -> Dict:
+    """Bayesian-decoder null from a broken rate↔distance pairing.
+
+    Mirrors :func:`_null_distance_regression` (and
+    ``decode_location._null_position_decode``): distance is rolled (not the
+    rates) so each stream's autocorrelation is preserved. Returns ``null_r2`` /
+    ``null_r2_std`` / ``null_r2_dist`` and ``null_median_error`` /
+    ``null_median_error_std``.
+    """
+    fr = np.asarray(firing_rates, dtype=np.float64)
+    if fr.ndim == 1:
+        fr = fr[:, None]
+    d = np.asarray(distance, dtype=np.float64)
+    n = len(d)
+
+    if null == "reverse":
+        variants = [d[::-1]]
+    elif null == "shuffle":
+        rng = np.random.default_rng(seed)
+        lo, hi = max(1, n // 10), max(2, n - n // 10)
+        shifts = rng.integers(lo, hi, size=n_shuffles)
+        variants = [np.roll(d, int(s)) for s in shifts]
+    else:
+        raise ValueError(f"Unknown null method {null!r} (use 'reverse' or 'shuffle').")
+
+    r2s, meds = [], []
+    for d_null in variants:
+        r = _cv_bayesian_distance(
+            fr, d_null, bin_size=bin_size, n_distance_bins=n_distance_bins,
+            tuning_smoothing_sigma=tuning_smoothing_sigma, cv_folds=cv_folds,
+            use_occupancy_prior=use_occupancy_prior, estimate=estimate,
+        )
+        r2s.append(r["cv_r2"])
+        meds.append(r["median_error"])
+    r2s = np.asarray(r2s, dtype=np.float64)
+    meds = np.asarray(meds, dtype=np.float64)
+
+    return {"null_r2": float(np.nanmean(r2s)),
+            "null_r2_std": float(np.nanstd(r2s)),
+            "null_r2_dist": r2s.tolist(),
+            "null_median_error": float(np.nanmean(meds)),
+            "null_median_error_std": float(np.nanstd(meds))}
+
+
+# ---------------------------------------------------------------------------
 # Pure-compute orchestrator (no I/O — used by CLI, GUI, and tests)
 # ---------------------------------------------------------------------------
+
+def _bin_size_from_centers(bin_centers: np.ndarray) -> float:
+    """Infer the time-bin width (s) from bin centres; 1.0 if undeterminable.
+
+    The Bayesian decoder needs Δt for the Poisson likelihood. Bins are an even
+    grid (some may be dropped for NaNs), so the median consecutive spacing
+    recovers the bin size robustly.
+    """
+    bc = np.asarray(bin_centers, dtype=np.float64)
+    if bc.size >= 2:
+        diffs = np.diff(bc)
+        diffs = diffs[np.isfinite(diffs) & (diffs > 0)]
+        if diffs.size:
+            return float(np.median(diffs))
+    return 1.0
+
 
 def _analyze(firing_rates: np.ndarray, distance: np.ndarray,
              nuisance: Optional[np.ndarray], bin_centers: np.ndarray,
@@ -341,12 +599,22 @@ def _analyze(firing_rates: np.ndarray, distance: np.ndarray,
              n_distance_bins: int = 15, tuning_smoothing_sigma: float = 1.0,
              null: Optional[str] = "shuffle", n_shuffles: int = 100,
              nuisance_names: Optional[Sequence[str]] = None,
+             decoder: str = "ridge", bayesian_estimate: str = "expected",
+             bayesian_occupancy_prior: bool = True,
              seed: int = 0) -> Dict:
     """Run the full single-cell + population distance decode on pre-binned arrays.
 
     I/O-free so the GUI and CLI share it and tests can exercise it on synthetic
     data. ``decode_partner_distance`` wraps ``build_distance_binned_data`` +
     this. See module docstring for the result-dict schema.
+
+    ``decoder`` selects the population decoder. ``'ridge'`` (default) is the
+    linear ridge regression — every top-level key keeps its original meaning.
+    ``'both'`` additionally runs the Poisson :func:`_bayesian_decode_1d` over the
+    distance tuning curves and nests its result (``cv_r2``, ``median_error``,
+    ``y_pred``, its own null, optional ``posterior``) under ``result['bayesian']``
+    — ridge stays primary, so the schema is unchanged. The Bayesian decoder
+    exploits bump-shaped distance tuning that linear ridge cannot capture.
     """
     firing_rates = np.asarray(firing_rates, dtype=np.float64)
     if firing_rates.ndim == 1:
@@ -361,6 +629,8 @@ def _analyze(firing_rates: np.ndarray, distance: np.ndarray,
         "tuning_smoothing_sigma": tuning_smoothing_sigma,
         "null": null, "n_shuffles": int(n_shuffles), "seed": int(seed),
         "nuisance_names": list(nuisance_names) if nuisance_names is not None else None,
+        "decoder": decoder, "bayesian_estimate": bayesian_estimate,
+        "bayesian_occupancy_prior": bool(bayesian_occupancy_prior),
         "class_label": CLASS_LABEL, "analysis_title": ANALYSIS_TITLE,
     }
 
@@ -395,11 +665,53 @@ def _analyze(firing_rates: np.ndarray, distance: np.ndarray,
         "focal": focal, "partner": partner, "parameters": parameters,
     }
 
+    # Robust scoring of the ridge decode (pooled OOF R², per-fold spread).
+    diag = pop.get("diagnostics")
+    if diag is not None:
+        result["diagnostics"] = diag
+        result["cv_r2_pooled"] = diag["pooled_r2"]
+        result["cv_r2_pearson"] = diag["pearson_r"]
+        result["r2_fold_std"] = diag["r2_fold_std"]
+
     if null is not None and null != "none":
         result.update(_null_distance_regression(
             firing_rates, distance, alpha=alpha, cv_folds=cv_folds,
             null=null, n_shuffles=n_shuffles, seed=seed,
         ))
+        # "Negative R²" must be judged against the null, not zero: the
+        # circular-shift null is itself strongly negative here.
+        null_r2 = result.get("null_r2")
+        null_std = result.get("null_r2_std")
+        if null_r2 is not None and np.isfinite(null_r2):
+            result["cv_r2_vs_null_z"] = (
+                float((result["cv_r2"] - null_r2) / null_std)
+                if null_std and null_std > 0 else float("nan"))
+            null_dist = np.asarray(result.get("null_r2_dist", []), dtype=np.float64)
+            null_dist = null_dist[np.isfinite(null_dist)]
+            result["cv_r2_null_percentile"] = (
+                float((null_dist < result["cv_r2"]).mean() * 100.0)
+                if null_dist.size else float("nan"))
+
+    # Side-by-side Bayesian decoder over the distance tuning curves.
+    if decoder == "both":
+        bayes = _cv_bayesian_distance(
+            firing_rates, distance, bin_size=_bin_size_from_centers(bin_centers),
+            n_distance_bins=n_distance_bins,
+            tuning_smoothing_sigma=tuning_smoothing_sigma, cv_folds=cv_folds,
+            dist_edges=tuning["dist_edges"],
+            use_occupancy_prior=bayesian_occupancy_prior,
+            estimate=bayesian_estimate, return_posterior=True,
+        )
+        if null is not None and null != "none":
+            bayes.update(_null_bayesian_distance(
+                firing_rates, distance, bin_size=_bin_size_from_centers(bin_centers),
+                n_distance_bins=n_distance_bins,
+                tuning_smoothing_sigma=tuning_smoothing_sigma, cv_folds=cv_folds,
+                use_occupancy_prior=bayesian_occupancy_prior,
+                estimate=bayesian_estimate, null=null, n_shuffles=n_shuffles,
+                seed=seed,
+            ))
+        result["bayesian"] = bayes
     return result
 
 
@@ -515,6 +827,9 @@ def decode_partner_distance(session_id: str, focal: str, partner: str, *,
                             tuning_smoothing_sigma: float = 1.0,
                             alpha: float = 1.0, cv_folds: int = 5,
                             null: Optional[str] = "shuffle", n_shuffles: int = 100,
+                            decoder: str = "ridge",
+                            bayesian_estimate: str = "expected",
+                            bayesian_occupancy_prior: bool = True,
                             t_start: Optional[float] = None,
                             t_end: Optional[float] = None,
                             filter_kwargs: Optional[dict] = None,
@@ -523,6 +838,8 @@ def decode_partner_distance(session_id: str, focal: str, partner: str, *,
 
     Thin convenience wrapper = ``load_focal_session_inputs`` +
     ``build_distance_binned_data`` + ``_analyze``. The partner needs no ephys.
+    Pass ``decoder='both'`` to additionally run the Bayesian decoder alongside
+    ridge (see :func:`_analyze`).
     """
     from ingestion.focal_session import load_focal_session_inputs
 
@@ -542,5 +859,7 @@ def decode_partner_distance(session_id: str, focal: str, partner: str, *,
         n_distance_bins=n_distance_bins,
         tuning_smoothing_sigma=tuning_smoothing_sigma,
         null=null, n_shuffles=n_shuffles,
+        decoder=decoder, bayesian_estimate=bayesian_estimate,
+        bayesian_occupancy_prior=bayesian_occupancy_prior,
         nuisance_names=data["nuisance_names"], seed=seed,
     )

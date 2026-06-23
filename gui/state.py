@@ -129,6 +129,7 @@ class PartnerDistanceParams:
     cv_folds: int
     null: Optional[str]
     n_shuffles: int
+    decoder: str = "ridge"
 
     def as_dict(self) -> dict:
         return asdict(self)

@@ -15,11 +15,13 @@ import streamlit as st
 
 from ephys.decode_partner_distance import _analyze, build_distance_binned_data
 from ephys.decode_partner_distance_plots import (
+    plot_distance_posterior,
     plot_distance_tuning_curves,
     plot_partner_distance_summary,
     plot_per_cell_r2_distribution,
     plot_predicted_vs_actual_scatter,
     plot_predicted_vs_actual_timeseries,
+    plot_regression_diagnostics,
 )
 from gui.plotting import show_fig
 from gui.runners import cached_step
@@ -37,6 +39,8 @@ VIEWS = [
     "Per-cell R²",
     "Predicted vs Actual",
     "Time Series",
+    "Diagnostics",
+    "Bayesian Posterior",
 ]
 
 
@@ -77,7 +81,7 @@ def render(key: SessionKey, params: PartnerDistanceParams | None = None) -> None
             help="Ridge regularization for the regression.",
         )
 
-    cols2 = st.columns(3)
+    cols2 = st.columns(4)
     with cols2[0]:
         n_distance_bins = st.slider(
             "Distance bins", 5, 40, 15, key="pd_dbins",
@@ -93,6 +97,13 @@ def render(key: SessionKey, params: PartnerDistanceParams | None = None) -> None
             "Null shuffles", 0, 300, 50, step=10, key="pd_shuffles",
             help="Circular-shift shuffles for the null (0 = skip null).",
         )
+    with cols2[3]:
+        decoder = st.selectbox(
+            "Decoder", ["ridge", "both"], key="pd_decoder",
+            help="'ridge' = linear regression only. 'both' also runs a Poisson "
+                 "Bayesian decoder over the distance tuning curves, which "
+                 "captures bump-shaped tuning that linear ridge misses.",
+        )
 
     pd_params = PartnerDistanceParams(
         partner=partner,
@@ -104,6 +115,7 @@ def render(key: SessionKey, params: PartnerDistanceParams | None = None) -> None
         cv_folds=int(cv_folds),
         null=("shuffle" if n_shuffles > 0 else None),
         n_shuffles=int(n_shuffles),
+        decoder=str(decoder),
     )
 
     result = cached_step(
@@ -122,15 +134,21 @@ def render(key: SessionKey, params: PartnerDistanceParams | None = None) -> None
         return
 
     cv = result["cv_r2"]
-    partial = result.get("cv_r2_partial")
-    null_r2 = result.get("null_r2")
+    pooled = result.get("cv_r2_pooled")
+    null_z = result.get("cv_r2_vs_null_z")
+    bayes = result.get("bayesian")
     mcols = st.columns(4)
-    mcols[0].metric("Population CV R²", f"{cv:.3f}")
-    mcols[1].metric("RMSE", f"{result['rmse']:.2f} {result['units']}")
-    if partial is not None:
-        mcols[2].metric("Partial R² (beyond self-motion)", f"{partial:.3f}")
-    if null_r2 is not None:
-        mcols[3].metric("Null R²", f"{null_r2:.3f}")
+    mcols[0].metric("Pop. CV R² (mean-fold)", f"{cv:.3f}")
+    if pooled is not None:
+        mcols[1].metric("Pooled R²", f"{pooled:.3f}",
+                        help="Out-of-fold R² against the global mean — robust "
+                             "to per-fold mean shifts on non-stationary data.")
+    mcols[2].metric("RMSE", f"{result['rmse']:.2f} {result['units']}")
+    if bayes is not None:
+        mcols[3].metric("Bayesian pooled R²", f"{bayes['cv_r2']:.3f}",
+                        help="Poisson decoder over the distance tuning curves.")
+    elif null_z is not None:
+        mcols[3].metric("vs null", f"{null_z:.1f} σ")
 
     view = plot_picker("View", VIEWS, key="pd_view")
     if view == "Summary":
@@ -143,6 +161,13 @@ def render(key: SessionKey, params: PartnerDistanceParams | None = None) -> None
         show_fig(plot_predicted_vs_actual_scatter(result))
     elif view == "Time Series":
         show_fig(plot_predicted_vs_actual_timeseries(result))
+    elif view == "Diagnostics":
+        show_fig(plot_regression_diagnostics(result))
+    elif view == "Bayesian Posterior":
+        if result.get("bayesian") is None:
+            st.info("Set Decoder = 'both' and re-run to see the Bayesian posterior.")
+        else:
+            show_fig(plot_distance_posterior(result))
 
 
 def _run(key: SessionKey, p: PartnerDistanceParams) -> dict:
@@ -163,5 +188,6 @@ def _run(key: SessionKey, p: PartnerDistanceParams) -> dict:
         n_distance_bins=p.n_distance_bins,
         tuning_smoothing_sigma=p.tuning_smoothing_sigma,
         null=p.null, n_shuffles=p.n_shuffles,
+        decoder=p.decoder,
         nuisance_names=data["nuisance_names"],
     )

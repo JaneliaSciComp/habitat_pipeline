@@ -15,8 +15,12 @@ import pytest
 
 from ephys.decode_partner_distance import (
     _analyze,
+    _bayesian_decode_1d,
+    _cv_bayesian_distance,
     _cv_regress,
+    _null_bayesian_distance,
     _null_distance_regression,
+    _regression_diagnostics,
     compute_distance_tuning,
     population_distance_regression,
     single_cell_distance_scores,
@@ -51,6 +55,25 @@ def _planted_population(T=1500, n_noise=20, a=1.0, noise=0.4, seed=0):
     signal = a * d_z + noise * rng.standard_normal(T)
     noise_cells = rng.standard_normal((T, n_noise))
     firing_rates = np.column_stack([signal, noise_cells])
+    return firing_rates, distance
+
+
+def _bump_population(T=2000, n_bumps=4, n_noise=20, width=7.0, peak_hz=12.0,
+                     seed=0):
+    """Bump-tuned cells (Gaussian-in-distance, non-monotonic) + noise cells.
+
+    Each signal cell fires maximally at a preferred distance — a "place field"
+    in distance space — so its *linear* correlation with distance is weak, which
+    is exactly the regime where the Bayesian decoder beats linear ridge.
+    """
+    rng = np.random.default_rng(seed)
+    distance = _autocorr_distance(T, seed, sigma=6.0)
+    centers = np.linspace(25.0, 95.0, n_bumps)
+    lam = np.column_stack([peak_hz * np.exp(-0.5 * ((distance - c) / width) ** 2)
+                           for c in centers])
+    bumps = rng.poisson(lam * 0.5) / 0.5                 # counts -> Hz (0.5 s bins)
+    noise = 5.0 + rng.standard_normal((T, n_noise))
+    firing_rates = np.clip(np.column_stack([bumps, noise]), 0.0, None)
     return firing_rates, distance
 
 
@@ -208,6 +231,119 @@ class TestCvRegress:
         res = _cv_regress(x, y, alpha=1e-6, cv_folds=5)
         assert np.all(np.isfinite(res["y_pred"]))
         assert res["y_pred"].shape == y.shape
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics: pooled R² vs mean-of-fold on non-stationary data
+# ---------------------------------------------------------------------------
+
+class TestDiagnostics:
+    def test_pooled_matches_sklearn_r2_score(self):
+        from sklearn.metrics import r2_score
+        rng = np.random.default_rng(20)
+        y = rng.standard_normal(400)
+        y_pred = y + 0.3 * rng.standard_normal(400)
+        diag = _regression_diagnostics(y, y_pred, [0.1, 0.2, 0.3])
+        assert diag["pooled_r2"] == pytest.approx(r2_score(y, y_pred))
+        assert diag["r2_fold_mean"] == pytest.approx(0.2)
+        assert diag["r2_fold_min"] == pytest.approx(0.1)
+        assert diag["r2_fold_max"] == pytest.approx(0.3)
+
+    def test_pooled_beats_mean_fold_on_nonstationary(self):
+        """A drifting (non-stationary) target makes per-fold means diverge.
+
+        Contiguous folds then occupy distance regimes absent from training, so
+        mean-of-fold R² is dragged far below the pooled out-of-fold R².
+        """
+        rng = np.random.default_rng(21)
+        T = 1500
+        # Random-walk distance — drifts across the session (non-stationary).
+        distance = 60.0 + np.cumsum(0.5 * rng.standard_normal(T))
+        d_z = (distance - distance.mean()) / distance.std()
+        fr = (d_z + 0.3 * rng.standard_normal(T))[:, None]
+        pop = population_distance_regression(fr, distance, alpha=1.0, cv_folds=5)
+        diag = pop["diagnostics"]
+        assert diag["pooled_r2"] > pop["cv_r2"]      # pooled is the honest summary
+        assert diag["pooled_r2"] > 0.3               # signal is genuinely there
+
+
+# ---------------------------------------------------------------------------
+# Bayesian 1-D decoder
+# ---------------------------------------------------------------------------
+
+class TestBayesian:
+    def test_decode_1d_recovers_monotone_tuning(self):
+        """Noiseless monotone tuning ⇒ small decoding error."""
+        rng = np.random.default_rng(22)
+        T = 2000
+        dist = _autocorr_distance(T, seed=22, sigma=6.0)
+        rate = (0.3 * dist)[:, None]                 # monotone, high-rate
+        tc = compute_distance_tuning(rate, dist, n_distance_bins=25,
+                                     smoothing_sigma=1.0)
+        pred, post = _bayesian_decode_1d(
+            rate, tc["tuning"], tc["occupancy"], 0.5, tc["dist_centers"])
+        assert post.shape == (T, 25)
+        assert np.allclose(post.sum(axis=1), 1.0)    # normalised posterior
+        # decoded tracks truth
+        assert np.corrcoef(pred, dist)[0, 1] > 0.9
+
+    def test_bayesian_beats_ridge_on_bump_tuning(self):
+        fr, dist = _bump_population(seed=23)
+        ridge = population_distance_regression(fr, dist, alpha=1.0, cv_folds=5)
+        bayes = _cv_bayesian_distance(fr, dist, bin_size=0.5, n_distance_bins=25,
+                                      cv_folds=5)
+        assert bayes["cv_r2"] > ridge["diagnostics"]["pooled_r2"] + 0.1
+        assert bayes["cv_r2"] > 0.3
+        assert bayes["median_error"] > 0
+
+    def test_bayesian_null_below_real(self):
+        fr, dist = _bump_population(seed=24)
+        real = _cv_bayesian_distance(fr, dist, bin_size=0.5, n_distance_bins=25,
+                                     cv_folds=5)["cv_r2"]
+        null = _null_bayesian_distance(fr, dist, bin_size=0.5, n_distance_bins=25,
+                                       cv_folds=5, null="shuffle", n_shuffles=30,
+                                       seed=24)
+        assert null["null_r2"] < real
+        assert null["null_r2"] < 0.1
+
+
+# ---------------------------------------------------------------------------
+# _analyze with decoder='both' — schema is additive
+# ---------------------------------------------------------------------------
+
+class TestDecoderBoth:
+    def test_both_keeps_ridge_keys_and_adds_bayesian(self):
+        fr, dist = _bump_population(seed=25)
+        bc = np.arange(len(dist)) * 0.5
+        ridge_only = _analyze(fr, dist, None, bc, units="cm", focal="A",
+                              partner="B", cv_folds=5, n_distance_bins=25,
+                              n_shuffles=15, decoder="ridge")
+        both = _analyze(fr, dist, None, bc, units="cm", focal="A", partner="B",
+                        cv_folds=5, n_distance_bins=25, n_shuffles=15,
+                        decoder="both")
+        # All ridge-mode top-level keys still present and unchanged in meaning.
+        for k in ("cv_r2", "rmse", "y_pred", "cell_ranking", "r2_per_cell",
+                  "tuning", "null_r2", "cv_r2_pooled", "diagnostics"):
+            assert k in ridge_only and k in both
+        assert "bayesian" not in ridge_only
+        assert both["cv_r2"] == ridge_only["cv_r2"]          # ridge stays primary
+        # Bayesian nested, with its own keys.
+        b = both["bayesian"]
+        assert {"cv_r2", "median_error", "y_pred", "posterior", "null_r2"} <= set(b)
+        assert b["posterior"].shape[0] == len(dist)
+        # Contract preserved.
+        assert both["parameters"]["class_label"] == "partner_distance"
+        assert both["parameters"]["analysis_title"] == "Partner-Distance Decoding"
+        assert both["parameters"]["decoder"] == "both"
+
+    def test_null_comparison_scalars(self):
+        fr, dist = _planted_population(seed=26)
+        bc = np.arange(len(dist)) * 0.5
+        res = _analyze(fr, dist, None, bc, units="cm", focal="A", partner="B",
+                       cv_folds=5, n_shuffles=30)
+        assert np.isfinite(res["cv_r2_vs_null_z"])
+        assert res["cv_r2_vs_null_z"] > 0                    # real signal beats null
+        assert 0.0 <= res["cv_r2_null_percentile"] <= 100.0
 
 
 if __name__ == "__main__":

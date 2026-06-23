@@ -92,6 +92,15 @@ def plot_per_cell_r2_distribution(result: Dict,
     if null_r2 is not None and np.isfinite(null_r2):
         ax.axvline(null_r2, color="tab:gray", ls="--",
                    label=f"null R² = {null_r2:.3f}")
+    pooled = result.get("cv_r2_pooled")
+    if pooled is not None and np.isfinite(pooled):
+        ax.axvline(pooled, color="tab:green", ls="-.",
+                   label=f"population pooled R² = {pooled:.3f}")
+    fmin = result.get("diagnostics", {}).get("r2_fold_min")
+    fmax = result.get("diagnostics", {}).get("r2_fold_max")
+    if fmin is not None and np.isfinite(fmin) and np.isfinite(fmax):
+        ax.axvspan(fmin, fmax, color="tab:green", alpha=0.08,
+                   label=f"population per-fold R² [{fmin:.2f}, {fmax:.2f}]")
     ax.axvline(0.0, color="black", lw=0.7)
     ax.set_xlabel("cross-validated R²")
     ax.set_ylabel("# cells")
@@ -122,9 +131,16 @@ def plot_predicted_vs_actual_scatter(result: Dict,
     ax.set_xlabel(f"actual distance ({units})")
     ax.set_ylabel(f"decoded distance ({units})")
     ax.set_aspect("equal")
-    txt = f"CV R² = {result['cv_r2']:.3f}\nRMSE = {result['rmse']:.2f} {units}"
+    txt = f"CV R² (mean-fold) = {result['cv_r2']:.3f}"
+    if result.get("cv_r2_pooled") is not None and np.isfinite(result["cv_r2_pooled"]):
+        txt += f"\npooled R² = {result['cv_r2_pooled']:.3f}"
+    if result.get("cv_r2_pearson") is not None and np.isfinite(result["cv_r2_pearson"]):
+        txt += f"\npearson r = {result['cv_r2_pearson']:.3f}"
+    txt += f"\nRMSE = {result['rmse']:.2f} {units}"
     if result.get("cv_r2_partial") is not None:
         txt += f"\npartial R² = {result['cv_r2_partial']:.3f}"
+    if result.get("cv_r2_vs_null_z") is not None and np.isfinite(result["cv_r2_vs_null_z"]):
+        txt += f"\nvs null = {result['cv_r2_vs_null_z']:.1f} σ"
     ax.text(0.05, 0.95, txt, transform=ax.transAxes, va="top", fontsize=10,
             bbox=dict(boxstyle="round", fc="white", alpha=0.8))
     ax.set_title(f"Population distance decoding · {_title(result)}")
@@ -222,10 +238,106 @@ def plot_partner_distance_summary(result: Dict,
     null_txt = ""
     if result.get("null_r2") is not None:
         null_txt = f"  ·  null R² = {result['null_r2']:.3f} ± {result['null_r2_std']:.3f}"
+    pooled_txt = ""
+    if result.get("cv_r2_pooled") is not None and np.isfinite(result["cv_r2_pooled"]):
+        pooled_txt = f"  ·  pooled R² = {result['cv_r2_pooled']:.3f}"
+        if result.get("cv_r2_vs_null_z") is not None and np.isfinite(result["cv_r2_vs_null_z"]):
+            pooled_txt += f" ({result['cv_r2_vs_null_z']:.1f}σ vs null)"
     fig.suptitle(
         f"Partner-distance decoding · {_title(result)}  "
-        f"({result['n_cells']} cells, {result['n_bins']} bins){null_txt}",
+        f"({result['n_cells']} cells, {result['n_bins']} bins){pooled_txt}{null_txt}",
         fontsize=13,
     )
+    fig.tight_layout()
+    return fig
+
+
+def plot_regression_diagnostics(result: Dict,
+                                figsize: Tuple[float, float] = (8, 5)):
+    """Per-fold R² spread vs pooled R² and the null band.
+
+    Distinguishes the two failure modes: a pooled R² well above the mean-of-fold
+    R² with a wide per-fold spread points to non-stationarity / blocked-CV
+    fragility rather than absence of signal; a pooled R² down at the null band
+    means there is genuinely little decodable signal.
+    """
+    import matplotlib.pyplot as plt
+
+    if not _ok(result):
+        return None
+    folds = np.asarray(result.get("r2_per_fold", []), dtype=np.float64)
+    folds = folds[np.isfinite(folds)]
+    diag = result.get("diagnostics", {}) or {}
+
+    fig, ax = plt.subplots(figsize=figsize)
+    if folds.size:
+        x = np.arange(1, folds.size + 1)
+        ax.bar(x, folds, color="tab:blue", alpha=0.6, label="per-fold R²")
+        ax.set_xticks(x)
+        ax.set_xlabel("CV fold")
+
+    mean_fold = result.get("cv_r2")
+    if mean_fold is not None and np.isfinite(mean_fold):
+        ax.axhline(mean_fold, color="tab:blue", ls=":",
+                   label=f"mean-of-fold R² = {mean_fold:.3f}")
+    pooled = result.get("cv_r2_pooled", diag.get("pooled_r2"))
+    if pooled is not None and np.isfinite(pooled):
+        ax.axhline(pooled, color="tab:green", ls="-",
+                   label=f"pooled R² = {pooled:.3f}")
+
+    null_r2 = result.get("null_r2")
+    null_std = result.get("null_r2_std")
+    if null_r2 is not None and np.isfinite(null_r2):
+        ax.axhline(null_r2, color="tab:gray", ls="--",
+                   label=f"null R² = {null_r2:.3f}")
+        if null_std is not None and np.isfinite(null_std):
+            ax.axhspan(null_r2 - null_std, null_r2 + null_std,
+                       color="tab:gray", alpha=0.15)
+    ax.axhline(0.0, color="black", lw=0.7)
+    ax.set_ylabel("cross-validated R²")
+    ax.set_title(f"Population decode diagnostics · {_title(result)}")
+    ax.legend(fontsize=8, loc="best")
+    fig.tight_layout()
+    return fig
+
+
+def plot_distance_posterior(result: Dict,
+                            figsize: Tuple[float, float] = (12, 5)):
+    """Bayesian decoder posterior over distance vs time, with truth overlaid.
+
+    Only available when the analysis ran with ``decoder='both'`` (the Bayesian
+    result and its posterior live under ``result['bayesian']``). Mirrors the
+    posterior panel of ``ephys.decode_location.plot_decoding_results``.
+    """
+    import matplotlib.pyplot as plt
+
+    if not _ok(result):
+        return None
+    bayes = result.get("bayesian")
+    if not bayes or bayes.get("posterior") is None:
+        print("No Bayesian posterior in result (run with decoder='both').")
+        return None
+
+    post = np.asarray(bayes["posterior"], dtype=np.float64)   # (n_time, n_dist)
+    centers = np.asarray(bayes.get("dist_centers", result["dist_centers"]),
+                         dtype=np.float64)
+    t = np.asarray(result["bin_centers"], dtype=np.float64)
+    y_true = np.asarray(result["y_true"], dtype=np.float64)
+    y_pred = np.asarray(bayes["y_pred"], dtype=np.float64)
+    units = result["units"]
+
+    fig, ax = plt.subplots(figsize=figsize)
+    extent = [t[0], t[-1], centers[0], centers[-1]]
+    ax.imshow(post.T, aspect="auto", origin="lower", extent=extent,
+              cmap="viridis", interpolation="nearest")
+    ax.plot(t, y_true, color="white", lw=1.0, alpha=0.9, label="actual")
+    ax.plot(t, y_pred, color="tab:red", lw=0.8, alpha=0.7, label="decoded (posterior mean)")
+    ax.set_xlabel("time (s, ephys)")
+    ax.set_ylabel(f"distance ({units})")
+    cv = bayes.get("cv_r2", float("nan"))
+    med = bayes.get("median_error", float("nan"))
+    ax.set_title(f"Bayesian distance posterior · {_title(result)} "
+                 f"(pooled R² = {cv:.3f}, median err = {med:.2f} {units})")
+    ax.legend(loc="upper right", fontsize=8)
     fig.tight_layout()
     return fig

@@ -82,6 +82,16 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Null baseline from a broken rate-distance pairing.")
     p.add_argument("--n_shuffles", type=int, default=100,
                    help="Circular shifts when --null shuffle.")
+    p.add_argument("--decoder", type=str, default="ridge",
+                   choices=["ridge", "both"],
+                   help="Population decoder: 'ridge' (linear) or 'both' (also "
+                        "run the Poisson Bayesian decoder over the distance "
+                        "tuning curves, reported under result['bayesian']).")
+    p.add_argument("--bayesian_estimate", type=str, default="expected",
+                   choices=["expected", "map"],
+                   help="Bayesian point estimate: posterior mean or MAP bin.")
+    p.add_argument("--no_bayesian_prior", action="store_true",
+                   help="Use a flat (not occupancy) prior in the Bayesian decoder.")
     p.add_argument("--seed", type=int, default=0,
                    help="Seed for the shuffle null.")
     p.add_argument("--output_dir", type=str, required=True,
@@ -99,7 +109,9 @@ def _build_parser() -> argparse.ArgumentParser:
 def _analyze_and_save(data: dict, output_dir: Path, *,
                       alpha: float, cv_folds: int, n_distance_bins: int,
                       tuning_smoothing_sigma: float,
-                      null: Optional[str], n_shuffles: int, seed: int) -> dict:
+                      null: Optional[str], n_shuffles: int, seed: int,
+                      decoder: str = "ridge", bayesian_estimate: str = "expected",
+                      bayesian_occupancy_prior: bool = True) -> dict:
     """Run ``_analyze`` on pre-binned data and write pickle + summary PNG."""
     result = _analyze(
         data["firing_rates"], data["distance"], data["nuisance"],
@@ -108,6 +120,8 @@ def _analyze_and_save(data: dict, output_dir: Path, *,
         n_distance_bins=n_distance_bins,
         tuning_smoothing_sigma=tuning_smoothing_sigma,
         null=(None if null == "none" else null), n_shuffles=n_shuffles,
+        decoder=decoder, bayesian_estimate=bayesian_estimate,
+        bayesian_occupancy_prior=bayesian_occupancy_prior,
         nuisance_names=data["nuisance_names"], seed=seed,
     )
 
@@ -126,9 +140,18 @@ def _analyze_and_save(data: dict, output_dir: Path, *,
             fig.savefig(png_path, dpi=150, bbox_inches="tight")
             plt.close(fig)
             logger.info("Wrote %s", png_path)
-        logger.info("CV R2=%.3f  RMSE=%.2f %s  null R2=%.3f",
-                    result["cv_r2"], result["rmse"], result["units"],
-                    result.get("null_r2", float("nan")))
+        logger.info("CV R2=%.3f (mean-fold)  pooled R2=%.3f  RMSE=%.2f %s  "
+                    "null R2=%.3f  vs-null=%.1f sigma",
+                    result["cv_r2"], result.get("cv_r2_pooled", float("nan")),
+                    result["rmse"], result["units"],
+                    result.get("null_r2", float("nan")),
+                    result.get("cv_r2_vs_null_z", float("nan")))
+        if result.get("bayesian") is not None:
+            b = result["bayesian"]
+            logger.info("Bayesian: pooled R2=%.3f  median_err=%.2f %s  null R2=%.3f",
+                        b.get("cv_r2", float("nan")),
+                        b.get("median_error", float("nan")), result["units"],
+                        b.get("null_r2", float("nan")))
     else:
         logger.warning("Decode status: %s", result.get("status"))
 
@@ -184,6 +207,8 @@ def main(argv: Optional[list] = None) -> int:
             n_distance_bins=args.n_distance_bins,
             tuning_smoothing_sigma=args.tuning_smoothing,
             null=args.null, n_shuffles=args.n_shuffles, seed=args.seed,
+            decoder=args.decoder, bayesian_estimate=args.bayesian_estimate,
+            bayesian_occupancy_prior=(not args.no_bayesian_prior),
         )
     except Exception as e:
         logger.exception("Analysis failed: %s", e)

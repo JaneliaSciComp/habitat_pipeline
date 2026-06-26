@@ -16,6 +16,10 @@ seaborn>=0.11.0
 # File I/O and data formats
 h5py>=3.6.0
 
+# NWB import (optional, for importing NWB-format datasets via ingestion/nwb_import.py)
+# pynwb is imported lazily; only required when loading .nwb files.
+pynwb>=3.0.0
+
 # Jupyter notebook support (optional, for interactive analysis)
 jupyter>=1.0.0
 ipykernel>=6.0.0

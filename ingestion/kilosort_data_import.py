@@ -92,6 +92,9 @@ class KilosortData:
     def get_firing_rates(self, bin_size_sec: float = 1.0) -> Dict[int, float]:
         """Calculate mean firing rate (Hz) for every cluster."""
         duration = self.duration_seconds
+        if duration <= 0:
+            # Degenerate recording (e.g. a single spike) — rate is undefined.
+            return {cid: 0.0 for cid in self.ks_ids}
         return {
             cid: len(self.spike_times_by_cell[i]) / duration
             for i, cid in enumerate(self.ks_ids)

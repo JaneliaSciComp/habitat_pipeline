@@ -180,8 +180,8 @@ class BehavioralEventsData:
             event_end_times = event_end_times[valid_mask]
             opponent_labels = opponent_labels[valid_mask]
 
-        print(f"✓ Found {len(event_start_times)} {behavior_type} events with opponent labels")
-        print(f"✓ Unique opponents: {np.unique(opponent_labels)}")
+        print(f"[OK] Found {len(event_start_times)} {behavior_type} events with opponent labels")
+        print(f"[OK] Unique opponents: {np.unique(opponent_labels)}")
         return event_start_times, event_end_times, opponent_labels
 
     @staticmethod
@@ -302,8 +302,8 @@ class BehavioralEventsData:
             return np.array([]), np.array([]), np.array([])
 
         composition = {op: group_map[op] for op in unique_opponents}
-        print(f"✓ Found {len(event_start_times)} {behavior_type} events with group labels")
-        print(f"✓ Group composition (relative to {animal_of_interest}): {composition}")
+        print(f"[OK] Found {len(event_start_times)} {behavior_type} events with group labels")
+        print(f"[OK] Group composition (relative to {animal_of_interest}): {composition}")
         return event_start_times, event_end_times, group_labels
 
     def extract_outcome_labels(
@@ -365,8 +365,8 @@ class BehavioralEventsData:
             return np.array([]), np.array([]), np.array([])
 
         scope = behavior_type if behavior_type is not None else 'aggressive'
-        print(f"✓ Found {len(event_start_times)} {scope} events with outcome labels")
-        print(f"✓ Outcome counts: {dict(zip(unique_outcomes, counts))}")
+        print(f"[OK] Found {len(event_start_times)} {scope} events with outcome labels")
+        print(f"[OK] Outcome counts: {dict(zip(unique_outcomes, counts))}")
         return event_start_times, event_end_times, outcome_labels
 
     def synchronize_with_ephys(

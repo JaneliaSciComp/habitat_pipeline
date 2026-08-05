@@ -298,7 +298,7 @@ def main():
 
     try:
         data_manager = DataStorageManager(args.animal_id, args.session_id, auto_load=True)
-        ks_data = load_kilosort_data(data_manager)
+        ks_data = load_kilosort_data(data_manager.get_kilosort_path())
         print(f"Loaded {len(ks_data.ks_ids)} ephys clusters")
 
         behavior_data = load_behavioral_events(

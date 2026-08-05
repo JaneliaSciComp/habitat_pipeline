@@ -289,6 +289,7 @@ def main():
     try:
         from ingestion.kilosort_data_import import load_kilosort_data
         from ingestion.data_paths import DataStorageManager
+        from ingestion.ephys_sync import DataSyncManager
         from video.behavioral_events import load_behavioral_events
     except ImportError as e:
         print(f"Import error: {e}")
@@ -306,6 +307,10 @@ def main():
             session_id=data_manager.session_id,
         )
         print(f"Loaded {len(behavior_data.events_data)} behavioral events")
+
+        print("Synchronizing behavioral events to ephys clock...")
+        sync = DataSyncManager(data_manager, dio_channel=1)
+        behavior_data.synchronize_with_ephys(sync, create_new_columns=True)
     except Exception as e:
         print(f"Error loading data: {e}")
         return 1

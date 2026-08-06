@@ -30,27 +30,53 @@ summary = rows[-1].result_summary_dict()
 ```
 
 State, in this order:
+
 1. **What was tested** (`analysis_module`, `params_dict()['behavior_type']` /
    `label_mode`, event counts from `unique_classes`/`n_events`).
-2. **The headline number** (`population_accuracy_mean` ± std, or `best_cell_accuracy`)
-   against chance (`1 / n_classes`).
-3. **Whether it's corrected for multiple comparisons.** Check
-   `summary.get('n_significant_cells')` / whether the run used `n_shuffles > 0`:
-   - If the rigor layer ran (`significance` was populated): report
-     `n_significant / n_tested` cells surviving Benjamini-Hochberg FDR — that's the
-     number that matters, not the raw "successful cells" count.
-   - If it did **not** run (`n_shuffles=0`, the default): say so explicitly and
-     recommend re-running via `run-analysis` with `n_shuffles>=200` before treating
-     "above chance" as a real finding. Do not report an uncorrected accuracy as if it
-     were a discovery — Phase 0's own synthetic demo showed exactly this over-calls
-     significance (9/24 flagged vs. 6 truly tuned cells).
+
+2. **The headline number against the right baseline.** Compare
+   `population_accuracy_mean` to **`baseline_accuracy`** (the majority-class rate),
+   *not* to `1 / n_classes`. With imbalanced classes these differ a lot and only the
+   former is honest: a real run reporting 60.6% accuracy on a 12/7 winner/loser split
+   was actually *below* its 63.2% majority-class baseline, while `1/n_classes` would
+   have called 50% "chance" and made it look like signal. If you want a metric whose
+   chance level really is `1/n_classes`, use `balanced_accuracy`.
+
+3. **The population-level p-value — usually the headline.**
+   `significance_population['p_value']` tests whether the population's mean accuracy
+   beats its label-permutation null. It is a *single* test, so it needs no FDR
+   correction and is well resolved even at modest `n_shuffles`. When events are few
+   (tens), this is the only decoding claim the data can actually support.
+
+4. **Whether the per-cell screen could have detected anything.** Check
+   `significance_resolution['resolvable']` **before** interpreting the per-cell count:
+   - `resolvable == False` → a null per-cell result is **uninformative, not evidence
+     of absence**. With `n_shuffles=200` across 149 cells the p-value floor is 1/201,
+     so the best reachable q is 0.74 — no single cell could pass at any effect size.
+     Say this explicitly and recommend a re-run at
+     `significance_resolution['recommended_n_shuffles']` or with `null_mode='pooled'`.
+     Do **not** report "0 significant cells" as a biological finding; that mistake was
+     made once already on this project.
+   - `resolvable == True` → report `n_significant / n_tested` surviving BH-FDR. That
+     is the number that matters, not the raw "successful cells" count.
+   - Rigor layer not run at all (`n_shuffles=0`, the default) → say so, and recommend
+     re-running before treating "above chance" as a finding. Phase 0's synthetic demo
+     showed a naive screen over-calls significance (9/24 flagged vs. 6 truly tuned).
 
 ## 2. Only then, look at the figures
 
 If PNGs exist (`figure_paths_list()`), read them for a **sanity check** against the
 numbers you already stated — e.g. does the confusion matrix / accuracy-distribution
 plot look consistent with the reported mean and best-cell accuracy — not as a source
-of new claims. If a figure needs real visual inspection (e.g. judging whether a
+of new claims.
+
+⚠️ **The saved decoding figures draw their chance line at `1/n_classes`** and their
+"Cells > Chance" counts against it (`ephys/decoding_plots.py`). On imbalanced classes
+that line sits *below* the honest majority-class baseline, so a figure can show most
+cells "above chance" for a result that doesn't beat naive guessing. Trust
+`baseline_accuracy` from step 2 over the plotted line, and say so if they conflict.
+
+If a figure needs real visual inspection (e.g. judging whether a
 rate-map or raster looks structured), delegate to the `interpreter` subagent
 (`.claude/agents/interpreter.md`) rather than reasoning over the image inline — it
 keeps image tokens out of the main conversation and it's built to follow the same
@@ -63,10 +89,16 @@ is itself worth reporting to the scientist.
 ## 3. Deliver a verdict, not a description
 
 End with one of:
-- "Real, corrected": significant cells survive FDR at a real `n_shuffles`.
-- "Suggestive, not yet corrected": accuracy is above chance but the rigor layer
-  hasn't run — recommend the re-run, don't call it a finding yet.
-- "Not supported": accuracy near chance / no cells survive correction.
+- **"Real, corrected"** — accuracy beats `baseline_accuracy`, the population-level
+  p-value is significant, and/or cells survive FDR in a `resolvable` screen.
+- **"Suggestive, not yet corrected"** — beats baseline but the rigor layer hasn't run.
+  Recommend the re-run; don't call it a finding yet.
+- **"Cannot tell — under-resolved"** — the per-cell screen wasn't `resolvable` and
+  there's no population-level p-value to fall back on. This is *distinct from* "not
+  supported": the analysis was incapable of answering, so the honest report is that
+  nothing was learned. Recommend the specific re-run configuration.
+- **"Not supported"** — accuracy at or below `baseline_accuracy`, and/or a
+  well-resolved test found nothing.
 
 If a `Hypothesis` is attached to this iteration, this verdict is what the scientist
 uses at the approval gate — say plainly whether you'd advance it, and why, in terms

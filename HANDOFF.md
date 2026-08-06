@@ -52,3 +52,38 @@ Built per the approved plan (`~/.claude/plans/vivid-wobbling-pillow.md`): the la
 **Test suite**: 233 passed, 1 skipped (was 217 before this pass), full run ~2 min (was ~14-20s for the original 104-test core suite; the 200-shuffle guardrail test is the main new cost, and it's a one-time regression check, not something re-run on every commit necessarily).
 
 **Next**: on a fresh session, actually invoke `/run-analysis` then `/interpret-results` conversationally to confirm the skills read as expected once loaded. After that, `propose-hypotheses`/`implement-module`/Coder is the natural next Phase 1 increment.
+
+> ⚠️ **Superseded in part by Phase 1.5 below.** The "0/148 cells survive FDR" figure above was an *artifact of an under-resolved permutation budget*, not a biological null. See the correction.
+
+## Phase 1.5 backbone — statistics correctness — done 2026-08-06
+
+A review of the Phase 1 work found three verified miscalibrations. All are now fixed. Sequencing rationale: an agent generating and screening hypotheses on top of a miscalibrated significance test is exactly the false-positive factory the design doc §5 exists to prevent, so this came before the remaining agentic pieces.
+
+**1. The FDR had no resolution to detect anything.** A permutation test floors p at `1/(n_shuffles+1)`; BH multiplies the smallest p by the number of tests. At `n_shuffles=200` across 149 cells the best achievable q was **0.74** — no cell could pass at any effect size, and ≥15 cells would have had to hit the p-floor simultaneously. The "0/148 significant" result was predetermined by the budget. New [`fdr_resolution()`](ephys/_stats_utils.py) computes this up front; `compute_population_significance` calls it, raises a `RuntimeWarning`, and returns the verdict as `results['significance_resolution']` so an under-resolved run is self-labelling. Two escape hatches added: `null_mode='pooled'` (ranks each cell against all cells' nulls pooled → ~150× finer p-floor at *identical* compute) and a properly-resolved single population-level test (below).
+
+**2. Accuracy was compared against the wrong baseline.** `chance_level = 1/n_classes` is prevalence-blind; the per-cell path returned no baseline at all. For the real 12-winner/7-loser split the majority-class baseline is **63.2%**, so the previously-reported 55.9–60.6% accuracies were at or *below* naive guessing. Added (purely additive) `baseline_accuracy` + `balanced_accuracy` per cell and `population_baseline_accuracy` + `population_balanced_accuracy_mean` per run, plus shared `print_baseline_block`/`print_significance_block` CLI reporters that flag "BELOW majority-class baseline" explicitly. Left alone by decision: `scoring='accuracy'` and `decoding_plots.py`'s `1/n_classes` chance lines (documented as a gotcha in CLAUDE.md instead of changing existing figures).
+
+**3. Campaign-level FDR was dead code.** `recompute_family_significance` reads a `p_value` from `result_summary` but nothing produced one. Now `results['significance_population']` gives one analysis-level permutation p-value (mean accuracy vs. its null) — **free**, since it reuses the retained null matrix. Being a single test it needs no correction and is well resolved at modest `n_shuffles`, which makes it the right headline when events are few. Subtlety handled: all cells now share one permutation per shuffle index, because independent per-cell permutations would shrink the population-mean null's variance by ~1/n_cells and make that test anti-conservative (there's a regression test for this).
+
+**Also fixed (pre-existing).** `ephys/social_spatial_fields.py`'s `_p_geq`/`_p_leq` used `k/n`, which returns exactly `p=0.0` when no shuffle beats the observed value — invalid from a finite permutation test, and it survives BH as `q=0` reading as infinite confidence. Now the add-one `(1+k)/(n+1)` form, consistent with the decoding path. **This turned out to be masking the same resolution bug**: four social-place-field tests only passed because `p=0.0` short-circuited a configuration (3 targets, 100 shuffles, `sig_alpha=0.01` → best q 0.030) that could never have classified a cell as tuned. Their shuffle budget is now 500. Note `compute_social_place_fields` does **not** yet self-check resolution — flagged in CLAUDE.md as a known gap.
+
+**Also fixed (found during verification).** Non-finite null draws — degenerate CV folds, common with few events — were being silently counted as "did not exceed", because `nan >= x` is False. That biases every p-value *downward*. Now `ephys._stats_utils.empirical_p_value` single-sources the add-one form and drops non-finite draws from both numerator and denominator; runs report `n_valid_shuffles`/`n_nan_draws`.
+
+**Test suite**: `slow` marker added to `pyproject.toml` (none existed). Fast pass `pytest -q -m "not slow"` → 253 passed, 1 skipped, 5 deselected in ~90 s (was ~170 s with everything inline). Heavy permutation tests run in the full pass.
+
+### First real finding — opponent identity is decodable from `EC` events
+
+With the corrected stack, animal 631 / session 20251216, `n_shuffles=200`:
+
+| run | accuracy | majority baseline | balanced acc (chance) | population p | per-cell FDR |
+|---|---|---|---|---|---|
+| `decode_event_outcome` (19 events, 12/7) | 60.6% ± 11.4% | **63.2%** — below | 54.3% (50%) | **0.114** | 0/148 |
+| `decode_opponent_identity` `EC` (173 events, 8 opponents), per-cell null | 28.8% ± 4.2% | 27.7% | 14.5% (12.5%) | **0.005** | **17/149** |
+| same, pooled null | 28.8% ± 4.2% | 27.7% | 14.5% (12.5%) | **0.005** | **16/149** |
+
+- **The outcome analysis is a clean, honest null**: accuracy below its own majority-class baseline and a non-significant population p-value. Consistent across every statistic, and now reported as such rather than as "55.9–60.6% accuracy, best cell 80–95%".
+- **The `EC` opponent analysis is a real effect**: observed mean 28.8% against a null of 25.5% ± 0.3% — roughly 11σ — with the population p-value pinned at its floor (no permutation beat the observed value), and 16–17 of 149 cells surviving per-cell FDR under *both* null modes. This is the project's first genuine positive finding, and it is the better-powered analysis (173 events, ~21/class) as predicted.
+- **The resolution guard behaved exactly as its analytics predicted.** It warned that 149 cells × 200 shuffles cannot resolve a *lone* significant cell — and indeed the 17 detections only got through because ≥15 cells hit the p-floor simultaneously, which is precisely the `min_tests_at_floor = 15` condition. Per-cell (17) and pooled (16) agreeing is a good cross-check. For a single-cell claim here, `n_shuffles≥2980` or the pooled null is still required.
+- **Campaign-level FDR now has inputs** (test family 3): q = 0.0075 for both `EC` runs, q = 0.114 for the outcome run.
+
+**Deferred, unchanged**: `propose-hypotheses`, `implement-module`, Coder subagent, the multi-session sweep (feasible — `get_animals_and_sessions(config_path)` yields 47 pairs across 2 cohorts; wants resumability since a rigor-on sweep is multi-hour), notebook read surface, and held-out-session enforcement (`Iteration.held_out` is still a column nobody checks).

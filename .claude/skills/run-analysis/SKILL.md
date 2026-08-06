@@ -72,23 +72,47 @@ smoke check or when you only need the printed summary + saved PNGs.
 
 ## 3. Turn on the rigor layer for anything a hypothesis rides on
 
-Both decoder wrappers now accept `n_shuffles` (default `0` = off), `alpha` (default
-`0.05`), `seed`. Leave `n_shuffles=0` for quick exploratory/cache-friendly runs. Before
-treating any "cells decode X" claim as real, re-run with `n_shuffles>=200` — this adds
-`results['significance']`, a `{cluster_id: {p_value, q_value, significant,
-n_shuffles}}` dict, computed via label-permutation + Benjamini-Hochberg FDR across
-cells (see `ephys/_lda_decoding.py::compute_population_significance`). This is not
-optional politeness — Phase 0's synthetic demo showed a naive accuracy-vs-chance
-screen over-calls significance (9/24 flagged vs. 6 truly tuned); the real-data smoke
-test in `docs/PHASE0_FINDINGS.md` showed the same pattern (146 "successful" cells,
-0 survive FDR at a coarse 20-shuffle resolution) — expect to need `n_shuffles>=200` for
-a stable read and treat a `None` `results['significance']` as "not yet corrected,"
-not "not significant."
+Both decoder wrappers accept `n_shuffles` (default `0` = off), `alpha` (default
+`0.05`), `seed`, and `null_mode` (`'per_cell'` default / `'pooled'`). Leave
+`n_shuffles=0` for quick exploratory/cache-friendly runs. When a claim rides on it,
+turn it on — it populates three keys (see
+`ephys/_lda_decoding.py::compute_population_significance`):
 
-Runtime: roughly linear in `n_cells * n_shuffles`; ~150 cells * 20 shuffles took ~25s
-end to end in Phase 1's real-data check, so 200 shuffles is a few minutes, not
-instant — don't block on it in the same turn if you can move on to something else
-first.
+| key | what it is |
+|---|---|
+| `significance` | `{cluster_id: {p_value, q_value, significant, n_shuffles}}`, BH-FDR across cells |
+| `significance_population` | one well-resolved test of population mean accuracy vs. its null — needs no FDR |
+| `significance_resolution` | whether the per-cell screen *could* detect anything at this budget |
+
+### Pick `n_shuffles` from the math, not by habit
+
+**Do not just default to 200.** BH multiplies the smallest p-value by the number of
+cells, and a permutation test floors p at `1/(n_shuffles+1)`. Across 149 cells,
+`n_shuffles=200` gives a best-achievable q of **0.74** — no cell can ever be
+significant, so a null result means nothing. Check first:
+
+```python
+from ephys._stats_utils import fdr_resolution
+fdr_resolution(n_tests=149, n_shuffles=200, alpha=0.05)
+# -> {'resolvable': False, 'recommended_n_shuffles': 2980, 'min_tests_at_floor': 15, ...}
+```
+
+Three ways to get a real answer, cheapest first:
+1. **`null_mode='pooled'`** — ranks each cell against all cells' nulls pooled
+   (`n_cells * n_shuffles` draws), so the p-floor drops by ~the cell count at
+   *identical* compute. Assumes cells share a null; good for a screen, slightly
+   anti-conservative for atypical (very low firing rate) cells.
+2. **Lean on `significance_population`** — a single test, well resolved at 200
+   shuffles. With few events (tens) this is the only claim the data supports.
+3. **Raise `n_shuffles`** to `recommended_n_shuffles` — correct but expensive
+   (~2980 shuffles on 149 cells is roughly an hour and a half).
+
+The function warns loudly when a run is under-resolved; don't ignore it, and never
+report "0 significant cells" from an under-resolved run as a biological result.
+
+Runtime: roughly linear in `n_cells * n_shuffles`. ~150 cells × 200 shuffles took
+~370 s on this workstation, so plan for minutes, not seconds — don't block on it in
+the same turn if you can do something else first.
 
 ## 4. Log the run to the lab notebook
 
@@ -100,19 +124,31 @@ params = {
     'animal_of_interest': animal_id, 'behavior_type': behavior_type,
     'time_window': time_window, 'time_bin_size': time_bin_size,
     'cv_folds': cv_folds, 'n_shuffles': n_shuffles, 'alpha': alpha,
+    'null_mode': null_mode,
 }
+population = results.get('significance_population') or {}
+resolution = results.get('significance_resolution') or {}
 result_summary = {
     'status': results['status'],
     'n_successful_cells': results.get('n_successful_cells'),
     'n_total_cells': results.get('n_total_cells'),
     'population_accuracy_mean': results.get('population_accuracy_mean'),
     'population_accuracy_std': results.get('population_accuracy_std'),
+    # The honest comparison point — NOT 1/n_classes.
+    'baseline_accuracy': results.get('population_baseline_accuracy'),
+    'balanced_accuracy': results.get('population_balanced_accuracy_mean'),
     'best_cell_accuracy': results.get('best_cell_accuracy'),
     'best_cell_id': results.get('best_cell_id'),
     'unique_classes': results.get('behavioral_summary', {}).get('unique_classes'),
     'n_events': results.get('behavioral_summary', {}).get('n_events'),
     'n_significant_cells': sum(v['significant'] for v in results['significance'].values())
                             if results.get('significance') else None,
+    # `p_value` is the key LabNotebook.recompute_family_significance reads for
+    # campaign-level FDR — always include it when the rigor layer ran.
+    'p_value': population.get('p_value'),
+    'population_null_mean': population.get('null_mean'),
+    'fdr_resolvable': resolution.get('resolvable'),
+    'recommended_n_shuffles': resolution.get('recommended_n_shuffles'),
 }
 iteration = nb.log_iteration(
     'ephys.decode_opponent_identity', params, result_summary,

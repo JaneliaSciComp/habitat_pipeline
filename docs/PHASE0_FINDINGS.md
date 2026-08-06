@@ -110,6 +110,16 @@ Best cell accuracy: 36.4% (Cell ID: 1167)
 
 8-way classification at 25.2% (chance = 12.5%) is a real, above-chance, well-formed result — the fix and the decoder are validated end-to-end on real data.
 
+### ⚠️ Correction (2026-08-06): the "0 significant cells" figure below was an artifact
+
+A later review found the Phase 1 rigor-layer verification was **statistically under-resolved**, so its headline number does not mean what it appears to. With `n_shuffles=200` a permutation p-value cannot go below `1/201`, and Benjamini-Hochberg multiplies the smallest p-value by the number of cells — so across 149 cells the best achievable q was **0.74**. No cell could have been called significant at *any* effect size; at least 15 cells would have had to hit the p-value floor simultaneously. **"0/148 significant" was predetermined by the permutation budget, not a finding about the data.** It is corrected here rather than deleted because the mistake is instructive: it is exactly the kind of false conclusion the rigor layer exists to prevent, reached *using* the rigor layer.
+
+Two further miscalibrations were found at the same time:
+- Reported accuracy was compared against `1/n_classes` (50%) when the honest majority-class baseline for the 12-winner/7-loser split was **63.2%** — the 55.9–60.6% accuracies quoted below are at or *below* naive guessing.
+- No analysis produced a single analysis-level p-value, so the lab notebook's campaign-level FDR had no inputs.
+
+All three are addressed in Phase 1.5 (see `HANDOFF.md`): `ephys/_stats_utils.fdr_resolution` now refuses to let an under-resolved run pass silently, `null_mode='pooled'` buys ~150× resolution at the same compute, `significance_population` provides a properly-resolved single test, and `baseline_accuracy`/`balanced_accuracy` are reported alongside accuracy.
+
 ### What this means for the build
 - **The REAL leg is now genuinely green for both decoders**: `decode_event_outcome` (real classes, 55.9%±11.1% accuracy) and `decode_opponent_identity` (8-way, 25.2%±3.6% accuracy, above the 12.5% chance level).
 - **Not a Runner/agent-architecture problem** — the fixes were small, localized, and consistent with patterns already established elsewhere in the repo (`gui/loaders.py`, the `CLAUDE.md` gotcha list). Confirms the earlier read: the code is healthy and agent-drivable, and an agent-run Phase 1 loop would have caught and could plausibly have proposed these same fixes.

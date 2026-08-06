@@ -212,25 +212,44 @@ def check_loop(rep: Reporter, seed: int) -> None:
     naive_hits = int(np.sum(accs > chance + 0.05))
     print(f"\n  naive screen (acc > chance+0.05): {naive_hits} 'significant' "
           f"cells vs {n_tuned} truly tuned")
-    try:
-        # Permutation-free illustrative correction: treat accuracy as a z-like
-        # score and apply Benjamini-Hochberg over per-cell p's from a binomial
-        # approximation. (Real pipeline should use label-permutation nulls.)
-        from math import comb
-        n_ev = len(labels)
-        k = np.clip((accs * n_ev).round().astype(int), 0, n_ev)
-        p = np.array([sum(comb(n_ev, j) for j in range(ki, n_ev + 1))
-                      / 2 ** n_ev for ki in k])
-        from statsmodels.stats.multitest import fdrcorrection
-        rej, _ = fdrcorrection(p, alpha=0.05)
-        print(f"  FDR-corrected (BH, alpha=0.05)   : {int(rej.sum())} "
-              "significant cells")
-        note = (f"naive {naive_hits} -> FDR {int(rej.sum())} "
-                f"(truth {n_tuned}); correction matters")
-    except Exception:  # noqa: BLE001  (statsmodels optional)
-        print("  [statsmodels not installed -> skipped FDR illustration]")
-        note = (f"naive screen flagged {naive_hits} vs {n_tuned} true; "
-                "apply FDR/Bonferroni in the loop")
+    # Real label-permutation nulls (Phase 1.5). This used to be a binomial
+    # approximation gated behind an optional statsmodels import, which meant it
+    # silently skipped on this workstation; the pipeline now has the real thing.
+    import warnings as _warnings
+
+    from ephys._lda_decoding import compute_population_significance
+    from ephys._stats_utils import fdr_resolution
+
+    # The resolution trap first: a permutation budget too small for the number
+    # of cells makes a null result meaningless whatever the effect sizes are.
+    n_shuffles = 200
+    res = fdr_resolution(len(ok_ids), n_shuffles, 0.05)
+    print(f"  resolution ({len(ok_ids)} cells x {n_shuffles} shuffles, per-cell null): "
+          f"p-floor {res['p_floor']:.3g}, best achievable q {res['best_achievable_q']:.3g} -> "
+          f"{'RESOLVABLE' if res['resolvable'] else 'UNDER-RESOLVED'}")
+    if not res['resolvable']:
+        print(f"    -> needs n_shuffles>={res['recommended_n_shuffles']}, or "
+              f">={res['min_tests_at_floor']} cells at the floor, or null_mode='pooled'")
+
+    # Pooled null: ~n_cells finer p-floor at identical compute.
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("ignore", RuntimeWarning)
+        sig = compute_population_significance(
+            spike_times_list, cluster_ids, event_times, labels,
+            successful_cluster_ids=ok_ids,
+            time_window=(0.0, 1.0), time_bin_size=0.25, cv_folds=5,
+            n_shuffles=n_shuffles, alpha=0.05, seed=seed, null_mode='pooled')
+
+    n_sig = sum(1 for v in sig['per_cell'].values() if v['significant'])
+    pop = sig['population']
+    print(f"  FDR-corrected (BH, pooled null, alpha=0.05): {n_sig} significant "
+          f"cells vs {n_tuned} truly tuned")
+    print(f"  population-level permutation test: p = {pop['p_value']:.4g} "
+          f"(observed {pop['observed_mean_accuracy']:.3f} vs null "
+          f"{pop['null_mean']:.3f} +/- {pop['null_std']:.3f})")
+
+    note = (f"naive {naive_hits} -> FDR {n_sig} (truth {n_tuned}); "
+            f"population p={pop['p_value']:.3g}; correction matters")
 
     rep.record("LOOP: runner+interpreter", "PASS", "result-dict produced")
     rep.record("LOOP: rigor guardrail", "INFO", note)

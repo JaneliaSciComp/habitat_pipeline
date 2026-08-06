@@ -44,5 +44,10 @@ gui = [
 [project.urls]
 Homepage = "https://github.com/JaneliaSciComp/habitat_pipeline"
 
+[tool.pytest.ini_options]
+markers = [
+    "slow: heavy permutation/shuffle tests; skip with -m 'not slow'",
+]
+
 [tool.setuptools.packages.find]
 include = ["ingestion*", "video*", "ephys*", "database*", "gui*"]

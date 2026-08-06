@@ -34,7 +34,12 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from ephys._rate_tensor import event_aligned_rates
-from ephys._stats_utils import benjamini_hochberg
+from ephys._stats_utils import (
+    benjamini_hochberg,
+    empirical_p_value,
+    fdr_resolution,
+    majority_class_baseline,
+)
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import (
@@ -104,8 +109,15 @@ def _prepare_lda_features(spike_times: np.ndarray,
 def _cv_lda_accuracy(features_scaled: np.ndarray,
                      labels: np.ndarray,
                      counts: np.ndarray,
-                     cv_folds) -> np.ndarray:
-    """Cross-validated LDA accuracy scores for one cell's features/labels."""
+                     cv_folds,
+                     scoring: str = 'accuracy') -> np.ndarray:
+    """Cross-validated LDA scores for one cell's features/labels.
+
+    ``scoring`` defaults to plain ``'accuracy'`` (what every existing caller
+    expects); pass ``'balanced_accuracy'`` for the prevalence-corrected
+    variant, which is what to compare against 1/n_classes when classes are
+    imbalanced.
+    """
     if cv_folds == 'loo' or cv_folds == -1:
         cv = LeaveOneOut()
     else:
@@ -114,7 +126,7 @@ def _cv_lda_accuracy(features_scaled: np.ndarray,
     lda = LinearDiscriminantAnalysis()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return cross_val_score(lda, features_scaled, labels, cv=cv, scoring='accuracy')
+        return cross_val_score(lda, features_scaled, labels, cv=cv, scoring=scoring)
 
 
 def single_cell_lda_decode(spike_times: np.ndarray,
@@ -128,13 +140,25 @@ def single_cell_lda_decode(spike_times: np.ndarray,
 
     Returns the standard cell-result dict with keys: ``accuracy``,
     ``accuracy_std``, ``n_events``, ``n_classes``, ``class_counts``,
-    ``confusion_matrix``, ``cv_scores``, ``status``.
+    ``confusion_matrix``, ``cv_scores``, ``status``, plus two
+    prevalence-aware additions:
+
+    - ``baseline_accuracy`` — accuracy from always guessing the majority
+      class. **This, not ``1/n_classes``, is what ``accuracy`` must beat**
+      when classes are imbalanced: for a 12/7 split the majority baseline is
+      63.2% while ``1/n_classes`` would say 50%.
+    - ``balanced_accuracy`` — mean per-class recall, i.e. the
+      prevalence-corrected score, whose chance level *is* ``1/n_classes``.
+      ``nan`` where it can't be computed (e.g. leave-one-out folds).
     """
     unique_labels, counts = np.unique(labels, return_counts=True)
+    baseline = majority_class_baseline(labels)
     if len(unique_labels) < 2 or np.min(counts) < min_events_per_class:
         return {
             'accuracy': np.nan,
             'accuracy_std': np.nan,
+            'baseline_accuracy': baseline,
+            'balanced_accuracy': np.nan,
             'n_events': len(event_times),
             'n_classes': len(unique_labels),
             'class_counts': dict(zip(unique_labels, counts)),
@@ -150,6 +174,8 @@ def single_cell_lda_decode(spike_times: np.ndarray,
             return {
                 'accuracy': np.nan,
                 'accuracy_std': np.nan,
+                'baseline_accuracy': baseline,
+                'balanced_accuracy': np.nan,
                 'n_events': len(event_times),
                 'n_classes': len(unique_labels),
                 'class_counts': dict(zip(unique_labels, counts)),
@@ -160,6 +186,12 @@ def single_cell_lda_decode(spike_times: np.ndarray,
 
         cv_scores = _cv_lda_accuracy(features_scaled, labels, counts, cv_folds)
 
+        try:
+            balanced = float(np.mean(_cv_lda_accuracy(
+                features_scaled, labels, counts, cv_folds, scoring='balanced_accuracy')))
+        except Exception:
+            balanced = np.nan
+
         lda = LinearDiscriminantAnalysis()
         lda.fit(features_scaled, labels)
         predictions = lda.predict(features_scaled)
@@ -168,6 +200,8 @@ def single_cell_lda_decode(spike_times: np.ndarray,
         return {
             'accuracy': float(np.mean(cv_scores)),
             'accuracy_std': float(np.std(cv_scores)),
+            'baseline_accuracy': baseline,
+            'balanced_accuracy': balanced,
             'n_events': len(event_times),
             'n_classes': len(unique_labels),
             'class_counts': dict(zip(unique_labels, counts)),
@@ -180,6 +214,8 @@ def single_cell_lda_decode(spike_times: np.ndarray,
         return {
             'accuracy': np.nan,
             'accuracy_std': np.nan,
+            'baseline_accuracy': baseline,
+            'balanced_accuracy': np.nan,
             'n_events': len(event_times),
             'n_classes': len(unique_labels) if 'unique_labels' in locals() else 0,
             'class_counts': dict(zip(unique_labels, counts)) if 'unique_labels' in locals() else {},
@@ -203,37 +239,76 @@ def compute_population_significance(spike_times_list: Sequence[np.ndarray],
                                      cv_folds=5,
                                      n_shuffles: int = 200,
                                      alpha: float = 0.05,
-                                     seed: int = 0) -> Dict:
-    """Label-permutation significance + Benjamini-Hochberg FDR for a per-cell decode.
+                                     seed: int = 0,
+                                     null_mode: str = 'per_cell') -> Dict:
+    """Label-permutation significance for a per-cell decode, at two granularities.
 
     Re-decodes each of ``successful_cluster_ids`` under ``n_shuffles`` random
     label permutations. Features don't depend on labels, so they are computed
     once per cell (via ``_prepare_lda_features``) and reused across shuffles;
-    only the label vector and the CV/LDA refit change per shuffle. The
-    observed accuracy's empirical rank against its null distribution gives a
-    per-cell p-value, and ``benjamini_hochberg`` corrects across cells.
+    only the label vector and the CV/LDA refit change per shuffle.
 
-    This is the within-run multiple-comparison guardrail Phase 0 flagged as
-    missing: testing many cells at once inflates false positives if accuracy
-    is screened against chance without correction (Phase 0's synthetic demo
-    found a naive screen flagged 9/24 cells vs. 6 truly tuned).
+    Returns a structured dict with three parts:
 
-    Assumptions: labels are exchangeable under the null (no residual
-    structure, e.g. temporal autocorrelation, ties label identity to event
-    order); BH-FDR controls the expected false-discovery *proportion* across
-    the tested cells, not each cell's individual Type-I error rate.
+    ``'per_cell'``
+        ``{cluster_id: {'p_value', 'q_value', 'significant', 'n_shuffles'}}`` —
+        each cell's accuracy ranked against a null, BH-FDR corrected across
+        cells. This is the within-run multiple-comparison guardrail Phase 0
+        flagged as missing (its synthetic demo found a naive
+        accuracy-vs-chance screen flagged 9/24 cells vs. 6 truly tuned).
+    ``'population'``
+        ``{'p_value', 'observed_mean_accuracy', 'null_mean', 'null_std',
+        'n_shuffles'}`` — one test of whether the *population mean* accuracy
+        exceeds its permutation null. Free, since it reuses the same null
+        matrix. Being a single test it needs no FDR correction and is well
+        resolved at modest ``n_shuffles``, which makes it the appropriate
+        headline statistic when the per-cell screen is under-resolved (see
+        below) or when events are few.
+    ``'resolution'``
+        ``ephys._stats_utils.fdr_resolution`` output for this run, plus
+        ``null_mode``. **Read this before interpreting a null per-cell
+        result**: if ``resolvable`` is False, no single cell could have
+        reached ``q < alpha`` regardless of effect size, so zero significant
+        cells says nothing about the data. A warning is also raised in that
+        case.
 
-    Returns ``{cluster_id: {'p_value', 'q_value', 'significant', 'n_shuffles'}}``
-    for cells where features could be computed (should be all of
-    ``successful_cluster_ids``, since they already decoded successfully with
-    this same feature/label combination).
+    ``null_mode``:
+
+    - ``'per_cell'`` (default) — each cell is ranked against its own
+      ``n_shuffles`` null draws. No cross-cell assumption, but the p-value
+      floor is ``1/(n_shuffles+1)``, which BH multiplies by the number of
+      cells; for a few hundred cells this needs thousands of shuffles to
+      resolve.
+    - ``'pooled'`` — every cell is ranked against the null accuracies of
+      *all* cells pooled (``n_cells * n_shuffles`` draws), lowering the
+      p-value floor by roughly the cell count at identical compute. Assumes
+      cells share a common null accuracy distribution; that is reasonable
+      for a screen but can be anti-conservative for atypical cells (e.g.
+      very low firing rates, whose null is wider).
+
+    Assumptions: labels are exchangeable under the null (nothing else, such
+    as temporal autocorrelation, ties label identity to event order). One
+    permutation is drawn per shuffle index and **shared across all cells**,
+    so the pooled and population-level nulls stay valid permutation nulls of
+    a coherent relabeling — drawing independent permutations per cell would
+    shrink the population-mean null's variance and make that test
+    anti-conservative. BH-FDR controls the expected false-discovery
+    *proportion* across tested cells, not per-cell Type-I error.
     """
+    if null_mode not in ('per_cell', 'pooled'):
+        raise ValueError(f"null_mode must be 'per_cell' or 'pooled', got {null_mode!r}")
+
     _, counts = np.unique(labels, return_counts=True)
     rng = np.random.default_rng(seed)
     n_events = len(labels)
     spikes_by_cluster = dict(zip(cluster_ids, spike_times_list))
 
-    p_values: Dict = {}
+    # One permutation per shuffle index, shared by every cell (see docstring).
+    perms = [rng.permutation(n_events) for _ in range(n_shuffles)]
+
+    tested_ids: List = []
+    observed: List[float] = []
+    null_rows: List[np.ndarray] = []
     for cluster_id in successful_cluster_ids:
         features_scaled = _prepare_lda_features(
             spikes_by_cluster[cluster_id], event_times, time_window, time_bin_size
@@ -241,32 +316,146 @@ def compute_population_significance(spike_times_list: Sequence[np.ndarray],
         if features_scaled is None:
             continue
 
-        observed_acc = float(np.mean(_cv_lda_accuracy(features_scaled, labels, counts, cv_folds)))
+        tested_ids.append(cluster_id)
+        observed.append(
+            float(np.mean(_cv_lda_accuracy(features_scaled, labels, counts, cv_folds)))
+        )
+        null_rows.append(np.array([
+            float(np.mean(_cv_lda_accuracy(features_scaled, labels[perm], counts, cv_folds)))
+            for perm in perms
+        ], dtype=np.float64))
 
-        n_ge = 0
-        for _ in range(n_shuffles):
-            perm_labels = labels[rng.permutation(n_events)]
-            null_acc = float(np.mean(_cv_lda_accuracy(features_scaled, perm_labels, counts, cv_folds)))
-            if null_acc >= observed_acc:
-                n_ge += 1
+    if not tested_ids:
+        return {'per_cell': {}, 'population': None,
+                'resolution': fdr_resolution(1, max(n_shuffles, 1), alpha) | {'null_mode': null_mode}}
 
-        p_values[cluster_id] = (1 + n_ge) / (n_shuffles + 1)
+    observed_arr = np.array(observed, dtype=np.float64)
+    null_matrix = np.vstack(null_rows)  # (n_cells, n_shuffles)
+    n_cells = len(tested_ids)
 
-    if not p_values:
-        return {}
+    resolution = fdr_resolution(n_cells, n_shuffles, alpha)
+    resolution['null_mode'] = null_mode
+    if null_mode == 'pooled':
+        # Pooling lowers the achievable p-floor by the cell count.
+        resolution = fdr_resolution(n_cells, n_cells * n_shuffles, alpha)
+        resolution['null_mode'] = null_mode
+        resolution['n_shuffles_requested'] = n_shuffles
+    if not resolution['resolvable']:
+        warnings.warn(
+            f"Under-resolved per-cell FDR: {n_cells} cells x {n_shuffles} shuffles gives a "
+            f"p-value floor of {resolution['p_floor']:.2g}, so the best achievable q is "
+            f"{resolution['best_achievable_q']:.2g} (>= alpha={alpha}). No single cell can reach "
+            f"significance regardless of effect size; at least {resolution['min_tests_at_floor']} "
+            f"cells must hit the floor simultaneously. Use n_shuffles>="
+            f"{resolution['recommended_n_shuffles']}, or null_mode='pooled', or rely on the "
+            f"population-level p-value instead.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
-    tested_ids = list(p_values.keys())
-    q_values = benjamini_hochberg(np.array([p_values[cid] for cid in tested_ids]))
+    # `empirical_p_value` uses the add-one form and drops non-finite draws from
+    # both numerator and denominator — see its docstring for why that matters.
+    if null_mode == 'pooled':
+        pooled = null_matrix.ravel()
+        p_values = np.array([empirical_p_value(obs, pooled) for obs in observed_arr])
+    else:
+        p_values = np.array([
+            empirical_p_value(observed_arr[i], null_matrix[i]) for i in range(n_cells)
+        ])
+
+    n_nan_draws = int(np.sum(~np.isfinite(null_matrix)))
+    q_values = benjamini_hochberg(p_values)
+
+    # Population-level test: mean accuracy across cells vs. its own null.
+    # Free — the per-shuffle means of the retained null matrix.
+    observed_mean = float(np.nanmean(observed_arr))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN column
+        null_means = np.nanmean(null_matrix, axis=0)
+    valid_means = null_means[np.isfinite(null_means)]
+    population = {
+        'p_value': empirical_p_value(observed_mean, null_means),
+        'observed_mean_accuracy': observed_mean,
+        'null_mean': float(np.mean(valid_means)) if valid_means.size else np.nan,
+        'null_std': float(np.std(valid_means)) if valid_means.size else np.nan,
+        'n_shuffles': n_shuffles,
+        'n_valid_shuffles': int(valid_means.size),
+        'n_cells': n_cells,
+        'n_nan_draws': n_nan_draws,
+    }
 
     return {
-        cluster_id: {
-            'p_value': float(p_values[cluster_id]),
-            'q_value': float(q_value),
-            'significant': bool(q_value < alpha),
-            'n_shuffles': n_shuffles,
-        }
-        for cluster_id, q_value in zip(tested_ids, q_values)
+        'per_cell': {
+            cluster_id: {
+                'p_value': float(p),
+                'q_value': float(q),
+                'significant': bool(q < alpha),
+                'n_shuffles': n_shuffles,
+            }
+            for cluster_id, p, q in zip(tested_ids, p_values, q_values)
+        },
+        'population': population,
+        'resolution': resolution,
     }
+
+
+# ---------------------------------------------------------------------------
+# Shared CLI reporting for the rigor layer
+# ---------------------------------------------------------------------------
+
+def print_baseline_block(results: Dict) -> None:
+    """Print the prevalence-aware baseline next to the reported accuracy.
+
+    Exists because plain accuracy against imbalanced classes is easy to
+    over-read: a 60.6% accuracy looks like signal until you see the
+    majority-class baseline is 63.2%.
+    """
+    baseline = results.get('population_baseline_accuracy')
+    if baseline is None or not np.isfinite(baseline):
+        return
+    accuracy = results.get('population_accuracy_mean', np.nan)
+    verdict = ''
+    if np.isfinite(accuracy):
+        verdict = ('  <-- BELOW majority-class baseline'
+                   if accuracy < baseline else '')
+    print(f"Majority-class baseline: {baseline:.1%}{verdict}")
+    balanced = results.get('population_balanced_accuracy_mean')
+    if balanced is not None and np.isfinite(balanced):
+        # `unique_classes` is a numpy array — no truthiness tests on it.
+        classes = results.get('behavioral_summary', {}).get('unique_classes')
+        n_classes = len(classes) if classes is not None else 0
+        chance = f" (chance = {1.0 / n_classes:.1%})" if n_classes else ""
+        print(f"Balanced accuracy (mean): {balanced:.1%}{chance}")
+
+
+def print_significance_block(results: Dict, alpha: float) -> None:
+    """Print the population-level p-value, per-cell FDR count, and — crucially —
+    whether the per-cell screen had the resolution to detect anything."""
+    population = results.get('significance_population')
+    if population:
+        print(f"Population-level permutation test: p = {population['p_value']:.4g} "
+              f"(observed mean {population['observed_mean_accuracy']:.1%} vs null "
+              f"{population['null_mean']:.1%} ± {population['null_std']:.1%}, "
+              f"{population.get('n_valid_shuffles', population['n_shuffles'])} "
+              f"usable shuffles)")
+        if population.get('n_nan_draws'):
+            print(f"  (note: {population['n_nan_draws']} non-finite null draws excluded — "
+                  f"degenerate CV folds, expected with few events)")
+
+    significance = results.get('significance')
+    if significance:
+        n_sig = sum(1 for v in significance.values() if v['significant'])
+        print(f"Significant cells after FDR correction (q < {alpha}): "
+              f"{n_sig}/{len(significance)}")
+
+    resolution = results.get('significance_resolution')
+    if resolution and not resolution.get('resolvable', True):
+        print(f"  [!] Per-cell screen UNDER-RESOLVED: {resolution['n_tests']} cells x "
+              f"{resolution['n_shuffles']} shuffles -> p-floor {resolution['p_floor']:.2g}, "
+              f"best achievable q {resolution['best_achievable_q']:.2g} >= alpha {resolution['alpha']}.")
+        print(f"      A null per-cell result here is UNINFORMATIVE, not evidence of absence. "
+              f"Use --n_shuffles {resolution['recommended_n_shuffles']}, --null_mode pooled, "
+              f"or read the population-level p-value above.")
 
 
 # ---------------------------------------------------------------------------

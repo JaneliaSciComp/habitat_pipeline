@@ -46,10 +46,13 @@ from ephys._lda_decoding import (
     align_spikes_to_events,
     compute_population_significance,
     extract_firing_rate_features,
+    print_baseline_block,
+    print_significance_block,
     run_population_per_cell_decode,
     run_time_resolved_population_decode,
     single_cell_lda_decode,
 )
+from ephys._stats_utils import majority_class_baseline
 from ingestion.kilosort_data_import import _DEFAULT_QUALITY_THRESHOLDS
 from ephys.decoding_plots import (
     plot_best_cells_decoding,
@@ -124,14 +127,20 @@ def decode_opponent_identity_population(ks_data,
                                         label_mode: str = 'opponent',
                                         n_shuffles: int = 0,
                                         alpha: float = 0.05,
-                                        seed: int = 0) -> Dict:
+                                        seed: int = 0,
+                                        null_mode: str = 'per_cell') -> Dict:
     """Decode opponent identity across the population (per-cell LDA).
 
     ``n_shuffles`` (default 0, i.e. off) opts into the rigor layer: a
     label-permutation significance test + Benjamini-Hochberg FDR correction
     across cells (see ``ephys._lda_decoding.compute_population_significance``).
-    When enabled, ``results['significance']`` is a ``{cluster_id: {...}}``
-    dict; when off, it is ``None`` and every other key is unchanged.
+    When enabled it populates three keys — ``significance`` (per-cell dict),
+    ``significance_population`` (the single well-resolved population-level
+    test, the right headline when events are few), and
+    ``significance_resolution`` (**check ``resolvable`` before reading a null
+    per-cell result as biology**). ``null_mode='pooled'`` trades a shared-null
+    assumption for ~n_cells better p-value resolution at the same compute.
+    When off, all three are ``None`` and every other key is unchanged.
     """
     if label_mode not in ('opponent', 'group'):
         raise ValueError(f"label_mode must be 'opponent' or 'group', got {label_mode!r}")
@@ -185,9 +194,12 @@ def decode_opponent_identity_population(ks_data,
     )
 
     significance = None
+    significance_population = None
+    significance_resolution = None
     if n_shuffles > 0 and successful_cluster_ids:
-        print(f"Computing label-permutation significance ({n_shuffles} shuffles)...")
-        significance = compute_population_significance(
+        print(f"Computing label-permutation significance ({n_shuffles} shuffles, "
+              f"null_mode={null_mode})...")
+        sig = compute_population_significance(
             spike_times_list=spike_times_list,
             cluster_ids=selected_cluster_ids,
             event_times=event_times,
@@ -199,9 +211,16 @@ def decode_opponent_identity_population(ks_data,
             n_shuffles=n_shuffles,
             alpha=alpha,
             seed=seed,
+            null_mode=null_mode,
         )
+        significance = sig['per_cell']
+        significance_population = sig['population']
+        significance_resolution = sig['resolution']
 
     n_total = len(selected_cluster_ids)
+    baseline_accuracy = majority_class_baseline(opponent_labels)
+    balanced = [r['balanced_accuracy'] for r in cell_results.values()
+                if r.get('status') == 'success' and np.isfinite(r.get('balanced_accuracy', np.nan))]
     return {
         'cell_results': cell_results,
         'successful_cells': successful_cluster_ids,
@@ -213,9 +232,13 @@ def decode_opponent_identity_population(ks_data,
         'population_accuracy_median': float(np.median(accuracies)) if accuracies else np.nan,
         'best_cell_accuracy': float(np.max(accuracies)) if accuracies else np.nan,
         'best_cell_id': successful_cluster_ids[int(np.argmax(accuracies))] if accuracies else None,
+        'population_baseline_accuracy': baseline_accuracy,
+        'population_balanced_accuracy_mean': float(np.mean(balanced)) if balanced else np.nan,
         'event_times': event_times,
         'labels': opponent_labels,
         'significance': significance,
+        'significance_population': significance_population,
+        'significance_resolution': significance_resolution,
         'parameters': {
             'animal_of_interest': animal_of_interest,
             'behavior_type': behavior_type,
@@ -229,6 +252,7 @@ def decode_opponent_identity_population(ks_data,
             'label_mode': label_mode,
             'n_shuffles': n_shuffles,
             'alpha': alpha,
+            'null_mode': null_mode,
             'class_label': _CLASS_LABEL,
             'analysis_title': _ANALYSIS_TITLE,
         },
@@ -345,6 +369,11 @@ def main():
                              '(0 = off, the default; e.g. 200 for a real significance pass)')
     parser.add_argument('--alpha', type=float, default=0.05,
                         help='FDR threshold for the rigor-layer significance test')
+    parser.add_argument('--null_mode', type=str, default='per_cell',
+                        choices=['per_cell', 'pooled'],
+                        help="Per-cell null (exact, resolution-limited) vs pooled across cells "
+                             "(~n_cells better p-value resolution at the same compute, assumes "
+                             "cells share a null)")
     parser.add_argument('--save_plots', action='store_true', help='Save plots to files')
     parser.add_argument('--output_dir', type=str, help='Output directory for plots')
 
@@ -395,6 +424,7 @@ def main():
         cv_folds=args.cv_folds,
         n_shuffles=args.n_shuffles,
         alpha=args.alpha,
+        null_mode=args.null_mode,
     )
 
     if results['status'] != 'success':
@@ -405,13 +435,10 @@ def main():
     print(f"Successful cells: {results['n_successful_cells']}/{results['n_total_cells']}")
     print(f"Population accuracy: {results['population_accuracy_mean']:.1%} "
           f"± {results['population_accuracy_std']:.1%}")
+    print_baseline_block(results)
     print(f"Best cell accuracy: {results['best_cell_accuracy']:.1%} "
           f"(Cell ID: {results['best_cell_id']})")
-
-    if results.get('significance'):
-        n_sig = sum(1 for v in results['significance'].values() if v['significant'])
-        print(f"Significant cells after FDR correction (q < {args.alpha}): "
-              f"{n_sig}/{len(results['significance'])}")
+    print_significance_block(results, args.alpha)
 
     if args.save_plots:
         output_dir = Path(args.output_dir) if args.output_dir else Path.cwd()

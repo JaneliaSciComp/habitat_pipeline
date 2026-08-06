@@ -38,6 +38,7 @@ import numpy as np
 
 from ephys._lda_decoding import (
     align_spikes_to_events,
+    compute_population_significance,
     extract_firing_rate_features,
     run_population_per_cell_decode,
     run_time_resolved_population_decode,
@@ -92,12 +93,21 @@ def decode_event_outcome_population(ks_data,
                                     time_window: Tuple[float, float] = (-1.0, 2.0),
                                     time_bin_size: float = 0.5,
                                     cv_folds: int = 5,
-                                    min_events_per_class: int = 5) -> Dict:
+                                    min_events_per_class: int = 5,
+                                    n_shuffles: int = 0,
+                                    alpha: float = 0.05,
+                                    seed: int = 0) -> Dict:
     """Decode event outcome (winner vs loser) cell-by-cell across the population.
 
     Parameters mirror ``decode_opponent_identity_population``. ``behavior_type``
     defaults to ``None``, in which case any event with both ``winner`` and
     ``loser`` populated is included.
+
+    ``n_shuffles`` (default 0, i.e. off) opts into the rigor layer: a
+    label-permutation significance test + Benjamini-Hochberg FDR correction
+    across cells (see ``ephys._lda_decoding.compute_population_significance``).
+    When enabled, ``results['significance']`` is a ``{cluster_id: {...}}``
+    dict; when off, it is ``None`` and every other key is unchanged.
     """
     try:
         event_start_times, event_end_times, outcome_labels = behavior_data.extract_outcome_labels(
@@ -144,6 +154,23 @@ def decode_event_outcome_population(ks_data,
         min_events_per_class=min_events_per_class,
     )
 
+    significance = None
+    if n_shuffles > 0 and successful_cluster_ids:
+        print(f"Computing label-permutation significance ({n_shuffles} shuffles)...")
+        significance = compute_population_significance(
+            spike_times_list=spike_times_list,
+            cluster_ids=selected_cluster_ids,
+            event_times=event_times,
+            labels=outcome_labels,
+            successful_cluster_ids=successful_cluster_ids,
+            time_window=time_window,
+            time_bin_size=time_bin_size,
+            cv_folds=cv_folds,
+            n_shuffles=n_shuffles,
+            alpha=alpha,
+            seed=seed,
+        )
+
     n_total = len(selected_cluster_ids)
     return {
         'cell_results': cell_results,
@@ -158,6 +185,7 @@ def decode_event_outcome_population(ks_data,
         'best_cell_id': successful_cluster_ids[int(np.argmax(accuracies))] if accuracies else None,
         'event_times': event_times,
         'labels': outcome_labels,
+        'significance': significance,
         'parameters': {
             'animal_of_interest': animal_of_interest,
             'behavior_type': behavior_type,
@@ -168,6 +196,8 @@ def decode_event_outcome_population(ks_data,
             'time_bin_size': time_bin_size,
             'cv_folds': cv_folds,
             'min_events_per_class': min_events_per_class,
+            'n_shuffles': n_shuffles,
+            'alpha': alpha,
             'class_label': _CLASS_LABEL,
             'analysis_title': _ANALYSIS_TITLE,
         },
@@ -279,6 +309,11 @@ def main():
     parser.add_argument('--min_events_per_class', type=int, default=5,
                         help='Minimum events per outcome class')
     parser.add_argument('--use_quality_cells', action='store_true', help='Filter by cell quality')
+    parser.add_argument('--n_shuffles', type=int, default=0,
+                        help='Label-permutation shuffles for the rigor-layer significance test '
+                             '(0 = off, the default; e.g. 200 for a real significance pass)')
+    parser.add_argument('--alpha', type=float, default=0.05,
+                        help='FDR threshold for the rigor-layer significance test')
     parser.add_argument('--save_plots', action='store_true', help='Save plots to files')
     parser.add_argument('--output_dir', type=str, help='Output directory for plots')
 
@@ -327,6 +362,8 @@ def main():
         time_bin_size=args.time_bin_size,
         cv_folds=args.cv_folds,
         min_events_per_class=args.min_events_per_class,
+        n_shuffles=args.n_shuffles,
+        alpha=args.alpha,
     )
 
     if results['status'] != 'success':
@@ -339,6 +376,11 @@ def main():
           f"± {results['population_accuracy_std']:.1%}")
     print(f"Best cell accuracy: {results['best_cell_accuracy']:.1%} "
           f"(Cell ID: {results['best_cell_id']})")
+
+    if results.get('significance'):
+        n_sig = sum(1 for v in results['significance'].values() if v['significant'])
+        print(f"Significant cells after FDR correction (q < {args.alpha}): "
+              f"{n_sig}/{len(results['significance'])}")
 
     if args.save_plots:
         output_dir = Path(args.output_dir) if args.output_dir else Path.cwd()

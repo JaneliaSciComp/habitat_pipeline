@@ -458,17 +458,23 @@ def field_significance(
             raise ValueError(f"Unknown null_method: {null_method!r}")
         sh_skaggs[i], sh_sparsity[i], sh_split[i] = _stats(sp_i, xy_i)
 
+    # Add-one ("plus-one") estimator: (1 + #exceedances) / (1 + n_shuffles).
+    # A finite permutation test cannot justify p == 0 — the plain k/n form
+    # returns exactly 0.0 when no shuffle beats the observed value, which then
+    # survives Benjamini-Hochberg as q == 0 and reads as infinite confidence.
+    # The floor here is 1/(n+1), matching
+    # ``ephys._lda_decoding.compute_population_significance``.
     def _p_geq(true_val, shuffles):
         valid = shuffles[np.isfinite(shuffles)]
         if not np.isfinite(true_val) or valid.size == 0:
             return np.nan
-        return float(np.mean(valid >= true_val))
+        return float((1 + np.sum(valid >= true_val)) / (1 + valid.size))
 
     def _p_leq(true_val, shuffles):
         valid = shuffles[np.isfinite(shuffles)]
         if not np.isfinite(true_val) or valid.size == 0:
             return np.nan
-        return float(np.mean(valid <= true_val))
+        return float((1 + np.sum(valid <= true_val)) / (1 + valid.size))
 
     return FieldSignificance(
         cluster_id=cluster_id,

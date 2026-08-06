@@ -240,7 +240,9 @@ class TestSignificance:
         )
         assert sig.n_shuffles == 500
         assert len(sig.shuffle_skaggs) == 500
-        assert sig.p_skaggs < 0.001
+        # The add-one estimator floors p at 1/(n_shuffles+1) = 1/501 ~ 0.002;
+        # the previous `< 0.001` was only reachable via an invalid p == 0.0.
+        assert sig.p_skaggs == pytest.approx(1 / 501)
 
     def test_flat_field_not_significant(self):
         xy = _make_xy(seed=15)
@@ -281,7 +283,13 @@ def _sweep(ks, tracking, focal="A", **kw):
     defaults = dict(
         target_animals=list(tracking.keys()),
         bin_size_cm=BIN, smoothing_sigma_cm=5.0,
-        speed_filter_subject="none", n_shuffles=100, min_n_spikes=50,
+        # n_shuffles=500, not 100: with 3 targets at the default sig_alpha=0.01
+        # a 100-shuffle budget has a p-value floor of 1/101, so the best
+        # BH-adjusted q reachable across 3 targets is 0.030 — above alpha, i.e.
+        # no cell could ever be classified as tuned. These tests previously
+        # passed only because `_p_geq` returned an invalid p == 0.0; see
+        # `ephys._stats_utils.fdr_resolution`.
+        speed_filter_subject="none", n_shuffles=500, min_n_spikes=50,
         use_quality_cells=False, arena_bounds=ARENA, seed=0,
     )
     defaults.update(kw)

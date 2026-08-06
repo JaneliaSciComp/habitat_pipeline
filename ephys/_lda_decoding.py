@@ -14,6 +14,8 @@ Public surface:
 - ``single_cell_lda_decode(spike_times, event_times, labels, ...)``
 - ``run_population_per_cell_decode(spike_times_list, cluster_ids, event_times, labels, ...)``
 - ``run_time_resolved_population_decode(spike_times_list, cluster_ids, event_times, labels, ...)``
+- ``compute_population_significance(spike_times_list, cluster_ids, event_times, labels, successful_cluster_ids, ...)``
+  — opt-in label-permutation + FDR significance layer for the per-cell decoders (§5 rigor layer).
 
 Callers select the cells they want to decode (e.g. via
 ``KilosortData.get_filtered_cells_spike_times``) and pass the resulting
@@ -32,6 +34,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from ephys._rate_tensor import event_aligned_rates
+from ephys._stats_utils import benjamini_hochberg
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import (
@@ -79,6 +82,41 @@ def extract_firing_rate_features(aligned_spikes: List[np.ndarray],
 # Single-cell decoder (label-agnostic)
 # ---------------------------------------------------------------------------
 
+def _prepare_lda_features(spike_times: np.ndarray,
+                          event_times: np.ndarray,
+                          time_window: Tuple[float, float],
+                          time_bin_size: float) -> Optional[np.ndarray]:
+    """Align spikes to events and return standardized firing-rate features.
+
+    Returns ``None`` if every bin is empty (no spikes anywhere in the
+    window) — the caller should treat that as a ``'no_spikes'`` condition.
+    Shared by ``single_cell_lda_decode`` and the permutation-null
+    significance test below, since features don't depend on labels and can
+    be computed once per cell and reused across label shuffles.
+    """
+    aligned_spikes = align_spikes_to_events(spike_times, event_times, time_window)
+    features = extract_firing_rate_features(aligned_spikes, time_window, time_bin_size)
+    if np.all(features == 0):
+        return None
+    return StandardScaler().fit_transform(features)
+
+
+def _cv_lda_accuracy(features_scaled: np.ndarray,
+                     labels: np.ndarray,
+                     counts: np.ndarray,
+                     cv_folds) -> np.ndarray:
+    """Cross-validated LDA accuracy scores for one cell's features/labels."""
+    if cv_folds == 'loo' or cv_folds == -1:
+        cv = LeaveOneOut()
+    else:
+        cv = StratifiedKFold(n_splits=min(int(cv_folds), int(np.min(counts))),
+                             shuffle=True, random_state=42)
+    lda = LinearDiscriminantAnalysis()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return cross_val_score(lda, features_scaled, labels, cv=cv, scoring='accuracy')
+
+
 def single_cell_lda_decode(spike_times: np.ndarray,
                            event_times: np.ndarray,
                            labels: np.ndarray,
@@ -106,10 +144,9 @@ def single_cell_lda_decode(spike_times: np.ndarray,
         }
 
     try:
-        aligned_spikes = align_spikes_to_events(spike_times, event_times, time_window)
-        features = extract_firing_rate_features(aligned_spikes, time_window, time_bin_size)
+        features_scaled = _prepare_lda_features(spike_times, event_times, time_window, time_bin_size)
 
-        if np.all(features == 0):
+        if features_scaled is None:
             return {
                 'accuracy': np.nan,
                 'accuracy_std': np.nan,
@@ -121,20 +158,9 @@ def single_cell_lda_decode(spike_times: np.ndarray,
                 'status': 'no_spikes',
             }
 
-        features_scaled = StandardScaler().fit_transform(features)
-
-        if cv_folds == 'loo' or cv_folds == -1:
-            cv = LeaveOneOut()
-        else:
-            cv = StratifiedKFold(n_splits=min(int(cv_folds), int(np.min(counts))),
-                                 shuffle=True, random_state=42)
+        cv_scores = _cv_lda_accuracy(features_scaled, labels, counts, cv_folds)
 
         lda = LinearDiscriminantAnalysis()
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            cv_scores = cross_val_score(lda, features_scaled, labels,
-                                        cv=cv, scoring='accuracy')
-
         lda.fit(features_scaled, labels)
         predictions = lda.predict(features_scaled)
         conf_matrix = confusion_matrix(labels, predictions, labels=unique_labels)
@@ -161,6 +187,86 @@ def single_cell_lda_decode(spike_times: np.ndarray,
             'cv_scores': None,
             'status': f'error: {str(e)}',
         }
+
+
+# ---------------------------------------------------------------------------
+# Rigor layer: label-permutation significance + FDR across cells
+# ---------------------------------------------------------------------------
+
+def compute_population_significance(spike_times_list: Sequence[np.ndarray],
+                                     cluster_ids: Sequence,
+                                     event_times: np.ndarray,
+                                     labels: np.ndarray,
+                                     successful_cluster_ids: Sequence,
+                                     time_window: Tuple[float, float] = (-1.0, 2.0),
+                                     time_bin_size: float = 0.5,
+                                     cv_folds=5,
+                                     n_shuffles: int = 200,
+                                     alpha: float = 0.05,
+                                     seed: int = 0) -> Dict:
+    """Label-permutation significance + Benjamini-Hochberg FDR for a per-cell decode.
+
+    Re-decodes each of ``successful_cluster_ids`` under ``n_shuffles`` random
+    label permutations. Features don't depend on labels, so they are computed
+    once per cell (via ``_prepare_lda_features``) and reused across shuffles;
+    only the label vector and the CV/LDA refit change per shuffle. The
+    observed accuracy's empirical rank against its null distribution gives a
+    per-cell p-value, and ``benjamini_hochberg`` corrects across cells.
+
+    This is the within-run multiple-comparison guardrail Phase 0 flagged as
+    missing: testing many cells at once inflates false positives if accuracy
+    is screened against chance without correction (Phase 0's synthetic demo
+    found a naive screen flagged 9/24 cells vs. 6 truly tuned).
+
+    Assumptions: labels are exchangeable under the null (no residual
+    structure, e.g. temporal autocorrelation, ties label identity to event
+    order); BH-FDR controls the expected false-discovery *proportion* across
+    the tested cells, not each cell's individual Type-I error rate.
+
+    Returns ``{cluster_id: {'p_value', 'q_value', 'significant', 'n_shuffles'}}``
+    for cells where features could be computed (should be all of
+    ``successful_cluster_ids``, since they already decoded successfully with
+    this same feature/label combination).
+    """
+    _, counts = np.unique(labels, return_counts=True)
+    rng = np.random.default_rng(seed)
+    n_events = len(labels)
+    spikes_by_cluster = dict(zip(cluster_ids, spike_times_list))
+
+    p_values: Dict = {}
+    for cluster_id in successful_cluster_ids:
+        features_scaled = _prepare_lda_features(
+            spikes_by_cluster[cluster_id], event_times, time_window, time_bin_size
+        )
+        if features_scaled is None:
+            continue
+
+        observed_acc = float(np.mean(_cv_lda_accuracy(features_scaled, labels, counts, cv_folds)))
+
+        n_ge = 0
+        for _ in range(n_shuffles):
+            perm_labels = labels[rng.permutation(n_events)]
+            null_acc = float(np.mean(_cv_lda_accuracy(features_scaled, perm_labels, counts, cv_folds)))
+            if null_acc >= observed_acc:
+                n_ge += 1
+
+        p_values[cluster_id] = (1 + n_ge) / (n_shuffles + 1)
+
+    if not p_values:
+        return {}
+
+    tested_ids = list(p_values.keys())
+    q_values = benjamini_hochberg(np.array([p_values[cid] for cid in tested_ids]))
+
+    return {
+        cluster_id: {
+            'p_value': float(p_values[cluster_id]),
+            'q_value': float(q_value),
+            'significant': bool(q_value < alpha),
+            'n_shuffles': n_shuffles,
+        }
+        for cluster_id, q_value in zip(tested_ids, q_values)
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -86,4 +86,78 @@ With the corrected stack, animal 631 / session 20251216, `n_shuffles=200`:
 - **The resolution guard behaved exactly as its analytics predicted.** It warned that 149 cells × 200 shuffles cannot resolve a *lone* significant cell — and indeed the 17 detections only got through because ≥15 cells hit the p-floor simultaneously, which is precisely the `min_tests_at_floor = 15` condition. Per-cell (17) and pooled (16) agreeing is a good cross-check. For a single-cell claim here, `n_shuffles≥2980` or the pooled null is still required.
 - **Campaign-level FDR now has inputs** (test family 3): q = 0.0075 for both `EC` runs, q = 0.114 for the outcome run.
 
-**Deferred, unchanged**: `propose-hypotheses`, `implement-module`, Coder subagent, the multi-session sweep (feasible — `get_animals_and_sessions(config_path)` yields 47 pairs across 2 cohorts; wants resumability since a rigor-on sweep is multi-hour), notebook read surface, and held-out-session enforcement (`Iteration.held_out` is still a column nobody checks).
+**Deferred, unchanged**: the multi-session sweep (feasible — `get_animals_and_sessions(config_path)` yields 47 pairs across 2 cohorts; wants resumability since a rigor-on sweep is multi-hour), notebook read surface, and held-out-session enforcement (`Iteration.held_out` is still a column nobody checks).
+
+## `run-analysis` → `interpret-results` live-tested — done 2026-08-17
+
+Exercised the two Phase 1 skills conversationally, end-to-end, for the first time
+(they'd only been unit-verified as recipes before). Ran `decode_opponent_identity`
+(`behavior_type='EC'`, `null_mode='pooled'`, `n_shuffles=200`) in-process against
+animal 631/session 20251216, logged it as iteration 7, then ran `interpret-results`
+against that iteration: population accuracy 28.8% vs. 27.7% baseline, population
+p = 0.005, 16/149 cells survive FDR — **verdict: Real, corrected**, reproducing
+iteration 5's numbers exactly (same seed, same inputs — a clean reproducibility check).
+
+One real friction point surfaced: `decode_opponent_identity_population`'s
+`animal_of_interest` must be a `str` — `extract_opponent_labels` calls
+`.startswith('rat')` on it directly — but nothing enforces this for an in-process
+caller (only the CLI's `argparse(type=str)` does). Passing an `int` fails deep inside
+label extraction with a confusing `'int' object has no attribute 'startswith'`. Not
+yet fixed in the library code; logged as iteration 6 (a failed run) and flagged here
+for whoever touches `extract_opponent_labels` next.
+
+## Phase 1 second increment — Hypothesizer + Coder — done 2026-08-17
+
+Built the remaining two discovery-loop roles deferred at the end of Phase 1:
+`propose-hypotheses` (Hypothesizer, design doc §4④/§5) and `implement-module` +
+a `coder` subagent (Coder, §4⑤). Per the approved plan
+(`~/.claude/plans/curried-giggling-sutherland.md`).
+
+**`database/lab_notebook.py`**: added `LabNotebook.set_hypothesis_status(id, status,
+notes=None)` and `list_hypotheses(status=None)` — small, additive, same file,
+`database_core.py` untouched. Needed so `propose-hypotheses` can check for prior
+proposals before registering a duplicate, and `implement-module` can flip a
+hypothesis to `approved`/`rejected` at its code-writing gate. New tests in
+`tests/test_lab_notebook.py::TestHypothesisAndTestFamily` (20 → covers round-trip,
+bad-status, unknown-id, and status-filtered listing).
+
+**`.claude/skills/propose-hypotheses/SKILL.md`**: generate → critique → rank cycle
+per the Co-Scientist pattern the design doc calls for. Grounds every candidate in
+the triggering iteration's actual numbers and checks `list_hypotheses()` for
+duplicates before proposing. **Literature MCP servers in this environment
+(PubMed, bioRxiv, Scholar_Gateway, Consensus, Elicit, Scite, Open_Targets, ChEMBL)
+are installed but not authenticated** — confirmed via `ToolSearch`, only their
+`authenticate`/`complete_authentication` tools are exposed. The skill is written to
+degrade gracefully: tell the scientist which MCP needs `/mcp` auth, continue without
+it, and flag every hypothesis produced this way as "not literature-grounded" rather
+than silently proceeding as if it were cited. On a scientist pick, pre-registers via
+`nb.add_hypothesis(...)` (status stays `'proposed'` — no gate at this stage).
+
+**`.claude/agents/coder.md`**: writes a new `ephys/` module + matching mock test.
+Picks between the two conventions already in the repo — reuse the classification
+core (`ephys/_lda_decoding.py`) or `decode_partner_distance.py`'s I/O-free-core +
+thin-wrapper split — and is required to document statistical assumptions the way
+`decode_partner_distance.py` (module "Statistical notes") and
+`_lda_decoding.py::compute_population_significance` (function "Assumptions:") already
+do, plus add a domain-guardrail test modeled on
+`tests/test_social_spatial_fields.py`'s self/target-swap pair (or explain why none
+applies). Tools: `Read, Write, Edit, Bash, Glob, Grep` — no `Agent`, no MCP/web
+access (citations arrive pre-resolved in its prompt).
+
+**`.claude/skills/implement-module/SKILL.md`**: the orchestration layer around
+`coder`, and where the design doc's §6 hard requirement — "explicit scientist
+approval before writing/modifying repo code" — is enforced *structurally*: this
+skill's own `allowed-tools` has no `Write`/`Edit`, so it is physically incapable of
+writing a file itself. It restates a concrete build plan, gets an explicit approval
+in-turn, only then dispatches `coder`, and independently re-runs the fast test suite
+afterward rather than trusting the subagent's self-report.
+
+**Not yet done**: live-exercising `propose-hypotheses`/`implement-module` against a
+real hypothesis and an actual new module — that's a separate, larger next step
+(the same "build it, then exercise it in a later turn" sequencing Phase 1's first
+two skills followed). Also not done: authenticating any literature MCP (requires the
+user's own OAuth browser flow).
+
+**Test suite**: `python -m pytest tests/test_lab_notebook.py -q` → 20 passed.
+`python -m pytest tests/ -q -m "not slow"` unaffected (only additive `LabNotebook`
+methods changed; no existing signatures touched).

@@ -52,6 +52,42 @@ class TestHypothesisAndTestFamily:
         assert family.correction_method == 'bh_fdr'
         assert family.alpha == 0.05
 
+    def test_set_hypothesis_status_round_trips(self, notebook):
+        hyp = notebook.add_hypothesis("cell X encodes opponent identity")
+        assert hyp.status == 'proposed'
+
+        updated = notebook.set_hypothesis_status(hyp.id, 'approved', notes='go ahead')
+        assert updated.status == 'approved'
+        assert updated.scientist_notes == 'go ahead'
+
+        updated = notebook.set_hypothesis_status(hyp.id, 'confirmed')
+        assert updated.status == 'confirmed'
+        # omitting notes leaves the prior note untouched
+        assert updated.scientist_notes == 'go ahead'
+
+    def test_set_hypothesis_status_rejects_bad_value(self, notebook):
+        hyp = notebook.add_hypothesis("h")
+        with pytest.raises(ValueError):
+            notebook.set_hypothesis_status(hyp.id, 'maybe')
+
+    def test_set_hypothesis_status_unknown_id_raises(self, notebook):
+        with pytest.raises(ValueError):
+            notebook.set_hypothesis_status(9999, 'approved')
+
+    def test_list_hypotheses_filters_by_status(self, notebook):
+        h1 = notebook.add_hypothesis("h1")
+        h2 = notebook.add_hypothesis("h2")
+        notebook.set_hypothesis_status(h2.id, 'approved')
+
+        all_hyps = notebook.list_hypotheses()
+        assert {h.id for h in all_hyps} == {h1.id, h2.id}
+
+        proposed = notebook.list_hypotheses(status='proposed')
+        assert {h.id for h in proposed} == {h1.id}
+
+        approved = notebook.list_hypotheses(status='approved')
+        assert {h.id for h in approved} == {h2.id}
+
 
 class TestIterationLogging:
     def test_log_iteration_round_trips(self, notebook):

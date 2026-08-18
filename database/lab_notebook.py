@@ -188,6 +188,37 @@ class LabNotebook:
             db_session.refresh(hyp)
             return hyp
 
+    def set_hypothesis_status(self, hypothesis_id: int, status: str,
+                               notes: str = None) -> Hypothesis:
+        """Transition a pre-registered hypothesis's status (design doc §6:
+        the scientist's approval-gate decision, but for a hypothesis rather
+        than a logged iteration — see ``record_decision`` for the iteration
+        equivalent)."""
+        if status not in ('proposed', 'approved', 'rejected', 'confirmed'):
+            raise ValueError(
+                f"status must be one of 'proposed'/'approved'/'rejected'/'confirmed', got {status!r}"
+            )
+        with self.get_db_session() as db_session:
+            hyp = db_session.get(Hypothesis, hypothesis_id)
+            if hyp is None:
+                raise ValueError(f"No hypothesis with id {hypothesis_id}")
+            hyp.status = status
+            if notes is not None:
+                hyp.scientist_notes = notes
+            db_session.commit()
+            db_session.refresh(hyp)
+            return hyp
+
+    def list_hypotheses(self, status: Optional[str] = None) -> List[Hypothesis]:
+        """List pre-registered hypotheses, optionally filtered by status —
+        used to check for prior/duplicate proposals before registering a
+        new one."""
+        with self.get_db_session() as db_session:
+            query = db_session.query(Hypothesis)
+            if status is not None:
+                query = query.filter(Hypothesis.status == status)
+            return query.order_by(Hypothesis.created_at).all()
+
     # -- Test families ------------------------------------------------------
     def create_test_family(self, name: str, correction_method: str = 'bh_fdr',
                             alpha: float = 0.05, notes: str = None) -> TestFamily:

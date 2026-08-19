@@ -23,12 +23,17 @@ prose; this file is the actionable, feasibility-checked backlog to draw from.
    Hypothesis #3 (`database/lab_notebook.py`, iteration 9, status `blocked`). Check
    `object_name` values in a session's `*_mask_metrics.csv` before assuming
    multi-animal position data exists for it.
-2. **N>2 simultaneous ephys is unconfirmed.** `ingestion/multi_animal_session.py`'s
-   plumbing (binning, common time grid) is N-agnostic, but the actual inter-brain
-   math (`ephys/inter_brain_dynamics.py::fit_shared_subspace`) and every test/CLI/
-   README example in the repo are pairwise only. Any idea needing 3+
-   simultaneously-*implanted* (not just tracked) animals needs a nearline directory
-   check first — this repo can't confirm or rule it out on its own.
+2. **N>2 simultaneous ephys is actually routine — confirmed 2026-08-19.**
+   `get_animals_and_sessions()` shows most cohort-7 sessions (including `20251216`,
+   the session behind the opponent-identity finding) have **4** simultaneously-
+   implanted animals (`rat613`, `rat615`, `rat630`, `rat631`), not 2. This corrects
+   the original caveat here — the data-availability blocker doesn't apply. What's
+   still missing is the *math*: `ephys/inter_brain_dynamics.py::fit_shared_subspace`
+   and every test/CLI/README example are pairwise-only; multi-set CCA is an
+   unimplemented stretch goal per `ephys/README.md`. So Tier assignments in §I below
+   reflect a **missing-method** gap, not a missing-data one — meaningfully easier to
+   greenlight than originally written, since the 4-animal ephys data to test against
+   already exists for a session we've already worked with.
 3. **Real head direction doesn't exist yet.** The raw tracking CSV's `orientation`
    column passes through unvalidated; `video/behavior_features.py::_kinematics`
    derives heading from movement velocity instead. Gaze/attention-based ideas need
@@ -141,7 +146,10 @@ prose; this file is the actionable, feasibility-checked backlog to draw from.
   animal/session pairs (deferred "multi-session sweep" in `HANDOFF.md`). First
   concrete pair to try: session `20251216` (animal 631, opponent-identity finding
   already on record) vs. `RatCity_20251210_1359_40Hz` (full 12-animal tracking,
-  overlapping opponent IDs) — *if* animal 631 has usable ephys on 2025-12-10 too.
+  overlapping opponent IDs) — **confirmed 2026-08-19**: animal 631 (plus 613, 615,
+  630) does have usable ephys on session `20251210` too (verified while running
+  partner-position decoding there, iterations 10-11), so this comparison is ready
+  to run, not blocked on a data check anymore.
 - **[Tier 2–3, opportunistic] Familiarity/novelty axis.** If cohort composition
   ever changed (a new rat introduced), compare the neural representation of the
   novel animal in the first sessions vs. after stabilization. Can't be scheduled —
@@ -203,20 +211,27 @@ prose; this file is the actionable, feasibility-checked backlog to draw from.
 All three are scientifically the most novel items in this backlog if the
 head-direction prerequisite gets built — currently blocked, not merely hard.
 
-## I. Multi-brain (N>2) methods — blocked on confirming data availability (caveat 2)
+## I. Multi-brain (N>2) methods — blocked on missing math, not missing data (see caveat 2)
 
-- **[Tier 4] Generalized / multi-set CCA (Kettenring 1971) or JIVE/SLIDE.** Finds
+Data is no longer the blocker here (most cohort-7 sessions have 4 simultaneously-
+implanted animals) — these are Tier 3/4 on algorithmic lift alone now, downgraded
+from "blocked."
+
+- **[Tier 3–4] Generalized / multi-set CCA (Kettenring 1971) or JIVE/SLIDE.** Finds
   directions correlated across all N brains, partitioning variance into
   cohort-shared / dyad-shared / individual. Explicitly listed as an unimplemented
-  stretch goal in `ephys/README.md`. Needs both new math and confirmation that 3+
-  animals ever have simultaneous ephys in this dataset.
-- **[Tier 4] Identity-aware per-dyad subspace comparison.** Fit one shared subspace
+  stretch goal in `ephys/README.md` — genuinely new math (not in any existing
+  dependency), but the 4-animal data to run it on already exists for session
+  `20251216`.
+- **[Tier 3–4] Identity-aware per-dyad subspace comparison.** Fit one shared subspace
   per dyad (A↔B, A↔C, …) and ask whether A's loadings are similar across dyads
   (broadcast) or partner-specific ("a channel per friend") — a multi-brain analog
-  of communication subspaces. Same N>2-ephys prerequisite.
+  of communication subspaces. Cheaper than multi-set CCA since it reuses the
+  existing pairwise `fit_shared_subspace` N-choose-2 times rather than needing new math.
 - **[Tier 4, opportunistic] Cohort reorganization events.** If an animal is ever
   added/removed from a cohort, track representational change in the rest of the
-  group. Same prerequisite plus depends on such an event existing in the record.
+  group. Data-ready if such a transition exists in the recorded history; otherwise
+  can't be scheduled.
 
 ## J. Replay
 
@@ -253,3 +268,32 @@ head-direction prerequisite gets built — currently blocked, not merely hard.
   subspace. Would introduce a new ML dependency not currently in the repo — biggest
   new-infra lift here, positioned as a `method="cebra"` branch alongside the
   existing `fit_shared_subspace` per `ephys/README.md`'s own stretch-goal list.
+
+## Update 2026-08-19 — partner-position decoding (item A) run; a caution, not a result
+
+Ran `ephys/decode_location.py::decode_all_locations` (item A, Tier 1) for animal
+631/session `20251210` against all 12 tracked objects. Two things worth recording
+for whoever picks up any `decode_location`-based item next:
+
+- **The module's default `null='reverse'` is a weak, easily-misread null.** Per its
+  own docstring it only reverses trajectory order, preserving every marginal and
+  autocorrelation — it tests temporal-order asymmetry, not "beats chance." A first
+  pass using it showed several partners nominally "beating" the null, including a
+  spurious win for a near-stationary animal (`rat630`, x/y std ~11-13px — any method
+  gets near-zero error on a target that barely moves) and cases where the null
+  outperformed real decoding entirely (likely stereotyped/patterned trajectories).
+  **Always use `null='shuffle'` with a proper `empirical_p_value`/BH-FDR pass
+  (`ephys/_stats_utils.py`) for any real claim from this module** — same lesson the
+  LDA decoders already learned the hard way (see Phase 1.5 above).
+- **Self-position decoding failed a proper shuffle-null test** (p=0.43, animal 631
+  decoding its own position from its own spikes, default params: `bin_size=0.5`,
+  `n_spatial_bins=20`, `smoothing_sigma=1.0`, no `pixels_per_cm` calibration, default
+  quality-cell thresholds). This is the basic sanity check any spatial decoder should
+  clear before a partner-decoding claim means anything, so **partner-position
+  decoding is not ready to yield a trustworthy finding with default parameters** —
+  needs either arena-scale-tuned spatial binning, a wider quality-cell net, or a
+  check on whether this recorded population/region is classically place-tuned at
+  all, before revisiting. One partner (`rat613`) nominally cleared FDR (q=0.039 of 7
+  tests) but given self-decoding's failure this reads as a likely false discovery,
+  not a real effect — logged as iterations 10 (reverse-null) and 11 (shuffle-null,
+  real p/q values) rather than presented as a finding.

@@ -161,3 +161,78 @@ user's own OAuth browser flow).
 **Test suite**: `python -m pytest tests/test_lab_notebook.py -q` → 20 passed.
 `python -m pytest tests/ -q -m "not slow"` unaffected (only additive `LabNotebook`
 methods changed; no existing signatures touched).
+
+## `propose-hypotheses` live-tested; two hypotheses run — done 2026-08-17/18
+
+Exercised `propose-hypotheses` for the first time, grounded in iteration 7's
+opponent-identity finding. Generated and ranked 4 candidates (all flagged
+"not literature-grounded" — the literature MCPs are still unauthenticated); the
+scientist picked two, pre-registered as Hypothesis #2 and #3.
+
+- **Hypothesis #2** (does opponent decodability survive coarsening to a 2-group
+  split?) — run via `run-analysis`, iteration 8: population accuracy 57.5% vs. 57.2%
+  baseline (negligible raw margin), but population p=0.005 and 20/149 cells survive
+  FDR (more than the original 8-way analysis's 16). `interpret-results` verdict:
+  **Real, corrected**, but complicates rather than confirms the hypothesis's own
+  wording — the effect persists under coarsening but its raw accuracy margin
+  collapses, arguing against a clean individual-vs-coarse-rank dichotomy.
+- **Hypothesis #3** (are the 16 FDR-significant opponent-identity cells actually
+  spatially confounded with opponent location?) — **blocked**, iteration 9: session
+  `20251216`'s tracking file only has the focal animal (`rat631`) identity-resolved,
+  no opponent positions exist for that session. Not a code problem — logged as
+  `status='blocked'`, `Hypothesis.status` left at `'proposed'` with notes explaining
+  why, rather than forced into `'rejected'`. Re-derived the 16 significant cluster
+  IDs anyway for future use: `470, 519, 528, 590, 707, 752, 766, 862, 955, 1016,
+  1019, 1020, 1107, 1159, 1167, 1168`.
+
+## Hypothesis backlog — done 2026-08-18/19
+
+Brainstormed novel analyses exploiting the multi-animal/simultaneous-ephys setup,
+merged with a second list contributed directly (`docs/HYPOTHESIS_LIST.md`) into one
+feasibility-checked, difficulty-tiered backlog: **`docs/HYPOTHESIS_BACKLOG.md`**.
+Cross-checking against the actual repo surfaced several corrections worth
+remembering:
+
+- Allocentric social place fields and conjunctive self×partner cells are **already
+  built** (`ephys/social_spatial_fields.py`) — not new work, contrary to how the
+  contributed list framed them.
+- `ephys/decode_location.py` already supports decoding *any* tracked animal's
+  position from *any* animal's spikes (`object_name` is independent of whose
+  `KilosortData` is passed), with CV and a null baseline built in —
+  partner-position decoding is nearly free, not a new-module item.
+- **Most cohort-7 sessions actually have 4 simultaneously-implanted animals**
+  (`rat613`, `rat615`, `rat630`, `rat631` — confirmed via `get_animals_and_sessions()`),
+  including session `20251216` itself. This corrects an initial assumption that
+  N>2-ephys was unconfirmed — multi-brain (N>2) methods are blocked on missing
+  *math* (multi-set CCA isn't implemented), not missing data.
+- Real head direction doesn't exist yet (`orientation` passes through tracking
+  unvalidated; heading is derived from movement velocity instead) — gaze/attention
+  ideas are genuinely blocked on that prerequisite.
+
+## Partner-position decoding exercise — done 2026-08-19
+
+Ran the backlog's cheapest item (partner-position decoding via `decode_location.py`)
+against session `20251210` (chosen because, unlike `20251216`, it has full
+multi-animal tracking *and* 4-animal ephys — see the sync/tracking check in this
+session's transcript). Result is a caution, not a finding — full writeup in
+`docs/HYPOTHESIS_BACKLOG.md`'s "Update 2026-08-19" section:
+
+- The module's default `null='reverse'` is a weak, order-only null (explicitly
+  preserves autocorrelation per its docstring) — a first pass using it produced a
+  spurious "win" for a near-stationary animal and cases where the null beat real
+  decoding outright. Re-ran with `null='shuffle'` + `ephys._stats_utils.empirical_p_value`
+  + BH-FDR instead (iterations 10 then 11) — the same "always use a proper
+  permutation null" lesson Phase 1.5 already taught the LDA decoders, now confirmed
+  to generalize to this older module too.
+- **Self-position decoding failed the proper shuffle-null test** (p=0.43) with
+  default parameters — the basic sanity check any spatial decoder needs to clear
+  before a partner-decoding claim means anything. One partner nominally cleared FDR
+  (q=0.039 of 7) but reads as a likely false discovery given self-decoding's
+  failure. Conclusion: `decode_location.py`'s defaults (spatial binning, no
+  `pixels_per_cm` calibration, quality-cell thresholds) need tuning to this dataset
+  before any position-decoding claim — partner or self — is trustworthy. Deferred,
+  not pursued further this session.
+
+**Still not done**: live-exercising `implement-module`/`coder` against a real new
+module (every hypothesis run so far only needed existing modules); authenticating
+any literature MCP; the multi-session sweep; held-out-session enforcement.

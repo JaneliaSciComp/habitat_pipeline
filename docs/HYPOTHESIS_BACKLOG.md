@@ -286,14 +286,23 @@ for whoever picks up any `decode_location`-based item next:
   (`ephys/_stats_utils.py`) for any real claim from this module** — same lesson the
   LDA decoders already learned the hard way (see Phase 1.5 above).
 - **Self-position decoding failed a proper shuffle-null test** (p=0.43, animal 631
-  decoding its own position from its own spikes, default params: `bin_size=0.5`,
-  `n_spatial_bins=20`, `smoothing_sigma=1.0`, no `pixels_per_cm` calibration, default
-  quality-cell thresholds). This is the basic sanity check any spatial decoder should
-  clear before a partner-decoding claim means anything, so **partner-position
-  decoding is not ready to yield a trustworthy finding with default parameters** —
-  needs either arena-scale-tuned spatial binning, a wider quality-cell net, or a
-  check on whether this recorded population/region is classically place-tuned at
-  all, before revisiting. One partner (`rat613`) nominally cleared FDR (q=0.039 of 7
-  tests) but given self-decoding's failure this reads as a likely false discovery,
-  not a real effect — logged as iterations 10 (reverse-null) and 11 (shuffle-null,
-  real p/q values) rather than presented as a finding.
+  decoding its own position from its own spikes, default params). Root-caused and
+  **fixed 2026-08-19**: `_cv_decode` used `KFold(shuffle=True, random_state=42)` —
+  leaky for autocorrelated position data (adjacent, near-identical time bins land in
+  different folds), contradicting the repo's own established convention
+  (`decode_partner_distance.py`/`inter_brain_dynamics._fit_r2` both use
+  `KFold(shuffle=False)`). Leakage was inflating *both* the real decode and the
+  shuffle-null comparably, hiding a real effect under two artificially-tight numbers.
+  Fixed in `ephys/decode_location.py` (contiguous folds now, "Statistical notes"
+  docstring added, new `tests/test_decode_location.py` — this module had zero test
+  coverage before).
+- **After the fix** (contiguous folds + `rate_smoothing_sigma=2.0`, iteration 12):
+  self-decoding improved to p=0.022 nominally — but does **not** survive BH-FDR
+  across the 7-object family (q=0.077). One partner (`rat613`) does clear FDR
+  (q=0.039, pinned at the `n_shuffles=180` p-floor). Honest read: the leakage fix is
+  a real, confirmed correctness improvement, but the evidence for any specific
+  partner-position-decoding claim is still fragile — the self-decoding sanity check
+  itself is only borderline at this shuffle budget, at the edge of what 180 shuffles
+  can resolve. **Not yet a finding.** Next step if pursued: raise `n_shuffles` (e.g.
+  to 500) to get self-decoding either a real pass or a real fail, rather than a
+  borderline nominal-but-uncorrected result. Logged as iteration 12.

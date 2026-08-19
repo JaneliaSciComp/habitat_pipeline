@@ -226,13 +226,46 @@ session's transcript). Result is a caution, not a finding — full writeup in
   to generalize to this older module too.
 - **Self-position decoding failed the proper shuffle-null test** (p=0.43) with
   default parameters — the basic sanity check any spatial decoder needs to clear
-  before a partner-decoding claim means anything. One partner nominally cleared FDR
-  (q=0.039 of 7) but reads as a likely false discovery given self-decoding's
-  failure. Conclusion: `decode_location.py`'s defaults (spatial binning, no
-  `pixels_per_cm` calibration, quality-cell thresholds) need tuning to this dataset
-  before any position-decoding claim — partner or self — is trustworthy. Deferred,
-  not pursued further this session.
+  before a partner-decoding claim means anything.
+
+## `decode_location.py` CV-leakage fix — done 2026-08-19
+
+Root-caused the self-decoding failure above: `ephys/decode_location.py::_cv_decode`
+used `KFold(n_splits=cv_folds, shuffle=True, random_state=42)`. Position is
+autocorrelated in time (like distance in `decode_partner_distance.py`), so shuffled
+folds leak adjacent, near-identical time bins between train and test — this repo
+already has an established convention against exactly this
+(`decode_partner_distance.py`/`ephys.inter_brain_dynamics._fit_r2` both use
+`KFold(shuffle=False)`), just not yet applied here. Confirmed empirically before
+fixing: patching in contiguous folds alone dropped self-decoding's p-value from 0.43
+to 0.138 (both real and null errors got larger and more honest — the leakage had
+been inflating both comparably, hiding a real effect under two artificially-tight
+numbers); adding `rate_smoothing_sigma=2.0` (standard for coarse-bin Bayesian
+place decoders) on top got it to p=0.022.
+
+**Fixed**: `_cv_decode` now uses `KFold(shuffle=False)`. Added a "Statistical notes"
+docstring section to the module (matching the convention in
+`decode_partner_distance.py`/`_lda_decoding.py`) documenting the contiguous-fold
+requirement and the null's autocorrelation-preserving design. Added
+`tests/test_decode_location.py` — **this module had zero test coverage before**:
+one test spies on `sklearn.model_selection.KFold`'s call to assert `shuffle=False`
+(direct regression guard), one confirms contiguous folds actually produce
+contiguous index blocks, one is a synthetic place-tuned-population sanity check
+(self-position must beat a shuffle-null by a real margin). 270 passed (was 267),
+no regressions in the rest of the suite.
+
+**Final honest result** (iteration 12, animal 631/session `20251210`, 7-object
+family, `n_shuffles=180`, contiguous folds + `rate_smoothing_sigma=2.0`): self
+(631) improves to p=0.022 nominally but does **not** survive BH-FDR (q=0.077,
+7 tests) — the sanity check is only borderline at this shuffle budget. One partner
+(`rat613`) does clear FDR (q=0.039), but it's pinned at the `n_shuffles=180` p-floor,
+and given self-decoding's own borderline status, **not treated as a finding yet**.
+The leakage fix is a confirmed, real correctness improvement; the underlying
+neuroscience question (does this population encode partner position) is still
+open, likely needs a larger shuffle budget (~500) to resolve self-decoding
+conclusively one way or the other before revisiting partner claims.
 
 **Still not done**: live-exercising `implement-module`/`coder` against a real new
 module (every hypothesis run so far only needed existing modules); authenticating
-any literature MCP; the multi-session sweep; held-out-session enforcement.
+any literature MCP; the multi-session sweep; held-out-session enforcement; raising
+`decode_location`'s shuffle budget to resolve self-decoding conclusively.

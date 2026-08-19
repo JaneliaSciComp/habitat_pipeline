@@ -11,6 +11,23 @@ Typical workflow
 3. Cross-validate: learn Poisson tuning curves on the training bins, decode a
    posterior position map on the held-out bins, and read off the estimate
    (posterior mean by default, or the MAP bin centre).
+
+Statistical notes
+------------------
+* Position (like distance in ``decode_partner_distance.py``) is strongly
+  autocorrelated in time, so cross-validation uses **contiguous**
+  ``KFold(shuffle=False)`` folds — shuffled folds would leak adjacent time
+  bins (nearly identical position) between train and test and inflate
+  apparent accuracy. This mirrors ``ephys.decode_partner_distance`` and
+  ``ephys.inter_brain_dynamics._fit_r2``.
+* The ``null='shuffle'`` baseline circularly shifts the trajectory, which
+  preserves its autocorrelation — a fair null only once folds are contiguous;
+  with leaky (shuffled) folds, the null benefits from the same leakage as the
+  real decode and both become artificially tight, hiding a real effect
+  underneath comparably-inflated numbers on both sides.
+* At a coarse temporal bin size (e.g. 0.5 s), consider `rate_smoothing_sigma``
+  > 0 to reduce Poisson shot noise in the tuning-curve fit — self-position
+  decoding on real data needed this to clear a proper shuffle-null test.
 """
 
 import numpy as np
@@ -284,11 +301,15 @@ def _cv_decode(X: np.ndarray,
     Returns ``(Y_pred, posterior, fold_median_errors)``.  When
     ``return_posterior`` is False the posterior is not accumulated (used for
     the null, which only needs errors) and ``posterior`` is None.
+
+    Folds are **contiguous** (``shuffle=False``) — see the module's
+    "Statistical notes": position is autocorrelated in time, so shuffled
+    folds would leak adjacent (near-identical) bins between train and test.
     """
     from sklearn.model_selection import KFold
 
     n_sb = len(x_centers)
-    kf = KFold(n_splits=cv_folds, shuffle=True, random_state=42)
+    kf = KFold(n_splits=cv_folds, shuffle=False)
     Y_pred = np.full_like(Y, np.nan)
     posterior = np.zeros((len(X), n_sb, n_sb)) if return_posterior else None
     fold_errors = []

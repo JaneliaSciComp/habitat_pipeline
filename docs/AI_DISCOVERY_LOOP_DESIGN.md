@@ -67,6 +67,46 @@ This is what separates a research tool from a false-positive generator. All of i
 - **Assumptions stated.** Every agent-written analysis ships with its statistical assumptions written into the module docstring and echoed into the notebook.
 - **Domain guardrails encoded as tests.** Extend the existing pattern (e.g. the self/target swap test in `tests/test_social_spatial_fields.py`) so agent-generated modules must pass domain-invariant checks, not just "it runs."
 
+### 5a. Amendments after implementation (2026-08-20)
+
+Building §5's mechanisms changed four things about how they have to work. See
+`HANDOFF.md` for the evidence behind each.
+
+- **The denominator must be *declared*, and computed by the ledger, not by the
+  caller.** §5's "the notebook counts every test the agent runs" is necessary but not
+  sufficient: counting what *ran* is not the denominator, because tests dropped after
+  their results were seen leave no trace. The atomic unit is therefore a declared test
+  (`FamilyTest`), fixed before anything runs. The failure that forced this: a sweep of
+  12 objects was reported at m=7, and the resolution guard — handed the post-exclusion
+  count — certified as resolvable a design that at the honest m=11 it rejects. So the
+  exclusion bought the significance *and* the permission to claim it. Never pass a
+  hand-counted `n_tests` to `fdr_resolution`.
+- **`statsmodels` is not used and should not be.** §5 names
+  `statsmodels.stats.multitest` and `statsmodels.stats.power`; neither is installed,
+  deliberately, so `ephys/_stats_utils.py` carries dependency-free equivalents. The
+  ledger's `family_fdr` reuses `benjamini_hochberg` **unchanged** by padding
+  declared-but-unrun members with p=1.0, which reproduces conservative BH at the
+  declared m exactly — so no edit to the statistics core was needed at all.
+- **The held-out rule needs a session-level registry, and a holdout can be *spent*.**
+  Reserving "at least one session the agent cannot see" cannot be enforced by a flag on
+  an iteration: a session the loop has never touched has no iterations, so such a check
+  passes precisely when it should block. `HoldoutReservation` is populated by a human
+  act prior to any analysis. A further condition turned out to be required — if any
+  iteration, *for any hypothesis*, ran against the session before it was unlocked, the
+  set was already seen and a later "confirmation" against it is just another
+  exploratory run with a pre-registration attached.
+- **Evidence tier is derived, never stored.** A stored tier is a field someone edits to
+  make a warning disappear. `evidence_tier` recomputes eight preconditions on every
+  read, so the only route to `confirmatory` is to satisfy them.
+
+**And one constraint §5 assumes away.** "Reserve at least one recording session"
+presumes there are several to choose from. The first capability-manifest build found
+that **exactly one session in the dataset has scored behavioural events**, and two have
+tracking. Every event-based analysis therefore has n=1 session and no available holdout.
+The mechanism ships built and empty; for those analyses the honest status is
+"confirmation not currently possible", which the reports state in those words rather
+than implying it is merely pending.
+
 ## 6. Human-in-the-loop + the lab notebook
 
 **Interaction.** Two surfaces, no new stack required:
@@ -76,6 +116,38 @@ This is what separates a research tool from a false-positive generator. All of i
 **Approval gates (hard requirements).** The agent may run cached/known analyses freely, but must get explicit scientist approval before: (a) writing/modifying repo code, (b) running against the held-out session, (c) anything touching `config/` or `.gui_cache/` deletion (both flagged "don't touch without asking" in `CLAUDE.md`).
 
 **Lab notebook — the one genuinely new artifact.** An append-only record (natural fit for the existing `database/` + `habitat_pipeline.db`) capturing, per iteration: hypothesis text, params, git commit of the code that ran, dataset/session version, result metrics, figure paths, literature citations, the test family for multiple-comparison accounting, and the scientist's decision. This gives provenance, resumability, and a reviewable audit trail in one place.
+
+### 6a. Amendments after implementation (2026-08-20)
+
+- **"Append-only" is aspirational, not enforced.** The notebook is a SQLite database
+  and permits `UPDATE`/`DELETE`; `record_decision` and `set_hypothesis_status`
+  legitimately update. Triggers were considered and rejected because they would block
+  those. Integrity here rests on convention plus a snapshot before any bulk write, and
+  the docs should say so rather than implying immutability the schema doesn't provide.
+  Where immutability genuinely matters it is enforced by *omission*: `FrozenPrediction`
+  has no update method anywhere, so changing a pre-registered statistic means inserting
+  a new row and marking the old one superseded.
+- **The approval gates are structural at the record seam and instructional at the
+  compute seam.** Gate (a) — approval before writing repo code — is real only against
+  the literal `Write`/`Edit` tools; `implement-module` also holds `Bash`, and a broad
+  `python -c` entry in `.claude/settings.local.json` makes that an unprompted write
+  primitive. Nothing can stop an agent running a decoder forty times either. What
+  *is* enforceable is the record: `record_family_test` refuses an undeclared test, and
+  `abandon_family_test` cannot drop one without an explicit answer about whether the
+  reason came from a result. That is the right target — the problem is the garden of
+  forking paths, not compute cost.
+- **A per-iteration record cannot make refutations prominent.** Prominence is a
+  property of the *collection*: a hypothesis that gets quietly dropped simply has no
+  report. The index report (`notebook_cli.py index`) is therefore a first-class
+  deliverable, not an extra, and it lists every hypothesis with its tier, verdict and
+  denominator status — including refuted, blocked, and iterations attached to no
+  hypothesis at all.
+- **The decision field failed for want of a one-liner.** `scientist_decision` sat at
+  `'pending'` on every logged iteration, not because anyone chose to skip the gate but
+  because recording a decision meant opening a Python session. `notebook_cli.py decide
+  <id> approved -m "..."` is the fix. Adding validation would only have made agents log
+  less; and the denominator is deliberately *not* coupled to this field, since a ledger
+  that depended on a human field empty 18 times out of 18 would be dead on arrival.
 
 ## 7. Hardening layer (right-sized ops)
 

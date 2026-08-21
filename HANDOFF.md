@@ -269,3 +269,243 @@ conclusively one way or the other before revisiting partner claims.
 module (every hypothesis run so far only needed existing modules); authenticating
 any literature MCP; the multi-session sweep; held-out-session enforcement; raising
 `decode_location`'s shuffle budget to resolve self-decoding conclusively.
+
+## Layers 0 + 7 + HTML reports — done 2026-08-20
+
+Built the first increment of the scientist's 8-layer architecture (plan:
+`~/.claude/plans/i-want-to-brainstorm-lazy-emerson.md`). **Layer 0** (capability
+manifest + hazard registry), **Layer 7** (multiple-comparisons ledger, declared-family
+budget, holdout registry), and **Layer 5's** per-hypothesis HTML report. Layers 1, 2,
+3, 4 and 6 remain out of scope, except for the minimum slice of Layer 2 that Layer 7
+requires: a frozen prediction has to exist for "no post-hoc redefinition without a new
+frozen record" to mean anything.
+
+**Test suite: 743 passed, 3 skipped** (`-m "not slow"`, ~70 s), up from 270. Nothing
+committed.
+
+### The finding that justified the increment
+
+Iteration 12's headline claim was computed on a post-hoc-shrunk denominator. Iteration
+10 ran all 12 tracked objects; iterations 11–12 dropped 5, moving m from 12 to 7, and
+four of those five exclusions are justified in prose *by iteration 10's own results*.
+
+| declared m | `rat613` q | verdict | `fdr_resolution(m, 180).resolvable` |
+|---|---|---|---|
+| 7 (as logged) | 0.0387 | significant | **True** |
+| 11 (honest: 12 − the one degenerate target) | **0.0608** | **not significant** | **False** |
+
+The exclusion did not merely improve q-values — it flipped the repo's *own* resolution
+guard from "unresolvable" to "resolvable", because the guard was handed the count the
+exclusion produced. So it manufactured both the significance and the permission to
+claim it. `tests/test_lab_notebook_ledger.py::TestIteration12GoldenRegression` pins
+both answers side by side so the bug cannot come back quietly.
+
+### What Layer 0's first manifest build found
+
+`python scripts/build_capability_manifest.py --probe-level paths` — 34 sessions,
+101 s, zero build errors. The inventory is the finding:
+
+| | cohort 7 | cohort 5 |
+|---|---|---|
+| sessions | 14 | 20 |
+| with tracking | **2** (`20251210`, `20251216`) | **0** (no tracking directory at all) |
+| with scored events | **1** (`20251216`) | 2 |
+| 4-animal ephys | 7 | 0 |
+
+**Only one session in the entire dataset has scored behavioural events.** "47
+animal/session pairs" is true of *ephys* only. Consequences:
+
+- Every event-based analysis (`decode_opponent_identity`, `decode_event_outcome`) has
+  **n = 1 session**.
+- The EC opponent-identity finding has **no path to holdout confirmation** — there is
+  no second event-scored session to reserve. Per the scope decision the holdout
+  mechanism ships built and *empty*, and this constraint is recorded rather than
+  worked around. It is not "confirmation pending"; it is "confirmation not currently
+  possible".
+- `docs/HYPOTHESIS_BACKLOG.md`'s cross-day-stability item and the deferred
+  multi-session sweep are both far more constrained than they read.
+
+**Three versions of session 20251216's scoring exist on disk**, and
+`DataStorageManager` resolves the oldest (it only looks inside date-named
+directories):
+
+| file | modified | rows | 631 outcome events |
+|---|---|---|---|
+| `20251216/20251216_behavior_event_df.csv` ← analyses use this | 2026-03-02 | 641 | **19** (12 W / 7 L) |
+| `behavior_event_df.csv` (loose) | 2026-08-13 | 688 | **29** (20 W / 9 L) |
+| `behavior_event_df_update.csv` (loose) | 2026-08-13 | 693 | **29** (20 W / 9 L) |
+
+**Decision: the dated directory is canonical.** Guarded by `HZ-DATA-007` so nobody
+wires a loose file in by accident. Worth knowing that Hypothesis 1's "underpowered
+null" was computed on the 19-event version; the discrepancy between the three files
+has not been explained.
+
+### Layer 0 — `discovery/`
+
+`hazards.json` holds **29 entries**, 16 with executable detectors (`callable` →
+`ephys._stats_utils` or `discovery/detectors.py`; `test` → a pytest node id).
+`validate_registry` enforces an **earn-your-place rule** — an entry qualifies only if
+it demonstrably caused a wrong result here, or it carries a real detector — plus
+importlib-resolvability of every callable and (under `slow`) collectability of every
+test node id, so a renamed function can't leave a decoration that looks like a guard.
+
+The module's central invariant: **a detector that cannot run reports
+`ran=False, passed=None`, never `passed=True`.** `TestCannotCheckIsNotAPass` attacks
+that from seven directions. A safety layer that reports unverified safety is worse
+than none, because it displaces the scepticism that would otherwise have applied.
+
+`capability_manifest.py` is the **consult** path and must never import
+`ingestion`/`video`/`ephys`; a subprocess test enforces it, because if the cheap check
+could reach the SMB share, eventually something would make it. `manifest_status()`
+**raises** on a missing file, a schema mismatch or a changed cohort config, and only
+warns on age — a quietly stale manifest is worse than no manifest, since the agent
+will trust it. Don't soften those raises.
+
+Requirements vs. hazards is a deliberate split: a **requirement** answers "does the
+data exist" (a missing prerequisite, e.g. no validated head direction, belongs in
+`discovery/requirements.py`); a **hazard** answers "will this silently lie".
+
+### Layer 7 — additive to `database/lab_notebook.py`
+
+Four new tables (`family_tests`, `holdout_reservations`, `frozen_predictions`,
+`hypothesis_verdicts`) plus 10 retrofitted columns via `_ensure_added_columns`. The
+real database migrated cleanly (snapshot taken first); legacy rows read `NULL` =
+"not recorded".
+
+- **The atomic unit is a *declared test*, not an iteration** — it exists before it
+  runs and survives being abandoned, which is what makes the denominator knowable.
+  One iteration can hold many tests (`decode_all_locations` sweeps 12 objects into one
+  result dict).
+- `family_fdr` pads declared-but-unrun members with p=1.0 and calls the existing
+  `benjamini_hochberg` **unchanged** — that reproduces conservative BH at the declared
+  m exactly, so `ephys/_stats_utils.py` needed no edit at all.
+- `abandon_family_test`'s `outcome_dependent` is **required with no default**. An
+  outcome-dependent exclusion *stays* in the denominator: deciding to drop it was
+  itself a test.
+- **The old holdout gate was inverted.** `held_out` was an `Iteration` column, so the
+  prescribed check returned nothing for an untouched session and passed — it could
+  only fire after being violated. Now a session-level registry, keyed on the
+  normalized 8-digit date (the DB says `'20251210'`, the directory says
+  `RatCity_20251210_1359_40Hz`), failing **closed** on an unresolvable id.
+- **The tier is derived, never stored** — a stored flag is a field someone edits to
+  make a banner go away. `evidence_tier` recomputes **eight** conditions. Every
+  hypothesis today fails at the first, which is the correct current state.
+
+Honest scoping of the budget: **structural at the record seam, instructional at the
+compute seam.** Nothing can stop an agent running a decoder forty times in ad-hoc
+Python. What becomes impossible is laundering forty runs into the record as seven
+tests with a clean q-value. That is the right target — the problem is the garden of
+forking paths, not compute cost.
+
+### Design gaps found while building, all closed
+
+1. **A spent holdout still counted.** Nothing checked whether a reserved session had
+   already been analysed *before* being unlocked, which destroys the only thing a
+   holdout provides. Now condition 8, and it catches contamination from a *different*
+   hypothesis too — the loop having seen the session while chasing another question
+   contaminates it just as thoroughly.
+2. **`HZ-STAT-001` bound `n_tests` to `n_quality_cells`** (377) — right for per-cell
+   decoding, wrong for `decode_location`, whose family is the object sweep. Now bound
+   to the ledger's declared denominator, and it reports "cannot check" rather than
+   confidently using the wrong number.
+3. **An undeclared family reported a denominator of 0** and crashed `fdr_resolution`
+   on real data. Legacy families predate the ledger: their denominator is
+   *unrecorded*, not zero. New `denominator_status='undeclared'`.
+4. **The manifest's label counts were read from the wrong tuple slot.** All three
+   `extract_*_labels` return `(start_times, end_times, labels)`; the probe
+   destructured index 1. Caught by a mock test *before* the multi-hour full probe ran.
+
+### Correction to earlier framing in this file
+
+`ephys/_lda_decoding.py`'s three `StratifiedKFold(shuffle=True, random_state=42)`
+sites are **not** the same defect as the `decode_location` leak. That one shuffled
+0.5 s *position bins* — adjacent, near-identical samples of an autocorrelated signal.
+These split **one row per behavioural event**, seconds to minutes apart. The genuine
+residual risk is narrower (bouts of events clustered in time, which would want grouped
+folds keyed on event time), and the fixed `random_state` across the observed run *and*
+every permutation is correct because it makes the comparison paired. So it is an
+*audit* item (`HZ-STAT-005`, allowlisted with a documented rationale and a stale-entry
+check), not a bug — and changing it would move the published 16-significant-cells
+result, so it is a scientist decision explicitly off-limits to `coder`.
+
+### Live observation: the pathology happening in real time
+
+Iterations 13–18 were logged during this session from a concurrent process. Iterations
+14 → 15 → 16 are one search with a growing headline number and no recorded
+denominator: all 8 EC opponents (28.8% vs 27.7% baseline) → a hand-picked
+`rat613`/`rat635` pair (55.5% vs 50.0%) → `rat634`/`rat635` with
+`min_events_per_class=1` and `cv_folds=4` (**68.4%** vs 55.6%). All have
+`test_family_id=None`. Seeded as `HZ-STAT-013`; left in place at the scientist's
+direction.
+
+### Backfill applied 2026-08-21
+
+`scripts/backfill_ledger.py --apply --confirm-exclusion-classification` ran against the
+real notebook (snapshot taken first). Result, readable via
+`notebook_cli.py ledger 4 --n-shuffles 180`:
+
+```
+family 4: 12 declared, 7 run, 4 abandoned, 1 excluded a priori
+  m used for correction: 11 (status: reconstructed)
+  resolvable at 180 shuffles: False (best achievable q 0.0608; 220 would be needed)
+  object=613  p=0.005525  q=0.0608     <- logged as q=0.0387, significant
+  object=631  p=0.022099  q=0.1215     <- logged as q=0.0773
+```
+
+No test in the family is significant at the declared denominator. The report shows
+"q as logged" beside "q at declared m=11" so both numbers stay visible.
+
+Judgment calls as applied: the near-stationary target counts as `excluded_prespecified`
+with `applied_after_seeing_results=True` (and the verdict is identical at m=10, 11 and
+12, so the call doesn't change the science); the four reverse-null drops are
+outcome-dependent and stay in the denominator; iterations 3/4 are two declared tests;
+the pending scientist decisions were **not** bulk-set. Hypothesis 1 was left at
+`'proposed'` per the scientist's decision — no verdict row was written for it.
+
+Two bugs surfaced during the apply and are fixed with regression tests:
+
+1. **The emptiness check ate its own output.** "Invalidate any family with zero
+   iterations" wrongly invalidated the reconstruction families, which deliberately hold
+   `family_tests` and no iterations. It only appeared on a second run, because the first
+   run's families aren't in the first run's survey. Now requires zero of *both* and skips
+   the reconstruction names by name. The two wrongly-invalidated families were repaired
+   back to `'open'` with a note recording why.
+2. **The hard rule was too strict to be useful.** "Never UPDATE an iterations row" meant
+   the reconstructed family was invisible from the iteration, so the report kept saying
+   "no test family is attached" while a correctly-declared family sat beside it. Narrowed
+   to: a **NULL** `test_family_id` may be filled (adds a pointer, changes no
+   measurement); an existing one is never overwritten; no other column is touched, which
+   a full row-hash test enforces. Iterations 10-12 are now linked to family 4.
+
+### One unreproduced test flake — worth watching
+
+`tests/test_kilosort_data_loading.py::TestKilosortDataLoading::test_load_complete_dataset`
+failed **once**, in a full-suite run, and I could not reproduce it: it passes in
+isolation, passed 5/5 in a targeted loop with its neighbouring file, and passed in 3
+consecutive full fast runs and one full slow run afterwards. The assertion text wasn't
+captured before it stopped recurring.
+
+Not code this increment touched. The plausible mechanism, unverified: `_find_cached_file`
+in `ingestion/kilosort_data_import.py` picks a cached pkl by `sorted(..., key=st_mtime,
+reverse=True)`, which is order-nondeterministic when two files land in the same clock
+tick — and there was a concurrent session writing to this repo throughout. Flagging it
+rather than calling the suite unconditionally green; if it recurs, capture the assertion
+and start there.
+
+### Still not done
+
+- **Step 10, the retroactive backfill** (`scripts/backfill_ledger.py`) — not yet
+  written. Agreed approach: dry-run first, review the denominator table at
+  m in {7,9,10,11,12} together, then decide the six judgment calls before applying.
+- **The full manifest probe** (`--probe-level full`) — hours; the artifact currently
+  says `probe_level: 'paths'`, so `manifest_status()` correctly reports `partial` and
+  content facts (cell counts, event class counts, tracking coverage) are absent.
+- `docs/AI_DISCOVERY_LOOP_DESIGN.md` §5/§6 amendments.
+- Every gate at the *compute* seam is still instructional. Per the scope decision only
+  the git entries were removed from `.claude/settings.local.json`; the broad
+  `python -c` wildcards remain, so `python -c` is still an unprompted write primitive
+  and `implement-module`'s "structural" claim holds only against the literal
+  `Write`/`Edit` tool names.
+- 18 iterations still have `scientist_decision='pending'`, and 15 are attached to no
+  hypothesis. Deliberately **not** bulk-set: record them going forward via
+  `notebook_cli.py decide`.

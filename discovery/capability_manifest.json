@@ -1,0 +1,4104 @@
+{
+ "build_errors": [],
+ "cohorts": [
+  {
+   "config_path": "config/default_paths.json",
+   "config_sha256": "2764f969cbcc19826046fd0cfdff2536be69da43f8061e54a0f5c7c712243993",
+   "name": "cohort7",
+   "pixels_per_cm": null
+  },
+  {
+   "config_path": "config/cohort5_paths.json",
+   "config_sha256": "5715611b7fd79943d8369fba7df27a8f50c1843b9480a0db5370cb0b90896d86",
+   "name": "cohort5",
+   "pixels_per_cm": null
+  }
+ ],
+ "generated_at": "2026-08-20T15:25:06Z",
+ "generated_by": {
+  "argv": "--probe-level paths",
+  "git_commit": "7dc5cdca881dd70fde05ae6e4e29cccf86cf292c",
+  "host": "proskurinm-lw1",
+  "probe_level": "paths",
+  "script": "scripts/build_capability_manifest.py"
+ },
+ "schema_version": 1,
+ "sessions": {
+  "20250812_115448": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650",
+     "651"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session.",
+      "{'animal_id': 'rat651'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session.",
+      "{'animal_id': 'rat651'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session.",
+      "{'animal_id': 'rat651'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650",
+     "rat651"
+    ],
+    "n_animals_with_ephys": 2,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250812_115448.rec\\rat650\\20250812_115448_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat651": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250812_115448.rec\\rat651\\20250812_115448_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 2.6,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250812_115448.rec\\rat650\\20250812_115448_merged.kilosort\\kilosort4",
+       "size": null
+      },
+      "rat651": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250812_115448.rec\\rat651\\20250812_115448_merged.kilosort\\kilosort4",
+       "size": null
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250812",
+   "session_id": "20250812_115448",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20250813_110128": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650",
+     "651"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session.",
+      "{'animal_id': 'rat651'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session.",
+      "{'animal_id': 'rat651'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session.",
+      "{'animal_id': 'rat651'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650",
+     "rat651"
+    ],
+    "n_animals_with_ephys": 2,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250813_110128.rec\\rat650\\20250813_110128_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat651": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250813_110128.rec\\rat651\\20250813_110128_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 2.48,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250813_110128.rec\\rat650\\20250813_110128_merged.kilosort\\kilosort4",
+       "size": null
+      },
+      "rat651": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250813_110128.rec\\rat651\\20250813_110128_merged.kilosort\\kilosort4",
+       "size": null
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250813",
+   "session_id": "20250813_110128",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20250814_105654": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650",
+     "651"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session.",
+      "{'animal_id': 'rat651'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session.",
+      "{'animal_id': 'rat651'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session.",
+      "{'animal_id': 'rat651'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650",
+     "rat651"
+    ],
+    "n_animals_with_ephys": 2,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250814_105654.rec\\rat650\\20250814_105654_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat651": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250814_105654.rec\\rat651\\20250814_105654_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 2.83,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250814_105654.rec\\rat650\\20250814_105654_merged.kilosort\\kilosort4",
+       "size": null
+      },
+      "rat651": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250814_105654.rec\\rat651\\20250814_105654_merged.kilosort\\kilosort4",
+       "size": null
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250814",
+   "session_id": "20250814_105654",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20250815_110536": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650",
+     "651"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session.",
+      "{'animal_id': 'rat651'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session.",
+      "{'animal_id': 'rat651'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session.",
+      "{'animal_id': 'rat651'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650",
+     "rat651"
+    ],
+    "n_animals_with_ephys": 2,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250815_110536.rec\\rat650\\20250815_110536_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat651": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250815_110536.rec\\rat651\\20250815_110536_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 2.6,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250815_110536.rec\\rat650\\20250815_110536_merged.kilosort\\kilosort4",
+       "size": null
+      },
+      "rat651": {
+       "mtime": 1774447994,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250815_110536.rec\\rat651\\20250815_110536_merged.kilosort\\kilosort4",
+       "size": 0
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250815",
+   "session_id": "20250815_110536",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20250816_111442": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650"
+    ],
+    "n_animals_with_ephys": 1,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250816_111442.rec\\rat650\\20250816_111442_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 1.34,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250816_111442.rec\\rat650\\20250816_111442_merged.kilosort\\kilosort4",
+       "size": null
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250816",
+   "session_id": "20250816_111442",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20250817_110404": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650"
+    ],
+    "n_animals_with_ephys": 1,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250817_110404.rec\\rat650\\20250817_110404_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 1.26,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250817_110404.rec\\rat650\\20250817_110404_merged.kilosort\\kilosort4",
+       "size": null
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250817",
+   "session_id": "20250817_110404",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20250818_104600": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650"
+    ],
+    "n_animals_with_ephys": 1,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250818_104600.rec\\rat650\\20250818_104600_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 1.25,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250818_104600.rec\\rat650\\20250818_104600_merged.kilosort\\kilosort4",
+       "size": null
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250818",
+   "session_id": "20250818_104600",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20250819_141715": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650"
+    ],
+    "n_animals_with_ephys": 1,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250819_141715.rec\\rat650\\20250819_141715_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": true,
+    "event_files": [
+     "\\\\nearline\\karpova\\TervoLab\\analysis\\RatCityBehavior\\cohort5\\20250819\\20250819_behavior_event_df_hierarchy_diff.csv"
+    ]
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 1.25,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "mtime": 1776088011,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250819_141715.rec\\rat650\\20250819_141715_merged.kilosort\\kilosort4",
+       "size": 0
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250819",
+   "session_id": "20250819_141715",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20250819_185946": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650"
+    ],
+    "n_animals_with_ephys": 1,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250819_185946.rec\\rat650\\20250819_185946_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": true,
+    "event_files": [
+     "\\\\nearline\\karpova\\TervoLab\\analysis\\RatCityBehavior\\cohort5\\20250819\\20250819_behavior_event_df_hierarchy_diff.csv"
+    ]
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 1.23,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250819_185946.rec\\rat650\\20250819_185946_merged.kilosort\\kilosort4",
+       "size": null
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250819",
+   "session_id": "20250819_185946",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20250820_092034": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650"
+    ],
+    "n_animals_with_ephys": 1,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250820_092034.rec\\rat650\\20250820_092034_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 1.23,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250820_092034.rec\\rat650\\20250820_092034_merged.kilosort\\kilosort4",
+       "size": null
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250820",
+   "session_id": "20250820_092034",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20250820_135859": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650"
+    ],
+    "n_animals_with_ephys": 1,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250820_135859.rec\\rat650\\20250820_135859_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 1.37,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250820_135859.rec\\rat650\\20250820_135859_merged.kilosort\\kilosort4",
+       "size": null
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250820",
+   "session_id": "20250820_135859",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20250820_181858": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650"
+    ],
+    "n_animals_with_ephys": 1,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250820_181858.rec\\rat650\\20250820_181858_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 1.31,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250820_181858.rec\\rat650\\20250820_181858_merged.kilosort\\kilosort4",
+       "size": null
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250820",
+   "session_id": "20250820_181858",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20250821_094853": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650"
+    ],
+    "n_animals_with_ephys": 1,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250821_094853.rec\\rat650\\20250821_094853_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 1.35,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250821_094853.rec\\rat650\\20250821_094853_merged.kilosort\\kilosort4",
+       "size": null
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250821",
+   "session_id": "20250821_094853",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20250821_141400": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650"
+    ],
+    "n_animals_with_ephys": 1,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250821_141400.rec\\rat650\\20250821_141400_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 1.29,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250821_141400.rec\\rat650\\20250821_141400_merged.kilosort\\kilosort4",
+       "size": null
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250821",
+   "session_id": "20250821_141400",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20250821_182030": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650"
+    ],
+    "n_animals_with_ephys": 1,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250821_182030.rec\\rat650\\20250821_182030_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 1.33,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250821_182030.rec\\rat650\\20250821_182030_merged.kilosort\\kilosort4",
+       "size": null
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250821",
+   "session_id": "20250821_182030",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20250822_092819": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650"
+    ],
+    "n_animals_with_ephys": 1,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250822_092819.rec\\rat650\\20250822_092819_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 1.37,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250822_092819.rec\\rat650\\20250822_092819_merged.kilosort\\kilosort4",
+       "size": null
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250822",
+   "session_id": "20250822_092819",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20250822_140218": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650"
+    ],
+    "n_animals_with_ephys": 1,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250822_140218.rec\\rat650\\20250822_140218_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 1.34,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250822_140218.rec\\rat650\\20250822_140218_merged.kilosort\\kilosort4",
+       "size": null
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250822",
+   "session_id": "20250822_140218",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20250822_182012": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650"
+    ],
+    "n_animals_with_ephys": 1,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250822_182012.rec\\rat650\\20250822_182012_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 1.29,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250822_182012.rec\\rat650\\20250822_182012_merged.kilosort\\kilosort4",
+       "size": null
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250822",
+   "session_id": "20250822_182012",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20250823_102107": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650"
+    ],
+    "n_animals_with_ephys": 1,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250823_102107.rec\\rat650\\20250823_102107_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 1.29,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250823_102107.rec\\rat650\\20250823_102107_merged.kilosort\\kilosort4",
+       "size": null
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250823",
+   "session_id": "20250823_102107",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20250823_152544": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "650"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat650'}: No Kilosort output resolved for this animal/session."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort5",
+   "ephys": {
+    "animals": [
+     "rat650"
+    ],
+    "n_animals_with_ephys": 1,
+    "per_animal": {
+     "rat650": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250823_152544.rec\\rat650\\20250823_152544_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": null,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 1.3,
+    "sources": {
+     "kilosort": {
+      "rat650": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort5\\ephys\\20250823_152544.rec\\rat650\\20250823_152544_merged.kilosort\\kilosort4",
+       "size": null
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20250823",
+   "session_id": "20250823_152544",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20251209_160716": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "613",
+     "615",
+     "630",
+     "631"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: No Kilosort output resolved for this animal/session.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: No Kilosort output resolved for this animal/session.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: No Kilosort output resolved for this animal/session.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort7",
+   "ephys": {
+    "animals": [
+     "rat613",
+     "rat615",
+     "rat630",
+     "rat631"
+    ],
+    "n_animals_with_ephys": 4,
+    "per_animal": {
+     "rat613": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251209_160716.rec\\rat613\\20251209_160716_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat615": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251209_160716.rec\\rat615\\20251209_160716_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat630": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251209_160716.rec\\rat630\\20251209_160716_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat631": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251209_160716.rec\\rat631\\20251209_160716_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": 4.0,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 6.03,
+    "sources": {
+     "kilosort": {
+      "rat613": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251209_160716.rec\\rat613\\20251209_160716_merged.kilosort\\kilosort4",
+       "size": null
+      },
+      "rat615": {
+       "mtime": 1774380273,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251209_160716.rec\\rat615\\20251209_160716_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat630": {
+       "mtime": 1774380276,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251209_160716.rec\\rat630\\20251209_160716_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat631": {
+       "mtime": 1774380279,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251209_160716.rec\\rat631\\20251209_160716_merged.kilosort\\kilosort4",
+       "size": 0
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20251209",
+   "session_id": "20251209_160716",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20251210_110059": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "613",
+     "615",
+     "630",
+     "631"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort7",
+   "ephys": {
+    "animals": [
+     "rat613",
+     "rat615",
+     "rat630",
+     "rat631"
+    ],
+    "n_animals_with_ephys": 4,
+    "per_animal": {
+     "rat613": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251210_110059.rec\\rat613\\20251210_110059_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat615": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251210_110059.rec\\rat615\\20251210_110059_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat630": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251210_110059.rec\\rat630\\20251210_110059_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat631": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251210_110059.rec\\rat631\\20251210_110059_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": 4.0,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 6.16,
+    "sources": {
+     "kilosort": {
+      "rat613": {
+       "mtime": 1780420557,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251210_110059.rec\\rat613\\20251210_110059_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat615": {
+       "mtime": 1780420627,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251210_110059.rec\\rat615\\20251210_110059_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat630": {
+       "mtime": 1780420468,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251210_110059.rec\\rat630\\20251210_110059_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat631": {
+       "mtime": 1778161466,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251210_110059.rec\\rat631\\20251210_110059_merged.kilosort\\kilosort4",
+       "size": 0
+      }
+     },
+     "tracking": {
+      "mtime": 1769238264,
+      "path": "\\\\nearline\\karpova\\TervoLab\\analysis\\Tracking\\manual_tracking\\cohort7\\RatCity_20251210_1359_40Hz\\RatCity_20251210_1359_40Hz_mask_metrics.csv",
+      "size": 83792696
+     }
+    }
+   },
+   "session_date": "20251210",
+   "session_id": "20251210_110059",
+   "tracking": {
+    "available": true,
+    "n_tracking_files": 2,
+    "tracking_file": "\\\\nearline\\karpova\\TervoLab\\analysis\\Tracking\\manual_tracking\\cohort7\\RatCity_20251210_1359_40Hz\\RatCity_20251210_1359_40Hz_mask_metrics.csv"
+   }
+  },
+  "20251211_104841": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "613",
+     "615",
+     "631"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort7",
+   "ephys": {
+    "animals": [
+     "rat613",
+     "rat615",
+     "rat631"
+    ],
+    "n_animals_with_ephys": 3,
+    "per_animal": {
+     "rat613": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251211_104841.rec\\rat613\\20251211_104841_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat615": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251211_104841.rec\\rat615\\20251211_104841_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat631": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251211_104841.rec\\rat631\\20251211_104841_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": 4.0,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 4.42,
+    "sources": {
+     "kilosort": {
+      "rat613": {
+       "mtime": 1774380312,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251211_104841.rec\\rat613\\20251211_104841_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat615": {
+       "mtime": 1774458457,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251211_104841.rec\\rat615\\20251211_104841_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat631": {
+       "mtime": 1774380316,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251211_104841.rec\\rat631\\20251211_104841_merged.kilosort\\kilosort4",
+       "size": 0
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20251211",
+   "session_id": "20251211_104841",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20251212_111544": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "613",
+     "615",
+     "630",
+     "631"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort7",
+   "ephys": {
+    "animals": [
+     "rat613",
+     "rat615",
+     "rat630",
+     "rat631"
+    ],
+    "n_animals_with_ephys": 4,
+    "per_animal": {
+     "rat613": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251212_111544.rec\\rat613\\20251212_111544_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat615": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251212_111544.rec\\rat615\\20251212_111544_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat630": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251212_111544.rec\\rat630\\20251212_111544_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat631": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251212_111544.rec\\rat631\\20251212_111544_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": 4.0,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 5.91,
+    "sources": {
+     "kilosort": {
+      "rat613": {
+       "mtime": 1774380323,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251212_111544.rec\\rat613\\20251212_111544_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat615": {
+       "mtime": 1774458473,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251212_111544.rec\\rat615\\20251212_111544_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat630": {
+       "mtime": 1774380340,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251212_111544.rec\\rat630\\20251212_111544_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat631": {
+       "mtime": 1774380342,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251212_111544.rec\\rat631\\20251212_111544_merged.kilosort\\kilosort4",
+       "size": 0
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20251212",
+   "session_id": "20251212_111544",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20251213_102418": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "613",
+     "615",
+     "630",
+     "631"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort7",
+   "ephys": {
+    "animals": [
+     "rat613",
+     "rat615",
+     "rat630",
+     "rat631"
+    ],
+    "n_animals_with_ephys": 4,
+    "per_animal": {
+     "rat613": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251213_102418.rec\\rat613\\20251213_102418_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat615": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251213_102418.rec\\rat615\\20251213_102418_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat630": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251213_102418.rec\\rat630\\20251213_102418_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat631": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251213_102418.rec\\rat631\\20251213_102418_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": 4.0,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 6.04,
+    "sources": {
+     "kilosort": {
+      "rat613": {
+       "mtime": 1774380351,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251213_102418.rec\\rat613\\20251213_102418_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat615": {
+       "mtime": 1774380357,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251213_102418.rec\\rat615\\20251213_102418_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat630": {
+       "mtime": 1774380364,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251213_102418.rec\\rat630\\20251213_102418_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat631": {
+       "mtime": 1774380377,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251213_102418.rec\\rat631\\20251213_102418_merged.kilosort\\kilosort4",
+       "size": 0
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20251213",
+   "session_id": "20251213_102418",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20251214_104416": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "613",
+     "615",
+     "630",
+     "631"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort7",
+   "ephys": {
+    "animals": [
+     "rat613",
+     "rat615",
+     "rat630",
+     "rat631"
+    ],
+    "n_animals_with_ephys": 4,
+    "per_animal": {
+     "rat613": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251214_104416.rec\\rat613\\20251214_104416_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat615": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251214_104416.rec\\rat615\\20251214_104416_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat630": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251214_104416.rec\\rat630\\20251214_104416_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat631": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251214_104416.rec\\rat631\\20251214_104416_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": 4.0,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 6.01,
+    "sources": {
+     "kilosort": {
+      "rat613": {
+       "mtime": 1774380386,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251214_104416.rec\\rat613\\20251214_104416_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat615": {
+       "mtime": 1774458492,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251214_104416.rec\\rat615\\20251214_104416_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat630": {
+       "mtime": 1774380391,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251214_104416.rec\\rat630\\20251214_104416_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat631": {
+       "mtime": 1774380395,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251214_104416.rec\\rat631\\20251214_104416_merged.kilosort\\kilosort4",
+       "size": 0
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20251214",
+   "session_id": "20251214_104416",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20251215_161815": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "613",
+     "615",
+     "630",
+     "631"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort7",
+   "ephys": {
+    "animals": [
+     "rat613",
+     "rat615",
+     "rat630",
+     "rat631"
+    ],
+    "n_animals_with_ephys": 4,
+    "per_animal": {
+     "rat613": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251215_161815.rec\\rat613\\20251215_161815_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat615": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251215_161815.rec\\rat615\\20251215_161815_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat630": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251215_161815.rec\\rat630\\20251215_161815_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat631": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251215_161815.rec\\rat631\\20251215_161815_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": 4.0,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 6.11,
+    "sources": {
+     "kilosort": {
+      "rat613": {
+       "mtime": 1774380401,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251215_161815.rec\\rat613\\20251215_161815_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat615": {
+       "mtime": 1774458513,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251215_161815.rec\\rat615\\20251215_161815_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat630": {
+       "mtime": 1774380408,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251215_161815.rec\\rat630\\20251215_161815_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat631": {
+       "mtime": 1774380416,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251215_161815.rec\\rat631\\20251215_161815_merged.kilosort\\kilosort4",
+       "size": 0
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20251215",
+   "session_id": "20251215_161815",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20251216_094334": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "613",
+     "615",
+     "630",
+     "631"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort7",
+   "ephys": {
+    "animals": [
+     "rat613",
+     "rat615",
+     "rat630",
+     "rat631"
+    ],
+    "n_animals_with_ephys": 4,
+    "per_animal": {
+     "rat613": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251216_094334.rec\\rat613\\20251216_094334_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat615": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251216_094334.rec\\rat615\\20251216_094334_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat630": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251216_094334.rec\\rat630\\20251216_094334_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat631": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251216_094334.rec\\rat631\\20251216_094334_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": true,
+    "event_files": [
+     "\\\\nearline\\karpova\\TervoLab\\analysis\\RatCityBehavior\\cohort7\\20251216\\20251216_behavior_event_df.csv"
+    ]
+   },
+   "pixels_per_cm": 4.0,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 4.55,
+    "sources": {
+     "kilosort": {
+      "rat613": {
+       "mtime": 1774380422,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251216_094334.rec\\rat613\\20251216_094334_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat615": {
+       "mtime": 1774380437,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251216_094334.rec\\rat615\\20251216_094334_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat630": {
+       "mtime": 1774380449,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251216_094334.rec\\rat630\\20251216_094334_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat631": {
+       "mtime": 1778163235,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251216_094334.rec\\rat631\\20251216_094334_merged.kilosort\\kilosort4",
+       "size": 0
+      }
+     },
+     "tracking": {
+      "mtime": 1772321981,
+      "path": "\\\\nearline\\karpova\\TervoLab\\analysis\\Tracking\\manual_tracking\\cohort7\\merged_20251216_0950_1200\\merged_20251216_0950_1200_mask_metrics.csv",
+      "size": 7605918
+     }
+    }
+   },
+   "session_date": "20251216",
+   "session_id": "20251216_094334",
+   "tracking": {
+    "available": true,
+    "n_tracking_files": 1,
+    "tracking_file": "\\\\nearline\\karpova\\TervoLab\\analysis\\Tracking\\manual_tracking\\cohort7\\merged_20251216_0950_1200\\merged_20251216_0950_1200_mask_metrics.csv"
+   }
+  },
+  "20251217_095130": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "613",
+     "630",
+     "631"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort7",
+   "ephys": {
+    "animals": [
+     "rat613",
+     "rat630",
+     "rat631"
+    ],
+    "n_animals_with_ephys": 3,
+    "per_animal": {
+     "rat613": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251217_095130.rec\\rat613\\20251217_095130_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat630": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251217_095130.rec\\rat630\\20251217_095130_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat631": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251217_095130.rec\\rat631\\20251217_095130_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": 4.0,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 4.52,
+    "sources": {
+     "kilosort": {
+      "rat613": {
+       "mtime": 1774380482,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251217_095130.rec\\rat613\\20251217_095130_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat630": {
+       "mtime": 1774458551,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251217_095130.rec\\rat630\\20251217_095130_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat631": {
+       "mtime": 1774458594,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251217_095130.rec\\rat631\\20251217_095130_merged.kilosort\\kilosort4",
+       "size": 0
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20251217",
+   "session_id": "20251217_095130",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20251218_094749": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "613",
+     "630",
+     "631"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort7",
+   "ephys": {
+    "animals": [
+     "rat613",
+     "rat630",
+     "rat631"
+    ],
+    "n_animals_with_ephys": 3,
+    "per_animal": {
+     "rat613": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251218_094749.rec\\rat613\\20251218_094749_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat630": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251218_094749.rec\\rat630\\20251218_094749_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat631": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251218_094749.rec\\rat631\\20251218_094749_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": 4.0,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 4.43,
+    "sources": {
+     "kilosort": {
+      "rat613": {
+       "mtime": 1774380498,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251218_094749.rec\\rat613\\20251218_094749_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat630": {
+       "mtime": 1774458614,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251218_094749.rec\\rat630\\20251218_094749_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat631": {
+       "mtime": 1774380517,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251218_094749.rec\\rat631\\20251218_094749_merged.kilosort\\kilosort4",
+       "size": 0
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20251218",
+   "session_id": "20251218_094749",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20251219_101017": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "613",
+     "630",
+     "631"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort7",
+   "ephys": {
+    "animals": [
+     "rat613",
+     "rat630",
+     "rat631"
+    ],
+    "n_animals_with_ephys": 3,
+    "per_animal": {
+     "rat613": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251219_101017.rec\\rat613\\20251219_101017_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat630": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251219_101017.rec\\rat630\\20251219_101017_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat631": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251219_101017.rec\\rat631\\20251219_101017_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": 4.0,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 4.51,
+    "sources": {
+     "kilosort": {
+      "rat613": {
+       "mtime": 1774380532,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251219_101017.rec\\rat613\\20251219_101017_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat630": {
+       "mtime": 1774380550,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251219_101017.rec\\rat630\\20251219_101017_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat631": {
+       "mtime": 1774380566,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251219_101017.rec\\rat631\\20251219_101017_merged.kilosort\\kilosort4",
+       "size": 0
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20251219",
+   "session_id": "20251219_101017",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20251220_094752": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "613",
+     "630",
+     "631"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort7",
+   "ephys": {
+    "animals": [
+     "rat613",
+     "rat630",
+     "rat631"
+    ],
+    "n_animals_with_ephys": 3,
+    "per_animal": {
+     "rat613": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251220_094752.rec\\rat613\\20251220_094752_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat630": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251220_094752.rec\\rat630\\20251220_094752_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat631": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251220_094752.rec\\rat631\\20251220_094752_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": 4.0,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 4.76,
+    "sources": {
+     "kilosort": {
+      "rat613": {
+       "mtime": 1774380577,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251220_094752.rec\\rat613\\20251220_094752_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat630": {
+       "mtime": 1774380588,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251220_094752.rec\\rat630\\20251220_094752_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat631": {
+       "mtime": 1774380613,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251220_094752.rec\\rat631\\20251220_094752_merged.kilosort\\kilosort4",
+       "size": 0
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20251220",
+   "session_id": "20251220_094752",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20251221_101519": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "630",
+     "631"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort7",
+   "ephys": {
+    "animals": [
+     "rat630",
+     "rat631"
+    ],
+    "n_animals_with_ephys": 2,
+    "per_animal": {
+     "rat630": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251221_101519.rec\\rat630\\20251221_101519_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat631": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251221_101519.rec\\rat631\\20251221_101519_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": 4.0,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 3.2,
+    "sources": {
+     "kilosort": {
+      "rat630": {
+       "mtime": 1774458704,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251221_101519.rec\\rat630\\20251221_101519_merged.kilosort\\kilosort4",
+       "size": 0
+      },
+      "rat631": {
+       "mtime": 1774458747,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251221_101519.rec\\rat631\\20251221_101519_merged.kilosort\\kilosort4",
+       "size": 0
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20251221",
+   "session_id": "20251221_101519",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  },
+  "20251222_094643": {
+   "aliases": {
+    "numeric_animal_ids": [
+     "630",
+     "631"
+    ]
+   },
+   "analysis_readiness": {
+    "ephys.decode_event_outcome": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_location": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_opponent_identity": {
+     "n_viable": 0,
+     "notes": [],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.decode_partner_distance": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat630'}: No Kilosort output resolved for this animal/session.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.inter_brain_dynamics": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat630'}: No Kilosort output resolved for this animal/session.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    },
+    "ephys.social_spatial_fields": {
+     "n_viable": 0,
+     "notes": [
+      "{'animal_id': 'rat630'}: No Kilosort output resolved for this animal/session.",
+      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+     ],
+     "testable": false,
+     "viable_params": []
+    }
+   },
+   "cohort": "cohort7",
+   "ephys": {
+    "animals": [
+     "rat630",
+     "rat631"
+    ],
+    "n_animals_with_ephys": 2,
+    "per_animal": {
+     "rat630": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251222_094643.rec\\rat630\\20251222_094643_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": false,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     },
+     "rat631": {
+      "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251222_094643.rec\\rat631\\20251222_094643_merged.kilosort\\kilosort4",
+      "n_clusters": null,
+      "n_quality_cells": null,
+      "path_exists": true,
+      "sync": {
+       "error": "not probed at --probe-level paths",
+       "ok": null
+      }
+     }
+    }
+   },
+   "events": {
+    "available": false,
+    "event_files": []
+   },
+   "pixels_per_cm": 4.0,
+   "provenance": {
+    "errors": [],
+    "probe_level": "paths",
+    "probe_seconds": 2.98,
+    "sources": {
+     "kilosort": {
+      "rat630": {
+       "missing": true,
+       "mtime": null,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251222_094643.rec\\rat630\\20251222_094643_merged.kilosort\\kilosort4",
+       "size": null
+      },
+      "rat631": {
+       "mtime": 1774458811,
+       "path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251222_094643.rec\\rat631\\20251222_094643_merged.kilosort\\kilosort4",
+       "size": 0
+      }
+     },
+     "tracking": null
+    }
+   },
+   "session_date": "20251222",
+   "session_id": "20251222_094643",
+   "tracking": {
+    "available": false,
+    "n_tracking_files": 0,
+    "tracking_file": null
+   }
+  }
+ }
+}

@@ -209,3 +209,8 @@ __marimo__/
 
 # Habitat Pipeline GUI cache
 .gui_cache/
+
+# AI-in-the-loop discovery platform: generated HTML reports and lab-notebook
+# snapshots. Both are derived artifacts - the notebook DB is the source of truth.
+reports/out/
+habitat_pipeline.db.bak_*

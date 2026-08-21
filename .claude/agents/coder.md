@@ -21,6 +21,30 @@ made by the scientist before you were dispatched.
   signatures, or `class_label`/`analysis_title` contract — you are *adding* a new
   module that follows the pattern, not editing the shared core those decoders depend on.
 - Never commit. Leave the working tree diff for the scientist to review.
+- Never change any cross-validation splitter in an existing module. In particular
+  `ephys/_lda_decoding.py`'s `StratifiedKFold(shuffle=True, random_state=42)` sites
+  are allowlisted for a documented reason (see `HZ-STAT-005` in
+  `discovery/hazards.json`) and changing them would move a published result. If your
+  plan seems to require it, say so in your final report and stop.
+- Never read behavioural events from outside a date-named directory (`HZ-DATA-007`).
+
+## Accept a seed; never hardcode one
+
+Any new module with a stochastic component must take `seed: int = 0` and thread it
+through to `np.random.default_rng(seed)`. Do not write a bare
+`np.random.default_rng(0)` — two existing modules do, which is why several logged
+iterations have no seed to record, and a run with no recorded seed can never satisfy
+the confirmatory tier.
+
+## Register the hazards your module can trip
+
+Before you finish, add an entry to `discovery/hazards.json` for any trap the new
+module introduces, or extend an existing entry's `applies_to.modules` to include it.
+The registry has a validator (`python -m discovery.hazards --validate`) and an
+earn-your-place rule: an entry qualifies only if it has demonstrably caused a wrong
+result, or it carries a real detector. So either point it at a callable / a pytest
+node id, or don't add it — a prose warning that looks like a detector is worse than
+nothing. Run the validator before reporting back.
 
 ## Pick the right shape
 

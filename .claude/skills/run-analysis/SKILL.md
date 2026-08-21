@@ -16,15 +16,76 @@ and throw away the result), and log the real result to the lab notebook
 (`database/lab_notebook.py`). You do not write new analysis code here — that's the
 deferred `implement-module` skill/Coder role.
 
-## 0. Approval gates — check before running anything
+## 0. Gates — run these three checks *before* touching any data
 
-Per §6 of the design doc, get explicit scientist approval before:
-- running against a session flagged `held_out=True` in the notebook (query
-  `LabNotebook.iterations_for_session(...)` or ask if unsure),
-- anything that would touch `config/` or delete `.gui_cache/` (`CLAUDE.md`: don't, without asking).
+### 0a. Holdout — assert, don't inspect
 
-Running a cached/known analysis against a normal (non-held-out) session needs no
-special approval — that's the whole point of a repo-native Runner.
+```python
+from database.lab_notebook import LabNotebook
+nb = LabNotebook()
+nb.assert_not_held_out(session_id, animal_id,
+                       purpose='exploratory',   # 'confirmatory' needs hypothesis_id=
+                       multi_animal=<True for anything reading >1 animal>)
+```
+
+Call this **before** constructing a `DataStorageManager`. It raises
+`HoldoutViolation` if the session is reserved, and `HoldoutIndeterminate` if the
+session id can't be resolved to a date — the second is deliberate, and you must not
+work around it by proceeding.
+
+> **This replaces an earlier instruction that did not work.** The previous version
+> said to detect a held-out session by querying `LabNotebook.iterations_for_session(...)`.
+> `held_out` was a column on *iterations*, so a session the loop had never touched —
+> exactly what a holdout protects — returned zero rows and passed the check. That gate
+> could only fire *after* it had already been violated. The registry
+> (`holdout_reservations`) is populated by a human act prior to any analysis, so it
+> protects "never touched" correctly.
+
+Set `multi_animal=True` for `decode_location` with a partner `object_name`,
+`run_inter_brain`, `social_spatial_fields`, and `decode_partner_distance`. Those read
+a partner's data *through* the focal animal, so an animal-scoped reservation cannot be
+honoured by running a different focal animal.
+
+### 0b. Feasibility — let the manifest refuse before the load
+
+```python
+from discovery.capability_manifest import check_testable
+report = check_testable('ephys.decode_opponent_identity', session_id,
+                        animal_id=animal_id, behavior_type='EC')
+print(report.summary())
+```
+
+If `report.testable` is False, **stop and report the reason** — do not load data to
+find out what the manifest already knows. Leave a parameter out to get
+`viable_params` enumerated instead of guessing: this is what replaces discovering by
+trial and error that `behavior_type='F'` yields one usable opponent while `'EC'`
+yields eight. Report every entry in `report.warnings` even when the run proceeds.
+
+Known availability constraints as of the 2026-08-20 manifest build — check the
+manifest rather than assuming, but be aware: **only one cohort-7 session
+(`20251216`) has scored behavioural events at all**, and only two (`20251210`,
+`20251216`) have tracking. Cohort 5 has no tracking directory. Every event-based
+analysis therefore has n=1 session.
+
+### 0c. Hazards — consult before running, acknowledge after
+
+```python
+from discovery.hazards import hazards_for, render_digest, run_detectors_for
+print(render_digest(hazards_for(stage='run', analysis=analysis, min_severity='high'),
+                    'line'))
+```
+
+After the run, execute the run-stage detectors against the result and state the
+outcome. A detector reporting `ran=False` means **could not check** — never report it
+as a pass.
+
+### 0d. Still needs explicit scientist approval
+
+- Anything touching `config/`, or deleting `.gui_cache/` (`CLAUDE.md`: don't, without asking).
+- Any run against a reserved session, including a confirmatory one.
+
+Running a known analysis against a normal session needs no special approval — that's
+the point of a repo-native Runner.
 
 ## 1. Pick the right module for the ask
 
@@ -114,6 +175,69 @@ Runtime: roughly linear in `n_cells * n_shuffles`. ~150 cells × 200 shuffles to
 ~370 s on this workstation, so plan for minutes, not seconds — don't block on it in
 the same turn if you can do something else first.
 
+### Never hand-count `n_tests`
+
+`n_tests` is the size of the **declared** test family, and it differs by analysis
+shape: the number of cells for per-cell decoding, the number of swept objects for
+`decode_location`, the number of targets for social place fields. Get it from the
+ledger:
+
+```python
+denom = nb.family_denominator(test_family_id)
+fdr_resolution(n_tests=denom['n_tests_for_correction'], n_shuffles=n_shuffles,
+               alpha=alpha)
+```
+
+**Never pass `len(things_i_decided_to_keep)`.** This is not a style preference. In
+iterations 11–12 the guard was called with a post-exclusion count of 7 instead of the
+honest 11, and it therefore reported the design as *resolvable* when at 11 it is not —
+so the exclusion manufactured both the significance and the permission to claim it.
+`rat613`'s q was reported as 0.0387 (significant); at the declared denominator it is
+0.0608 (not significant).
+
+## 3b. Declare the test family *before* running it
+
+```python
+family = nb.get_or_create_test_family(f'{analysis} {animal_id}/{session_id}')
+nb.declare_family_tests(family.id, test_keys, declared_by='<who>')
+```
+
+`test_keys` is every test you intend to run, decided now. For `decode_location` that
+is `tracking.get_object_names()` — computable a priori. For the decoders it is the
+label configurations you plan to try.
+
+Use `get_or_create_test_family`, not `create_test_family`: the latter has no
+get-or-create check and already produced two identically-named families eight minutes
+apart in this notebook, one of them empty. Since family membership *is* the
+denominator, a duplicate silently splits it.
+
+Then record each result as it arrives:
+
+```python
+nb.record_family_test(family.id, test_key, iteration_id=iteration.id,
+                      p_value=p, git_commit=commit)
+```
+
+Recording an undeclared key raises `UndeclaredTestError`. That refusal is the point:
+nothing stops you running a decoder forty times, but forty runs cannot be entered into
+the record as seven tests with a clean q-value.
+
+**Dropping a test is `abandon_family_test`, and it requires an answer:**
+
+```python
+nb.abandon_family_test(family.id, test_key, reason='...',
+                       outcome_dependent=<True/False>)   # required, no default
+```
+
+`outcome_dependent=True` means the reason came from looking at a result. Such a test
+**stays in the denominator** — deciding to drop it was itself a test. Only a criterion
+that was available a priori (a target's positional variance, say) leaves the
+denominator, and even then record `applied_after_seeing_results` honestly.
+
+Also record a class-subset or a relaxed floor as its own declared test. Narrowing an
+8-way problem to a hand-picked pair, or lowering `min_events_per_class` below 5, makes
+a result easier without making it truer (see `HZ-STAT-013`).
+
 ## 4. Log the run to the lab notebook
 
 ```python
@@ -150,12 +274,17 @@ result_summary = {
     'fdr_resolvable': resolution.get('resolvable'),
     'recommended_n_shuffles': resolution.get('recommended_n_shuffles'),
 }
+from database.dataset_fingerprint import fingerprint_session
+fingerprint, method = fingerprint_session(dsm)
+
 iteration = nb.log_iteration(
     'ephys.decode_opponent_identity', params, result_summary,
     animal_id=animal_id, session_id=session_id,
     hypothesis_id=hypothesis_id,      # None if this is exploratory, not hypothesis-testing
-    test_family_id=test_family_id,    # None unless you're accumulating a campaign
-    figure_paths=saved_png_paths,     # if you saved plots
+    test_family_id=test_family_id,    # attach one; see step 3b
+    figure_paths=saved_png_paths,     # see the figure convention below
+    seed=seed,                        # None only if the module hardcodes it
+    dataset_fingerprint=fingerprint, fingerprint_method=method,
 )
 ```
 
@@ -163,13 +292,49 @@ Log a **curated summary**, not the raw `cell_results` dict (hundreds of per-cell
 entries) — `log_iteration`'s `_json_safe` handles numpy types in whatever you pass,
 but keep it to the scalars a scientist or the `interpret-results` skill actually needs.
 
-If this run is part of an ongoing campaign (multiple hypotheses/analyses against one
-session), create or reuse a `TestFamily` (`nb.create_test_family(...)`) and pass its
-id — that's what lets `nb.recompute_family_significance(...)` correct across the
-whole campaign later, on top of the within-run per-cell correction from step 3.
+`held_out` is derived from the holdout registry automatically, so the flag and the
+registry cannot disagree. Don't pass it by hand.
+
+**Record `seed` and `dataset_fingerprint`.** Both are preconditions of the
+confirmatory tier: a confirmation run that can't be reproduced confirms nothing. Pass
+`seed=None` when the module genuinely hardcodes it — `ephys/decode_location.py` and
+`ephys/_lda_decoding.py`'s time-resolved path both use `np.random.default_rng(0)` with
+no parameter — and the report will say "not recorded (module hardcodes it)" rather
+than implying one was chosen. `compute_population_significance` *does* plumb `seed`
+correctly, so pass it there.
+
+### Save figures somewhere durable
+
+```python
+out_dir = Path('reports/figures') / session_id
+out_dir.mkdir(parents=True, exist_ok=True)
+```
+
+**Never save a figure to the session scratchpad.** Exactly one of this notebook's
+iterations has a figure path, and it points into a per-session temp directory that
+gets reaped — so the report generator has nothing to render for it. `reports/figures/`
+is git-ignored but durable.
 
 ## 5. Hand off
 
 After logging, tell the scientist what you found in one or two sentences (numbers,
-not a data dump) and, if this came out of `interpret-results`/a hypothesis, point at
-the `Iteration.id` so they can `record_decision(...)` on it.
+not a data dump). Report the accuracy against `baseline_accuracy`, never against
+`1/n_classes`, and report q against the ledger's denominator
+(`nb.family_fdr(family_id)`), not against whatever the analysis computed internally.
+
+Point at the `Iteration.id` and give them the one-liner:
+
+```
+python scripts/notebook_cli.py decide <id> approved -m "..."
+```
+
+That command exists because `scientist_decision` sat at `'pending'` on every logged
+iteration — not because anyone chose to skip the gate, but because recording a
+decision meant opening a Python session.
+
+Then generate the report so the run is legible without a Python session:
+
+```
+python scripts/notebook_cli.py report --hypothesis <id>
+python scripts/notebook_cli.py index
+```

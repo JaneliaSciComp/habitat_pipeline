@@ -63,6 +63,40 @@ State, in this order:
      re-running before treating "above chance" as a finding. Phase 0's synthetic demo
      showed a naive screen over-calls significance (9/24 flagged vs. 6 truly tuned).
 
+5. **The denominator.** Read q from the ledger, not from `result_summary`:
+
+   ```python
+   fdr = nb.family_fdr(iteration.test_family_id)
+   denom = fdr['denominator']
+   ```
+
+   Report `denom['n_tests_for_correction']` alongside every q-value, and compare
+   `q_at_declared` against whatever the analysis logged. If `denom['denominator_status']`
+   is not `'clean'`, say which it is and what it means:
+
+   | status | what to say |
+   |---|---|
+   | `undeclared` | The family declares no tests, so the denominator is **unrecorded** — not zero. Any corrected statistic is uninterpretable. |
+   | `reconstructed` | Recovered after the fact; the true number of tests is a **lower bound**. |
+   | `outcome_dependent_exclusions` | Tests were dropped because of what results showed. That is selection on the outcome. |
+   | `pipeline_changed` | The family mixes code versions. Those are not the same statistic. |
+
+   This is the check that matters most. Iteration 12's `rat613` was logged at
+   q=0.0387 and significant; at the declared denominator of 11 it is q=0.0608 and
+   **not** significant, and the resolution guard flips from resolvable to not.
+
+6. **Hazards, at the interpret stage.**
+
+   ```python
+   from discovery.hazards import hazards_for, render_digest, run_detectors_for
+   ```
+
+   Run the interpret-stage detectors against the result. A detector reporting
+   `ran=False` is **could not check** — never report it as a pass. `HZ-INTERP-002`
+   has no detector on purpose: re-derive the headline number from its inputs by hand
+   and say what you recomputed versus what you took on trust. Every trap in this
+   registry was found that way and by nothing else.
+
 ## 2. Only then, look at the figures
 
 If PNGs exist (`figure_paths_list()`), read them for a **sanity check** against the
@@ -99,7 +133,31 @@ End with one of:
   nothing was learned. Recommend the specific re-run configuration.
 - **"Not supported"** — accuracy at or below `baseline_accuracy`, and/or a
   well-resolved test found nothing.
+- **"Refuted"** — a well-resolved test contradicts the hypothesis's own prediction.
+  Distinct from "not supported", which is an absence of evidence. Record it as such:
+  `notebook_cli.py verdict <id> refuted --rationale "..."`. A refutation is a result
+  and must be reported as prominently as a confirmation, not quietly dropped.
+
+### Always state the tier
+
+```python
+print(nb.evidence_tier(hypothesis_id).summary())
+```
+
+Unless the tier is `confirmatory`, say in these words: **"Without the holdout, the
+loop's output is hypothesis-generating only."** Then list the unmet conditions the
+assessment returns. This is not boilerplate — a result on the same data the
+hypothesis was generated from is a different kind of claim from one that survived
+held-out confirmation, and the wording is what keeps the two from being read alike.
+
+Note the current constraint: only one cohort-7 session has scored behavioural events,
+so **no event-based hypothesis has a path to holdout confirmation right now**. Say
+that rather than implying confirmation is merely pending.
 
 If a `Hypothesis` is attached to this iteration, this verdict is what the scientist
 uses at the approval gate — say plainly whether you'd advance it, and why, in terms
-of the numbers above.
+of the numbers above. Then point at:
+
+```
+python scripts/notebook_cli.py report --hypothesis <id>
+```

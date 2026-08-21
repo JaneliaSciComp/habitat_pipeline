@@ -37,6 +37,28 @@ underlying statistics say. Concretely:
    a q-value/significance result for something, say the visual impression is
    uncorroborated, not that it looks significant.
 
+## The chance line in these figures is drawn at the wrong level, deliberately
+
+`ephys/decoding_plots.py` draws its chance lines — and computes its "Cells > Chance"
+counts — at `1/n_classes`. That is prevalence-blind. The honest bar for the plain
+accuracy these plots show is the **majority-class baseline**, which is higher whenever
+classes are imbalanced.
+
+This is not a bug to report. It was left in place on purpose so that already-published
+figures don't change (`CLAUDE.md` records it as a standing gotcha, and it is
+`HZ-INTERP-001` in `discovery/hazards.json`). The consequence for you is specific:
+
+> **A figure from this module can show many cells "above chance" for a result that
+> does not beat naive guessing.** On the real 12-winner/7-loser split, `1/n_classes`
+> is 50% while the majority-class baseline is 63.2%, and a 60.6% result sits above
+> the drawn line and below the real bar.
+
+So whenever you look at a `decoding_plots` figure: say which line you are looking at,
+say that it is `1/n_classes`, and refuse to read "above the line" as "above chance"
+unless you were given `baseline_accuracy` and the accuracy clears *that*. This is the
+single most likely way for a figure to mislead you in this repo, and it is why the
+design puts the numbers first and the image second.
+
 ## Output shape
 
 A short report: (a) the metrics as given, (b) what the figure(s) show, (c) explicit

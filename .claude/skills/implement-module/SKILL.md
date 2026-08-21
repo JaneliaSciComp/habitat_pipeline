@@ -56,6 +56,37 @@ check:
 - **Whether a domain-guardrail test applies** (an identity/axis/self-target swap this
   analysis could get backwards) — name the specific swap risk, or state there isn't one.
 
+## 2b. Hazard gate — run the detectors before you ask
+
+```python
+from discovery.hazards import hazards_for, render_digest, run_detectors_for
+applicable = hazards_for(stage='implement', module=planned_module, min_severity='high')
+results = run_detectors_for(applicable, context, allow_tests=True)
+```
+
+A failing `critical` detector **blocks dispatch**. This gate is genuinely enforceable
+— this skill has `Bash` and no `Write`/`Edit`, so it can run the checks and cannot
+write around them.
+
+The build plan in step 2 must name:
+- which hazard ids the new module could trip, and
+- the guardrail test that will prove it doesn't.
+
+Two specific things are off-limits to `coder` and must be raised with the scientist
+instead if the plan seems to need them:
+
+1. **Changing `ephys/_lda_decoding.py`'s cross-validation.** Its three
+   `StratifiedKFold(shuffle=True, random_state=42)` sites are *allowlisted, not
+   cleared* (`HZ-STAT-005`). They split one row per behavioural event, so this is not
+   the adjacent-bin leakage fixed in `decode_location`, and the fixed `random_state`
+   across the observed run and every permutation is correct because it makes the
+   comparison paired. The genuine residual risk is bouts of events clustered in time,
+   which would want grouped folds keyed on event time. Changing it would move the
+   published 16-significant-cells result, so it is a scientist decision.
+2. **Reading behavioural events from outside a date-named directory** (`HZ-DATA-007`).
+   The dated directory is canonical by decision; the newer loose exports differ by
+   enough rows to change a conclusion.
+
 ## 3. Hard stop — explicit approval required
 
 Present the plan from step 2 to the scientist and **wait for an affirmative

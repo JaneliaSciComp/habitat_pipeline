@@ -18,11 +18,59 @@ prose; this file is the actionable, feasibility-checked backlog to draw from.
 
 ## Cross-cutting caveats (apply to multiple items below)
 
-1. **Tracking coverage is session-specific.** Session `20251216`'s tracking only
-   has the focal animal (`rat631`) identity-resolved — discovered while testing
-   Hypothesis #3 (`database/lab_notebook.py`, iteration 9, status `blocked`). Check
-   `object_name` values in a session's `*_mask_metrics.csv` before assuming
-   multi-animal position data exists for it.
+> ### ⚠️ Caveat 0 — read this first. Most of this backlog is more constrained than it reads.
+>
+> The first capability-manifest build (2026-08-20,
+> `python scripts/build_capability_manifest.py --probe-level paths`) inventoried all
+> 34 sessions across both cohorts. The result reshapes what is actually schedulable:
+>
+> | | cohort 7 | cohort 5 |
+> |---|---|---|
+> | sessions | 14 | 20 |
+> | with tracking | **2** (`20251210`, `20251216`) | **0** — no tracking directory exists |
+> | with scored behavioural events | **1** (`20251216`) | 2 |
+> | 4-animal ephys | 7 | 0 |
+>
+> **Only one session in the dataset has scored behavioural events.** Every item below
+> that depends on events — anything routed through `decode_opponent_identity` or
+> `decode_event_outcome`, and every "rank"/"outcome"/"identity" framing — has
+> **n = 1 session**. That does not make those items wrong, but it does mean:
+>
+> - **No event-based claim currently has a path to held-out confirmation.** There is
+>   no second event-scored session to reserve. The holdout machinery exists and is
+>   empty by design; for these items the honest status is "confirmation not currently
+>   possible", not "confirmation pending".
+> - **§D's cross-day stability item is blocked**, not ready to run. Its stated first
+>   pair (`20251216` vs `20251210`) has events for only one of the two.
+> - **`HANDOFF.md`'s deferred multi-session sweep** enumerates 47 animal/session pairs
+>   of *ephys*. Any sweep touching events or tracking is bounded by 1 and 2 sessions
+>   respectively.
+> - Spatial items (§B, §E, §J) have two candidate sessions, so a
+>   replication/holdout design is at least conceivable there — which is where the
+>   holdout is most worth spending.
+>
+> Don't take the table on trust: ask the manifest, which answers per-analysis and
+> gives a reason and an alternative.
+>
+> ```python
+> from discovery.capability_manifest import check_testable, suggest_sessions
+> print(check_testable('ephys.social_spatial_fields', '20251216',
+>                      animal_id='rat631').summary())
+> print(suggest_sessions('ephys.social_spatial_fields', 'rat631'))
+> ```
+
+1. **Tracking coverage is session-specific — and it is a time *window*, not a boolean.**
+   Session `20251216`'s tracking only has the focal animal (`rat631`) identity-resolved
+   — discovered while testing Hypothesis #3 (`database/lab_notebook.py`, iteration 9,
+   status `blocked`). Check `object_name` values in a session's `*_mask_metrics.csv`
+   before assuming multi-animal position data exists.
+   **Additionally**: that session's tracking file (`merged_20251216_0950_1200`) covers
+   roughly **63%** of a recording that starts at 09:43:34, and both
+   `resolve_tracking_on_ephys_clock` and `compute_social_place_fields` accept a time
+   window that defaults to *everything*. An analysis run over the whole session
+   silently mixes ~37% no-position time into its occupancy maps. Pass
+   `t_window_ephys` from the manifest's `tracking.ephys_window`. Guarded as
+   `HZ-DATA-002`.
 2. **N>2 simultaneous ephys is actually routine — confirmed 2026-08-19.**
    `get_animals_and_sessions()` shows most cohort-7 sessions (including `20251216`,
    the session behind the opponent-identity finding) have **4** simultaneously-

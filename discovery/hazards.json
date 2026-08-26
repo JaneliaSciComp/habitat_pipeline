@@ -628,28 +628,34 @@
         "analyses": ["ephys.social_spatial_fields", "ephys.decode_location", "ephys.decode_partner_distance"]
       },
       "symptom": "Nothing visible. Occupancy maps and rate estimates are computed over a window that includes time with no position data at all.",
-      "mechanism": "Tracking coverage is a time window, not a boolean. resolve_tracking_on_ephys_clock and compute_social_place_fields both accept a window and both default to the whole recording, and nothing in the repo computes what the window should be.",
-      "consequence": "Silent corruption of every occupancy-normalised quantity, proportional to the uncovered fraction.",
+      "mechanism": "Tracking coverage is a time window, not a boolean, and it is per ANIMAL rather than per session: animals in one session share a clock but not a recording length. resolve_tracking_on_ephys_clock and compute_social_place_fields both accept a window and both default to the whole recording, and nothing in the repo computes what the window should be.",
+      "consequence": "Silent corruption of every occupancy-normalised quantity, proportional to the uncovered fraction. And because coverage differs per animal, a single session-wide figure is not just imprecise but meaningless.",
       "detector": {
         "type": "callable",
         "callable": "discovery.detectors:tracking_coverage_ok",
         "args_from": {
-          "frac_covered": "$manifest.tracking.frac_of_ephys_duration_covered",
+          "frac_covered": "$manifest.tracking.coverage_by_animal.{animal_id}",
           "ephys_window": "$manifest.tracking.ephys_window"
         },
         "pass_if": {"field": "covers_enough", "op": "is_true"},
-        "on_fail": "Tracking covers only {frac_covered:.0%} of the recording (below {min_frac:.0%}). Pass t_window_ephys={ephys_window} explicitly, or the uncovered fraction silently enters every occupancy map."
+        "on_fail": "Tracking covers only {frac_covered:.0%} of THIS animal's recording (below {min_frac:.0%}). Pass t_window_ephys={ephys_window} explicitly, or the uncovered fraction silently enters every occupancy map."
       },
       "remedies": [
         "pass t_window_ephys / t_start_ephys / t_end_ephys from the manifest's tracking.ephys_window",
+        "read coverage from tracking.coverage_by_animal[animal], never from a session-wide scalar",
         "report the covered fraction alongside any occupancy-normalised result"
       ],
       "known_gaps": [
         "No analysis module defaults its time window to the tracking span; every caller must pass it."
       ],
       "evidence": {
-        "occurred": false,
-        "note": "Discovered during Layer 0 design, 2026-08-20, and not previously documented anywhere. Session 20251216's tracking file merged_20251216_0950_1200 covers roughly 63% of a recording starting 09:43:34."
+        "occurred": true,
+        "date": "2026-08-26",
+        "where": [
+          "Session 20251216, measured by the first full capability-manifest probe: the tracking window on the ephys clock is [687.3, 8187.2] s, a span of 7499.9 s, against per-animal recording durations of 18866 s (rat613), 3651 s (rat615), 18556 s (rat630) and 9960 s (rat631)",
+          "so coverage is 39.8% / 205% / 40.4% / 75.3% depending on the animal - and 205% is impossible, which is the tell that a session-wide scalar was never a coherent quantity",
+          "an earlier version of this probe divided by whichever animal sorted first and recorded 0.3975 as THE coverage; the figure of 'roughly 63%' documented on 2026-08-20 was filename arithmetic and was wrong for every animal"
+        ]
       },
       "references": [
         "video/tracking_import.py::resolve_tracking_on_ephys_clock",

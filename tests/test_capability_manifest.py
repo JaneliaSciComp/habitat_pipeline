@@ -77,8 +77,11 @@ def _manifest_dict():
                     'available': True,
                     'n_identity_resolved_animals': 1,
                     'identity_resolved_animals': ['rat631'],
-                    'frac_of_ephys_duration_covered': 0.63,
-                    'ephys_window': [412.7, 8231.4],
+                    # Per animal: one session, four recording lengths.
+                    'coverage_by_animal': {'rat631': 0.753, 'rat613': 0.3975},
+                    'coverage_reference_animal': 'rat613',
+                    'frac_of_ephys_duration_covered': 0.3975,
+                    'ephys_window': [687.3, 8187.2],
                     'objects': {
                         'rat631': {'identity_resolved': True, 'frac_frames_present': 0.997,
                                    'x_std_px': 143.2, 'y_std_px': 121.9},
@@ -87,7 +90,10 @@ def _manifest_dict():
                 'events': {
                     'available': True,
                     'n_events_total': 641,
-                    'frac_events_within_ephys_window': 1.0,
+                    'frac_events_within_recording_by_animal': {
+                        'rat631': 0.9376, 'rat613': 0.9376},
+                    'events_window_reference_animal': 'rat631',
+                    'frac_events_within_ephys_window': 0.9376,
                     'per_animal': {
                         'rat631': {
                             'opponent_labels': {
@@ -106,7 +112,7 @@ def _manifest_dict():
                         },
                     },
                 },
-                'provenance': {'sources': {}},
+                'provenance': {'sources': {}, 'probe_level': 'full'},
             },
             # Four animals with ephys and full multi-animal tracking.
             'RatCity_20251210_1359_40Hz': {
@@ -128,6 +134,8 @@ def _manifest_dict():
                     'available': True,
                     'n_identity_resolved_animals': 4,
                     'identity_resolved_animals': ['rat613', 'rat630', 'rat631', 'rat635'],
+                    'coverage_by_animal': {'rat631': 0.95, 'rat613': 0.95},
+                    'coverage_reference_animal': 'rat631',
                     'frac_of_ephys_duration_covered': 0.95,
                     'ephys_window': [0.0, 12000.0],
                     'objects': {
@@ -142,9 +150,12 @@ def _manifest_dict():
                                    'x_std_px': 120.0, 'y_std_px': 118.0},
                     },
                 },
-                'events': {'available': True, 'frac_events_within_ephys_window': 1.0,
+                'events': {'available': True,
+                           'frac_events_within_recording_by_animal': {
+                               'rat631': 1.0, 'rat613': 1.0},
+                           'frac_events_within_ephys_window': 1.0,
                            'per_animal': {}},
-                'provenance': {'sources': {}},
+                'provenance': {'sources': {}, 'probe_level': 'full'},
             },
         },
     }
@@ -258,7 +269,7 @@ class TestTheRealFailures:
         """63% coverage doesn't make the analysis impossible, only wrong if ignored."""
         report = check_testable('ephys.decode_location', '20251216',
                                 animal_id='rat631', object_name='rat631', path=manifest)
-        assert any('frac_of_ephys_duration_covered' in w.requirement
+        assert any('coverage_by_animal' in w.requirement
                    for w in report.warnings)
         assert any('HZ-DATA-002' in w.hazard_ids for w in report.warnings)
 
@@ -272,6 +283,30 @@ class TestTheRealFailures:
                                 animal_id='rat631', object_name='rat632', path=manifest)
         assert report.testable is False
         assert any('absent' in u.observed for u in report.unmet)
+
+    def test_coverage_is_read_per_animal(self, manifest):
+        """One session, several recording lengths - so coverage is per animal.
+
+        On the real 20251216 the same tracking window covers 39.8% of rat613's
+        recording and 75.3% of rat631's. A session-wide scalar reported one of
+        those as the answer for all four animals.
+        """
+        record = session_capabilities('20251216', manifest)
+        coverage = record['tracking']['coverage_by_animal']
+        assert coverage['rat631'] != coverage['rat613']
+
+        lenient = check_testable('ephys.decode_location', '20251216',
+                                 animal_id='rat631', object_name='rat631',
+                                 path=manifest)
+        strict = check_testable('ephys.decode_location', '20251216',
+                                animal_id='rat613', object_name='rat631',
+                                path=manifest)
+        # rat631 is at 0.753 and rat613 at 0.3975; both are below the 0.8
+        # threshold, but the warning must quote each animal's own number.
+        observed = {r.animal_id: [w.observed for w in r.warnings
+                                  if 'coverage_by_animal' in w.requirement]
+                    for r in (lenient, strict)}
+        assert observed['rat631'] != observed['rat613']
 
 
 class TestResolveParams:
@@ -367,13 +402,43 @@ class TestStalenessRaisesRatherThanWarns:
         assert status.state == 'fresh'
         assert status.n_sessions == 2
 
-    def test_paths_level_probe_is_flagged_partial(self, tmp_path):
+    def test_probe_level_is_derived_from_sessions_not_the_top_level_claim(self, tmp_path):
+        """The top-level field records what the last run *asked for*.
+
+        Probing one session at 'full' leaves it saying 'full' while every other
+        session is paths-only, so trusting it makes the manifest overstate
+        itself - and manifest_status would then not warn at all.
+        """
         data = _manifest_dict()
-        data['generated_by']['probe_level'] = 'paths'
+        data['generated_by']['probe_level'] = 'full'      # the optimistic claim
+        for record in data['sessions'].values():
+            record['provenance']['probe_level'] = 'paths'  # the reality
         path = tmp_path / 'm.json'
         path.write_text(json.dumps(data), encoding='utf-8')
-        with pytest.warns(RuntimeWarning, match='probe-level paths'):
-            assert manifest_status(path).state == 'partial'
+        with pytest.warns(RuntimeWarning, match='paths-only'):
+            status = manifest_status(path)
+        assert status.probe_level == 'paths'
+        assert status.state == 'partial'
+        assert status.n_fully_probed == 0
+
+    def test_a_mixed_manifest_is_partial_and_says_how_many(self, tmp_path):
+        """The real state after probing one session out of 34."""
+        data = _manifest_dict()
+        keys = sorted(data['sessions'])
+        data['sessions'][keys[0]]['provenance']['probe_level'] = 'full'
+        data['sessions'][keys[1]]['provenance']['probe_level'] = 'paths'
+        path = tmp_path / 'm.json'
+        path.write_text(json.dumps(data), encoding='utf-8')
+        with pytest.warns(RuntimeWarning, match='1 of 2'):
+            status = manifest_status(path)
+        assert status.probe_level == 'mixed'
+        assert status.state == 'partial'
+        assert status.n_fully_probed == 1
+
+    def test_a_fully_probed_manifest_is_fresh(self, manifest):
+        status = manifest_status(manifest)
+        assert status.probe_level == 'full'
+        assert status.n_fully_probed == status.n_sessions
 
     def test_old_manifest_warns_but_is_usable(self, tmp_path):
         data = _manifest_dict()

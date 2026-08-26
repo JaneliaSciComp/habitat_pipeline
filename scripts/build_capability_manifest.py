@@ -106,8 +106,12 @@ def cmd_build(args) -> int:
     cohorts = [c for c in DEFAULT_COHORTS
                if not args.cohort or c['name'] in args.cohort]
 
+    # Always resume from an existing artifact unless --rebuild is given.
+    # --force re-probes the *selected* sessions; it must not discard the rest,
+    # which an earlier version did - one `--force --sessions X` silently dropped
+    # 33 already-probed sessions.
     manifest = None
-    if out_path.exists() and not args.force:
+    if out_path.exists() and not args.rebuild:
         try:
             manifest = dict(load_manifest(out_path, use_cache=False))
             print(f"resuming from {out_path} "
@@ -215,7 +219,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--animals', nargs='*', default=[])
     parser.add_argument('--dio-channel', type=int, default=1)
     parser.add_argument('--force', action='store_true',
-                        help='re-probe sessions already present at this level')
+                        help='re-probe the selected sessions even if already present '
+                             'at this probe level; other sessions are kept')
+    parser.add_argument('--rebuild', action='store_true',
+                        help='discard the existing artifact and start from scratch '
+                             '(this DOES drop already-probed sessions)')
     parser.add_argument('--check', action='store_true',
                         help='report staleness and exit; builds nothing')
     parser.add_argument('--verify-sources', action='store_true',

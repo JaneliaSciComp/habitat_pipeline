@@ -292,19 +292,39 @@ def probe_sync(dsm, dio_channel: int = 1) -> Dict[str, Any]:
         return out
 
 
-def probe_tracking(dsm, sync=None, *, ephys_duration: Optional[float] = None,
+def probe_tracking(dsm, sync=None, *, durations: Optional[Mapping[str, float]] = None,
                    pixels_per_cm: Optional[float] = None) -> Dict[str, Any]:
     """Per-object tracking facts, read cheaply.
 
     Deliberately avoids ``load_tracking_data``: the merged mask-metrics files
     run to tens of megabytes and only five columns are needed.
+
+    Assumptions:
+        - **"Fraction of the recording covered" is per *animal*, not per
+          session.** Animals in one session do not share a recording length,
+          only a clock: on session ``20251216`` the four durations span
+          3651-18866 s, so one tracking window covers 39.8%, 40.4%, 75.3% or
+          (impossibly) 205% of "the recording" depending on which animal is
+          meant. An earlier version of this probe divided by whichever animal
+          sorted first and reported that single number as the coverage, which
+          is exactly the kind of confidently-wrong scalar this layer exists to
+          prevent. ``coverage_by_animal`` is therefore the real field;
+          ``frac_of_ephys_duration_covered`` is kept only as the *minimum*
+          across animals, which is the conservative reading, and it names its
+          reference animal.
+        - A ratio above 1.0 means the tracking file outlives that animal's
+          recording, which is a real inconsistency rather than a coverage
+          measurement, so it is flagged rather than clamped silently.
     """
     from video.tracking_import import _compute_speed, load_timestamps
 
     out: Dict[str, Any] = {
         'available': False, 'tracking_file': None, 'n_tracking_files': 0,
         'n_frames': None, 'frame_rate_hz': None, 'ephys_window': None,
-        'frac_of_ephys_duration_covered': None, 'n_objects': 0,
+        'ephys_window_span_seconds': None,
+        'coverage_by_animal': {}, 'coverage_reference_animal': None,
+        'frac_of_ephys_duration_covered': None,
+        'coverage_exceeds_recording': [], 'n_objects': 0,
         'identity_resolved_animals': [], 'n_identity_resolved_animals': 0,
         'unresolved_object_names': [], 'objects': {}, 'error': None,
     }
@@ -353,11 +373,24 @@ def probe_tracking(dsm, sync=None, *, ephys_duration: Optional[float] = None,
             with contextlib.suppress(Exception):
                 start = float(sync.convert_behavior_to_ephys(seconds[0]))
                 end = float(sync.convert_behavior_to_ephys(seconds[-1]))
-                out['ephys_window'] = [start, end]
-                if ephys_duration:
-                    covered = max(0.0, min(end, ephys_duration) - max(start, 0.0))
-                    out['frac_of_ephys_duration_covered'] = round(
-                        covered / float(ephys_duration), 4)
+                out['ephys_window'] = [round(start, 3), round(end, 3)]
+                out['ephys_window_span_seconds'] = round(end - start, 3)
+                for animal, duration in sorted((durations or {}).items()):
+                    if not duration:
+                        continue
+                    covered = max(0.0, min(end, float(duration)) - max(start, 0.0))
+                    fraction = round(covered / float(duration), 4)
+                    out['coverage_by_animal'][animal] = fraction
+                    if end > float(duration) * 1.001:
+                        # The tracking file outlives this animal's recording:
+                        # an inconsistency to surface, not a coverage figure.
+                        out['coverage_exceeds_recording'].append(animal)
+                if out['coverage_by_animal']:
+                    reference = min(out['coverage_by_animal'],
+                                    key=lambda a: out['coverage_by_animal'][a])
+                    out['coverage_reference_animal'] = reference
+                    out['frac_of_ephys_duration_covered'] = \
+                        out['coverage_by_animal'][reference]
 
     total_frames = out['n_frames'] or int(frame['frame'].nunique()) \
         if 'frame' in frame.columns else None
@@ -405,14 +438,27 @@ def probe_tracking(dsm, sync=None, *, ephys_duration: Optional[float] = None,
 
 
 def probe_events(dsm, animal_ids: Sequence[str], sync=None, *,
-                 ephys_duration: Optional[float] = None,
+                 durations: Optional[Mapping[str, float]] = None,
                  min_events_per_class: int = 5) -> Dict[str, Any]:
-    """Event counts and, per focal animal, the real usable label sets."""
+    """Event counts and, per focal animal, the real usable label sets.
+
+    Assumptions:
+        - **"Fraction of events inside the recording" is per animal.** Same
+          reason as :func:`probe_tracking`: animals in one session share a clock
+          but not a recording length, so there is no single session duration to
+          divide by. On 20251216 the shortest recording is 3651 s and the
+          longest 18866 s, and using either as "the" duration misreports every
+          other animal. The per-animal figure lives in
+          ``per_animal[animal]['frac_events_within_recording']``; the top-level
+          scalar is the most conservative of them and names its reference.
+    """
     from video.behavioral_events import load_behavioral_events
 
     out: Dict[str, Any] = {
         'available': False, 'event_files': [], 'n_events_total': None,
         'by_type': {}, 'animals_seen': [], 'sync_probe_ok': False,
+        'frac_events_within_recording_by_animal': {},
+        'events_window_reference_animal': None,
         'frac_events_within_ephys_window': None, 'per_animal': {}, 'error': None,
     }
     try:
@@ -455,16 +501,26 @@ def probe_events(dsm, animal_ids: Sequence[str], sync=None, *,
                     behavior.synchronize_with_ephys(sync, create_new_columns=True))
         except Exception as exc:
             out['error'] = f"sync failed: {type(exc).__name__}: {exc}"
-        if out['sync_probe_ok'] and ephys_duration:
+        if out['sync_probe_ok'] and durations:
             with contextlib.suppress(Exception):
                 starts = pd.to_numeric(behavior.events_data['ts_start_ephys'],
                                        errors='coerce').to_numpy(dtype=float)
                 finite = np.isfinite(starts)
                 if finite.any():
-                    inside = ((starts >= 0.0) & (starts <= float(ephys_duration))
-                              & finite).sum()
-                    out['frac_events_within_ephys_window'] = round(
-                        float(inside) / float(finite.sum()), 4)
+                    per_animal_frac: Dict[str, float] = {}
+                    for animal, duration in sorted(durations.items()):
+                        if not duration:
+                            continue
+                        inside = ((starts >= 0.0) & (starts <= float(duration))
+                                  & finite).sum()
+                        per_animal_frac[animal] = round(
+                            float(inside) / float(finite.sum()), 4)
+                    out['frac_events_within_recording_by_animal'] = per_animal_frac
+                    if per_animal_frac:
+                        reference = min(per_animal_frac, key=per_animal_frac.get)
+                        out['events_window_reference_animal'] = reference
+                        out['frac_events_within_ephys_window'] = \
+                            per_animal_frac[reference]
 
     # Label sets, computed by the very functions the analyses call.
     if not out['sync_probe_ok']:
@@ -599,7 +655,9 @@ def build_session_record(session_id: str, animals: Sequence[str], *,
     }
     errors: List[Dict[str, Any]] = []
     primary_dsm = None
-    ephys_duration = None
+    #: Per animal, because animals in one session share a clock but not a
+    #: recording length - see probe_tracking's assumptions.
+    durations: Dict[str, float] = {}
     sync = None
 
     for animal in sorted(str(a) for a in animals):
@@ -633,8 +691,8 @@ def build_session_record(session_id: str, animals: Sequence[str], *,
         if block.get('load_error'):
             errors.append({'animal': animal, 'stage': 'ephys',
                            'error': block['load_error']})
-        if ephys_duration is None and block.get('duration_seconds'):
-            ephys_duration = block['duration_seconds']
+        if block.get('duration_seconds'):
+            durations[animal] = float(block['duration_seconds'])
 
         sync_block = probe_sync(dsm, dio_channel=dio_channel)
         if sync is None and sync_block.get('ok'):
@@ -646,7 +704,7 @@ def build_session_record(session_id: str, animals: Sequence[str], *,
 
     if primary_dsm is not None and probe_level != 'paths':
         record['tracking'] = probe_tracking(
-            primary_dsm, sync, ephys_duration=ephys_duration,
+            primary_dsm, sync, durations=durations,
             pixels_per_cm=record.get('pixels_per_cm'))
         if record['tracking'].get('error'):
             errors.append({'stage': 'tracking', 'error': record['tracking']['error']})
@@ -655,7 +713,7 @@ def build_session_record(session_id: str, animals: Sequence[str], *,
 
         record['events'] = probe_events(
             primary_dsm, sorted(record['ephys']['per_animal']), sync,
-            ephys_duration=ephys_duration)
+            durations=durations)
         if record['events'].get('error'):
             errors.append({'stage': 'events', 'error': record['events']['error']})
         record['provenance']['sources']['events'] = {

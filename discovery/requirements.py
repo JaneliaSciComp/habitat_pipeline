@@ -185,10 +185,12 @@ _EVENT_DECODING = _COMMON + (
     Req('events.available', 'is_true',
         reason='No scored behavioural events for this session.',
         hazards=('HZ-API-002',)),
-    Req('events.frac_events_within_ephys_window', '>=', 0.95,
+    # Per animal, for the same reason coverage is: there is no single session
+    # duration to divide by.
+    Req('events.frac_events_within_recording_by_animal.{animal_id}', '>=', 0.95,
         severity='warning',
-        reason='Some scored events fall outside the recording, so the usable event '
-               'count is lower than it looks.',
+        reason='Some scored events fall outside THIS animal\'s recording, so the '
+               'usable event count is lower than the total suggests.',
         hazards=('HZ-DATA-006',)),
 )
 
@@ -196,10 +198,14 @@ _TRACKING_BASED = _COMMON + (
     Req('tracking.available', 'is_true',
         reason='No tracking file resolved for this session.',
         hazards=('HZ-DATA-001',)),
-    Req('tracking.frac_of_ephys_duration_covered', '>=', 0.8,
+    # Per animal, not per session: animals in one session share a clock but not
+    # a recording length. On 20251216 the four durations span 3651-18866 s, so a
+    # single session-wide coverage number is meaningless (it read 39.8%, 40.4%,
+    # 75.3% or an impossible 205% depending on the animal).
+    Req('tracking.coverage_by_animal.{animal_id}', '>=', 0.8,
         severity='warning',
-        reason='Tracking covers only part of the recording; an analysis over the whole '
-               'session mixes in time with no position data.',
+        reason='Tracking covers only part of THIS animal\'s recording; an analysis '
+               'over the whole session mixes in time with no position data.',
         remedy='Pass t_window_ephys from the manifest\'s tracking.ephys_window.',
         hazards=('HZ-DATA-002',)),
     Req('pixels_per_cm', 'is_present', severity='warning',

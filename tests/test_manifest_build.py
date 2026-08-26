@@ -153,17 +153,51 @@ class TestProbeTracking:
         path = _write_tracking(tmp_path, n_frames=400, frame_rate=40.0,
                                start_second=100.0)
         out = probe_tracking(_StubDsm(tracking=path), _StubSync(),
-                             ephys_duration=200.0)
+                             durations={'rat631': 200.0})
         assert out['ephys_window'][0] == pytest.approx(100.0, abs=0.5)
         # 100s..110s of a 200s recording -> about 5% covered.
-        assert 0.0 < out['frac_of_ephys_duration_covered'] < 0.2
+        assert 0.0 < out['coverage_by_animal']['rat631'] < 0.2
+        assert out['coverage_reference_animal'] == 'rat631'
 
     def test_full_coverage_reports_near_one(self, tmp_path):
         path = _write_tracking(tmp_path, n_frames=400, frame_rate=40.0,
                                start_second=0.0)
         out = probe_tracking(_StubDsm(tracking=path), _StubSync(),
-                             ephys_duration=10.0)
-        assert out['frac_of_ephys_duration_covered'] == pytest.approx(1.0, abs=0.05)
+                             durations={'rat631': 10.0})
+        assert out['coverage_by_animal']['rat631'] == pytest.approx(1.0, abs=0.05)
+
+    def test_coverage_is_per_animal_because_durations_differ(self, tmp_path):
+        """Animals in one session share a clock, not a recording length.
+
+        The real 20251216 durations are 18866 / 3651 / 18556 / 9960 s, so the
+        same tracking window covers 39.8% / 205% / 40.4% / 75.3% of "the
+        recording". An earlier version divided by whichever animal sorted first
+        and reported that as the coverage - a confidently wrong scalar.
+        """
+        path = _write_tracking(tmp_path, n_frames=400, frame_rate=40.0,
+                               start_second=0.0)
+        out = probe_tracking(_StubDsm(tracking=path), _StubSync(),
+                             durations={'rat613': 100.0, 'rat631': 20.0})
+        coverage = out['coverage_by_animal']
+        assert coverage['rat613'] < coverage['rat631'], 'coverage must differ per animal'
+        # The single scalar is the most conservative reading, and names its source.
+        assert out['coverage_reference_animal'] == 'rat613'
+        assert out['frac_of_ephys_duration_covered'] == coverage['rat613']
+
+    def test_a_ratio_above_one_is_flagged_not_reported(self, tmp_path):
+        """205% coverage is an inconsistency, not a measurement."""
+        path = _write_tracking(tmp_path, n_frames=400, frame_rate=40.0,
+                               start_second=0.0)
+        out = probe_tracking(_StubDsm(tracking=path), _StubSync(),
+                             durations={'rat615': 2.0})   # recording far shorter
+        assert 'rat615' in out['coverage_exceeds_recording']
+        assert out['coverage_by_animal']['rat615'] <= 1.0
+
+    def test_no_durations_means_no_coverage_claim(self, tmp_path):
+        path = _write_tracking(tmp_path)
+        out = probe_tracking(_StubDsm(tracking=path), _StubSync())
+        assert out['coverage_by_animal'] == {}
+        assert out['frac_of_ephys_duration_covered'] is None
 
     def test_converts_to_cm_when_the_scale_is_known(self, tmp_path):
         path = _write_tracking(tmp_path)
@@ -294,16 +328,21 @@ class TestDeriveAnalysisReadiness:
                                                 'sync': {'ok': True}}}},
             'tracking': {'available': True, 'n_identity_resolved_animals': 1,
                          'identity_resolved_animals': ['rat631'],
-                         'frac_of_ephys_duration_covered': 0.63,
+                         'coverage_by_animal': {'rat631': 0.753},
+                         'coverage_reference_animal': 'rat631',
+                         'frac_of_ephys_duration_covered': 0.753,
                          'objects': {'rat631': {'identity_resolved': True,
                                                 'frac_frames_present': 0.99}}},
-            'events': {'available': True, 'frac_events_within_ephys_window': 1.0,
+            'events': {'available': True,
+                       'frac_events_within_recording_by_animal': {'rat631': 1.0},
+                       'frac_events_within_ephys_window': 1.0,
                        'per_animal': {'rat631': {
                            'opponent_labels': {
                                'EC': {'n_classes_usable': 8, 'usable': True},
                                'F': {'n_classes_usable': 1, 'usable': False}},
                            'outcome_labels': {'__any__': {'usable': True}}}}},
             'pixels_per_cm': 4.0,
+            'provenance': {'sources': {}, 'probe_level': 'full'},
         }
         record.update(overrides)
         return record

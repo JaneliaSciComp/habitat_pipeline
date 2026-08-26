@@ -492,6 +492,56 @@ tick — and there was a concurrent session writing to this repo throughout. Fla
 rather than calling the suite unconditionally green; if it recurs, capture the assertion
 and start there.
 
+### Full probe of 20251216, and three bugs it exposed — 2026-08-26
+
+`--probe-level full --sessions 20251216`, 87 s. The probe validated against known
+ground truth (rat631: 263 clusters, 149 quality cells, EC 8 classes / 173 events,
+outcome 19 events at a 0.632 majority baseline — all matching the record exactly),
+and turned up something new: **the EC analysis is runnable on two more animals in
+the same session.** rat630 has 8 usable opponent classes / 123 EC events / 114
+quality cells; rat613 has 5 classes / 118 events / 187 quality cells. The EC finding
+has only ever been tested on 631. rat615 has 269 clusters but **0 quality cells**, so
+it is out.
+
+Then three bugs, two of them mine, all fixed with regression tests:
+
+**1. "Fraction of the recording covered" was never a coherent session-wide
+quantity.** Animals in one session share a clock, not a recording length: 20251216's
+four durations are 18866 / 3651 / 18556 / 9960 s. The single tracking window
+`[687.3, 8187.2]` (span 7499.9 s) therefore covers 39.8% / 205% / 40.4% / 75.3% of
+"the recording" — and 205% is impossible, which is the tell. My probe divided by
+whichever animal sorted first and recorded 0.3975 as *the* coverage. Now
+`tracking.coverage_by_animal`, with the scalar kept only as the most conservative
+value and naming its reference animal, and ratios above 1.0 flagged in
+`coverage_exceeds_recording` rather than reported as coverage. Same fix applied to
+`events.frac_events_within_recording_by_animal` after the same bug appeared there:
+**93.8%** of events fall inside rat631's recording, against 39.8% inside rat615's.
+
+**Correction to this file and the backlog**: the "roughly 63%" coverage figure
+recorded on 2026-08-20 was filename arithmetic, never measured, and wrong for every
+animal. For rat631 it is **75.3%**.
+
+**2. `manifest_status` trusted a field that records an intention, not a fact.**
+`generated_by.probe_level` says what the last run *asked for*, so probing one session
+at 'full' left it claiming 'full' while 33 sessions were paths-only — and the status
+then reported `fresh` with no warning. Now derived from the sessions themselves,
+yielding `paths` / `mixed` / `full`, with the count of fully-probed sessions.
+
+**3. `check_testable` could not tell "this data doesn't exist" from "nobody
+looked".** Both surfaced as an unmet requirement, so a paths-level session reported
+`NOT TESTABLE` for content requirements — a confident claim about data nobody had
+examined. Absent-because-unprobed is now `undetermined`, with the exact rebuild
+command in the message.
+
+**Also fixed**: `--force` discarded the entire artifact rather than re-probing the
+selected sessions, contradicting its own help text. One `--force --sessions X`
+silently dropped 33 already-probed sessions (recovered by re-running paths, 101 s).
+`--force` now re-probes the selection and keeps the rest; `--rebuild` is the explicit
+start-over flag.
+
+Manifest state after all this: 34 sessions, `probe_level=mixed`, 1 fully probed,
+correctly self-reporting as `partial`. Suite: 781 passing.
+
 ### Still not done
 
 - **Step 10, the retroactive backfill** (`scripts/backfill_ledger.py`) — not yet

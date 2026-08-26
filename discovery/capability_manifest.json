@@ -14,12 +14,12 @@
    "pixels_per_cm": null
   }
  ],
- "generated_at": "2026-08-20T15:25:06Z",
+ "generated_at": "2026-08-26T15:04:24Z",
  "generated_by": {
-  "argv": "--probe-level paths",
-  "git_commit": "7dc5cdca881dd70fde05ae6e4e29cccf86cf292c",
+  "argv": "--probe-level full --sessions 20251216 --force",
+  "git_commit": "3461a4c6b9a3ee1b5623911ec501bf80a4441dc2",
   "host": "proskurinm-lw1",
-  "probe_level": "paths",
+  "probe_level": "full",
   "script": "scripts/build_capability_manifest.py"
  },
  "schema_version": 1,
@@ -116,7 +116,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 2.6,
+    "probe_seconds": 0.01,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -235,7 +235,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 2.48,
+    "probe_seconds": 0.01,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -354,7 +354,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 2.83,
+    "probe_seconds": 0.01,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -473,7 +473,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 2.6,
+    "probe_seconds": 0.01,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -576,7 +576,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 1.34,
+    "probe_seconds": 0.0,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -674,7 +674,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 1.26,
+    "probe_seconds": 0.0,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -772,7 +772,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 1.25,
+    "probe_seconds": 0.0,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -872,7 +872,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 1.25,
+    "probe_seconds": 0.01,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -971,7 +971,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 1.23,
+    "probe_seconds": 0.0,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -1069,7 +1069,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 1.23,
+    "probe_seconds": 0.0,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -1167,7 +1167,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 1.37,
+    "probe_seconds": 0.0,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -1265,7 +1265,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 1.31,
+    "probe_seconds": 0.0,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -1363,7 +1363,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 1.35,
+    "probe_seconds": 0.0,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -1461,7 +1461,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 1.29,
+    "probe_seconds": 0.0,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -1559,7 +1559,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 1.33,
+    "probe_seconds": 0.0,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -1657,7 +1657,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 1.37,
+    "probe_seconds": 0.0,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -1755,7 +1755,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 1.34,
+    "probe_seconds": 0.0,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -1853,7 +1853,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 1.29,
+    "probe_seconds": 0.0,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -1951,7 +1951,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 1.29,
+    "probe_seconds": 0.0,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -2049,7 +2049,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 1.3,
+    "probe_seconds": 0.0,
     "sources": {
      "kilosort": {
       "rat650": {
@@ -2192,7 +2192,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 6.03,
+    "probe_seconds": 0.03,
     "sources": {
      "kilosort": {
       "rat613": {
@@ -2350,7 +2350,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 6.16,
+    "probe_seconds": 0.04,
     "sources": {
      "kilosort": {
       "rat613": {
@@ -2496,7 +2496,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 4.42,
+    "probe_seconds": 0.02,
     "sources": {
      "kilosort": {
       "rat613": {
@@ -2648,7 +2648,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 5.91,
+    "probe_seconds": 0.03,
     "sources": {
      "kilosort": {
       "rat613": {
@@ -2805,7 +2805,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 6.04,
+    "probe_seconds": 0.03,
     "sources": {
      "kilosort": {
       "rat613": {
@@ -2962,7 +2962,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 6.01,
+    "probe_seconds": 0.03,
     "sources": {
      "kilosort": {
       "rat613": {
@@ -3119,7 +3119,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 6.11,
+    "probe_seconds": 0.03,
     "sources": {
      "kilosort": {
       "rat613": {
@@ -3165,52 +3165,108 @@
    },
    "analysis_readiness": {
     "ephys.decode_event_outcome": {
-     "n_viable": 0,
+     "n_viable": 1,
      "notes": [],
-     "testable": false,
-     "viable_params": []
+     "testable": true,
+     "viable_params": [
+      {
+       "animal_id": "rat631",
+       "behavior_type": "__any__"
+      }
+     ]
     },
     "ephys.decode_location": {
-     "n_viable": 0,
-     "notes": [],
-     "testable": false,
-     "viable_params": []
+     "n_viable": 3,
+     "notes": [
+      "{'animal_id': 'rat615', 'object_name': 'rat631'}: Fewer than 10 quality cells makes a population claim meaningless."
+     ],
+     "testable": true,
+     "viable_params": [
+      {
+       "animal_id": "rat613",
+       "object_name": "rat631"
+      },
+      {
+       "animal_id": "rat630",
+       "object_name": "rat631"
+      },
+      {
+       "animal_id": "rat631",
+       "object_name": "rat631"
+      }
+     ]
     },
     "ephys.decode_opponent_identity": {
-     "n_viable": 0,
+     "n_viable": 7,
      "notes": [],
-     "testable": false,
-     "viable_params": []
+     "testable": true,
+     "viable_params": [
+      {
+       "animal_id": "rat613",
+       "behavior_type": "EC"
+      },
+      {
+       "animal_id": "rat613",
+       "behavior_type": "__any__"
+      },
+      {
+       "animal_id": "rat630",
+       "behavior_type": "EC"
+      },
+      {
+       "animal_id": "rat630",
+       "behavior_type": "__any__"
+      },
+      {
+       "animal_id": "rat631",
+       "behavior_type": "EC"
+      },
+      {
+       "animal_id": "rat631",
+       "behavior_type": "PS"
+      },
+      {
+       "animal_id": "rat631",
+       "behavior_type": "__any__"
+      }
+     ]
     },
     "ephys.decode_partner_distance": {
      "n_viable": 0,
      "notes": [
-      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
-      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
-      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
-      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+      "{'animal_id': 'rat613'}: Only the focal animal is identity-resolved in this session's tracking, so no partner positions exist.",
+      "{'animal_id': 'rat615'}: Fewer than 10 quality cells makes a population claim meaningless.",
+      "{'animal_id': 'rat630'}: Only the focal animal is identity-resolved in this session's tracking, so no partner positions exist.",
+      "{'animal_id': 'rat631'}: Only the focal animal is identity-resolved in this session's tracking, so no partner positions exist."
      ],
      "testable": false,
      "viable_params": []
     },
     "ephys.inter_brain_dynamics": {
-     "n_viable": 0,
+     "n_viable": 3,
      "notes": [
-      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
-      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
-      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
-      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+      "{'animal_id': 'rat615'}: Fewer than 10 quality cells makes a population claim meaningless."
      ],
-     "testable": false,
-     "viable_params": []
+     "testable": true,
+     "viable_params": [
+      {
+       "animal_id": "rat613"
+      },
+      {
+       "animal_id": "rat630"
+      },
+      {
+       "animal_id": "rat631"
+      }
+     ]
     },
     "ephys.social_spatial_fields": {
      "n_viable": 0,
      "notes": [
-      "{'animal_id': 'rat613'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
-      "{'animal_id': 'rat615'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
-      "{'animal_id': 'rat630'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted.",
-      "{'animal_id': 'rat631'}: Ephys/behaviour clock alignment failed for this session, so nothing event- or tracking-aligned can be trusted."
+      "{'animal_id': 'rat613'}: Only the focal animal is identity-resolved in this session's tracking, so no partner positions exist.",
+      "{'animal_id': 'rat615'}: Fewer than 10 quality cells makes a population claim meaningless.",
+      "{'animal_id': 'rat630'}: Only the focal animal is identity-resolved in this session's tracking, so no partner positions exist.",
+      "{'animal_id': 'rat631'}: Only the focal animal is identity-resolved in this session's tracking, so no partner positions exist."
      ],
      "testable": false,
      "viable_params": []
@@ -3227,59 +3283,693 @@
     "n_animals_with_ephys": 4,
     "per_animal": {
      "rat613": {
+      "duration_seconds": 18866.0316,
+      "ephys_window": [
+       0.0,
+       18866.0316
+      ],
+      "files_verified": true,
       "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251216_094334.rec\\rat613\\20251216_094334_merged.kilosort\\kilosort4",
-      "n_clusters": null,
-      "n_quality_cells": null,
+      "load_error": null,
+      "n_clusters": 204,
+      "n_quality_cells": 187,
       "path_exists": true,
+      "quality_thresholds": {
+       "max_cv_isi": 5.0,
+       "min_firing_rate": 0.5,
+       "min_presence_ratio": 0.8
+      },
       "sync": {
-       "error": "not probed at --probe-level paths",
-       "ok": null
+       "dio_channel": 1,
+       "error": null,
+       "intercept": 1765896212.7159104,
+       "ok": true,
+       "slope": 1.0000072105973183
       }
      },
      "rat615": {
+      "duration_seconds": 3650.9461,
+      "ephys_window": [
+       0.0,
+       3650.9461
+      ],
+      "files_verified": true,
       "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251216_094334.rec\\rat615\\20251216_094334_merged.kilosort\\kilosort4",
-      "n_clusters": null,
-      "n_quality_cells": null,
+      "load_error": null,
+      "n_clusters": 269,
+      "n_quality_cells": 0,
       "path_exists": true,
+      "quality_thresholds": {
+       "max_cv_isi": 5.0,
+       "min_firing_rate": 0.5,
+       "min_presence_ratio": 0.8
+      },
       "sync": {
-       "error": "not probed at --probe-level paths",
-       "ok": null
+       "dio_channel": 1,
+       "error": null,
+       "intercept": 1765896212.715908,
+       "ok": true,
+       "slope": 1.0000072136394162
       }
      },
      "rat630": {
+      "duration_seconds": 18555.69913333333,
+      "ephys_window": [
+       0.0,
+       18555.69913333333
+      ],
+      "files_verified": true,
       "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251216_094334.rec\\rat630\\20251216_094334_merged.kilosort\\kilosort4",
-      "n_clusters": null,
-      "n_quality_cells": null,
+      "load_error": null,
+      "n_clusters": 164,
+      "n_quality_cells": 114,
       "path_exists": true,
+      "quality_thresholds": {
+       "max_cv_isi": 5.0,
+       "min_firing_rate": 0.5,
+       "min_presence_ratio": 0.8
+      },
       "sync": {
-       "error": "not probed at --probe-level paths",
-       "ok": null
+       "dio_channel": 1,
+       "error": null,
+       "intercept": 1765896212.7159104,
+       "ok": true,
+       "slope": 1.0000072105973183
       }
      },
      "rat631": {
+      "duration_seconds": 9959.998933333334,
+      "ephys_window": [
+       0.0,
+       9959.998933333334
+      ],
+      "files_verified": true,
       "kilosort_path": "\\\\nearline\\karpova\\TervoLab\\data\\RatCity\\cohort7\\ephys\\20251216_094334.rec\\rat631\\20251216_094334_merged.kilosort\\kilosort4",
-      "n_clusters": null,
-      "n_quality_cells": null,
+      "load_error": null,
+      "n_clusters": 263,
+      "n_quality_cells": 149,
       "path_exists": true,
+      "quality_thresholds": {
+       "max_cv_isi": 5.0,
+       "min_firing_rate": 0.5,
+       "min_presence_ratio": 0.8
+      },
       "sync": {
-       "error": "not probed at --probe-level paths",
-       "ok": null
+       "dio_channel": 1,
+       "error": null,
+       "intercept": 1765896212.7159104,
+       "ok": true,
+       "slope": 1.0000072105973183
       }
      }
     }
    },
    "events": {
+    "animals_seen": [
+     "rat613",
+     "rat615",
+     "rat616",
+     "rat617",
+     "rat620",
+     "rat629",
+     "rat630",
+     "rat631",
+     "rat634",
+     "rat635"
+    ],
     "available": true,
+    "by_type": {
+     "C": 46,
+     "D": 16,
+     "EC": 376,
+     "F": 71,
+     "HD": 4,
+     "P": 15,
+     "PO": 5,
+     "PS": 71,
+     "R": 5,
+     "SN": 31,
+     "UD": 1
+    },
+    "error": null,
     "event_files": [
      "\\\\nearline\\karpova\\TervoLab\\analysis\\RatCityBehavior\\cohort7\\20251216\\20251216_behavior_event_df.csv"
-    ]
+    ],
+    "events_window_reference_animal": "rat615",
+    "frac_events_within_ephys_window": 0.3978,
+    "frac_events_within_recording_by_animal": {
+     "rat613": 0.9376,
+     "rat615": 0.3978,
+     "rat630": 0.9376,
+     "rat631": 0.9376
+    },
+    "n_events_total": 641,
+    "per_animal": {
+     "rat613": {
+      "group_labels": {
+       "EC": {
+        "class_counts": {
+         "others": 93,
+         "self": 30
+        },
+        "majority_baseline": 0.756098,
+        "n_classes_usable": 2,
+        "n_events": 123,
+        "usable": true
+       },
+       "SN": {
+        "class_counts": {
+         "others": 7,
+         "self": 8
+        },
+        "majority_baseline": 0.533333,
+        "n_classes_usable": 2,
+        "n_events": 15,
+        "usable": true
+       },
+       "__any__": {
+        "class_counts": {
+         "others": 145,
+         "self": 17
+        },
+        "majority_baseline": 0.895062,
+        "n_classes_usable": 2,
+        "n_events": 162,
+        "usable": true
+       }
+      },
+      "min_events_per_class": 5,
+      "opponent_labels": {
+       "EC": {
+        "class_counts": {
+         "rat629": 25,
+         "rat630": 9,
+         "rat631": 48,
+         "rat634": 6,
+         "rat635": 30
+        },
+        "majority_baseline": 0.40678,
+        "n_classes_usable": 5,
+        "n_events": 118,
+        "usable": true
+       },
+       "PS": {
+        "class_counts": {
+         "rat631": 6
+        },
+        "majority_baseline": 1.0,
+        "n_classes_usable": 1,
+        "n_events": 6,
+        "reason": "only 1 class reaches min_events_per_class=5; LDA needs >= 2",
+        "usable": false
+       },
+       "SN": {
+        "class_counts": {
+         "rat616": 5
+        },
+        "majority_baseline": 1.0,
+        "n_classes_usable": 1,
+        "n_events": 5,
+        "reason": "only 1 class reaches min_events_per_class=5; LDA needs >= 2",
+        "usable": false
+       },
+       "__any__": {
+        "class_counts": {
+         "rat616": 10,
+         "rat629": 29,
+         "rat630": 12,
+         "rat631": 61,
+         "rat634": 8,
+         "rat635": 35
+        },
+        "majority_baseline": 0.393548,
+        "n_classes_usable": 6,
+        "n_events": 155,
+        "usable": true
+       }
+      },
+      "outcome_labels": {},
+      "unusable_types": {
+       "C": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "D": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "EC": {
+        "outcome_labels": "no usable events"
+       },
+       "F": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "HD": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "P": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "PO": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "PS": {
+        "group_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "R": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "SN": {
+        "outcome_labels": "no usable events"
+       },
+       "UD": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "__any__": {
+        "outcome_labels": "no usable events"
+       }
+      }
+     },
+     "rat615": {
+      "group_labels": {
+       "EC": {
+        "class_counts": {
+         "others": 16,
+         "self": 12
+        },
+        "majority_baseline": 0.571429,
+        "n_classes_usable": 2,
+        "n_events": 28,
+        "usable": true
+       },
+       "__any__": {
+        "class_counts": {
+         "others": 24,
+         "self": 22
+        },
+        "majority_baseline": 0.521739,
+        "n_classes_usable": 2,
+        "n_events": 46,
+        "usable": true
+       }
+      },
+      "min_events_per_class": 5,
+      "opponent_labels": {
+       "EC": {
+        "class_counts": {
+         "rat617": 8,
+         "rat620": 5,
+         "rat629": 8
+        },
+        "majority_baseline": 0.380952,
+        "n_classes_usable": 3,
+        "n_events": 21,
+        "usable": true
+       },
+       "__any__": {
+        "class_counts": {
+         "rat616": 5,
+         "rat617": 13,
+         "rat620": 6,
+         "rat629": 15
+        },
+        "majority_baseline": 0.384615,
+        "n_classes_usable": 4,
+        "n_events": 39,
+        "usable": true
+       }
+      },
+      "outcome_labels": {},
+      "unusable_types": {
+       "C": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "D": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "EC": {
+        "outcome_labels": "no usable events"
+       },
+       "F": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "HD": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "P": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "PO": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "PS": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "R": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "SN": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "UD": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "__any__": {
+        "outcome_labels": "no usable events"
+       }
+      }
+     },
+     "rat630": {
+      "group_labels": {
+       "EC": {
+        "class_counts": {
+         "others": 47,
+         "self": 79
+        },
+        "majority_baseline": 0.626984,
+        "n_classes_usable": 2,
+        "n_events": 126,
+        "usable": true
+       },
+       "__any__": {
+        "class_counts": {
+         "others": 57,
+         "self": 87
+        },
+        "majority_baseline": 0.604167,
+        "n_classes_usable": 2,
+        "n_events": 144,
+        "usable": true
+       }
+      },
+      "min_events_per_class": 5,
+      "opponent_labels": {
+       "EC": {
+        "class_counts": {
+         "rat613": 9,
+         "rat616": 5,
+         "rat617": 25,
+         "rat620": 5,
+         "rat629": 20,
+         "rat631": 12,
+         "rat634": 29,
+         "rat635": 18
+        },
+        "majority_baseline": 0.235772,
+        "n_classes_usable": 8,
+        "n_events": 123,
+        "usable": true
+       },
+       "__any__": {
+        "class_counts": {
+         "rat613": 12,
+         "rat616": 7,
+         "rat617": 27,
+         "rat620": 8,
+         "rat629": 20,
+         "rat631": 16,
+         "rat634": 31,
+         "rat635": 20
+        },
+        "majority_baseline": 0.219858,
+        "n_classes_usable": 8,
+        "n_events": 141,
+        "usable": true
+       }
+      },
+      "outcome_labels": {},
+      "unusable_types": {
+       "C": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "D": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "EC": {
+        "outcome_labels": "no usable events"
+       },
+       "F": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "HD": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "P": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "PO": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "PS": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "R": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "SN": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "UD": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "__any__": {
+        "outcome_labels": "no usable events"
+       }
+      }
+     },
+     "rat631": {
+      "group_labels": {
+       "EC": {
+        "class_counts": {
+         "others": 74,
+         "self": 99
+        },
+        "majority_baseline": 0.572254,
+        "n_classes_usable": 2,
+        "n_events": 173,
+        "usable": true
+       },
+       "F": {
+        "class_counts": {
+         "others": 8,
+         "self": 5
+        },
+        "majority_baseline": 0.615385,
+        "n_classes_usable": 2,
+        "n_events": 13,
+        "usable": true
+       },
+       "PS": {
+        "class_counts": {
+         "others": 9,
+         "self": 7
+        },
+        "majority_baseline": 0.5625,
+        "n_classes_usable": 2,
+        "n_events": 16,
+        "usable": true
+       },
+       "__any__": {
+        "class_counts": {
+         "others": 101,
+         "self": 132
+        },
+        "majority_baseline": 0.566524,
+        "n_classes_usable": 2,
+        "n_events": 233,
+        "usable": true
+       }
+      },
+      "min_events_per_class": 5,
+      "opponent_labels": {
+       "EC": {
+        "class_counts": {
+         "rat613": 48,
+         "rat616": 15,
+         "rat617": 6,
+         "rat620": 5,
+         "rat629": 24,
+         "rat630": 12,
+         "rat634": 15,
+         "rat635": 48
+        },
+        "majority_baseline": 0.277457,
+        "n_classes_usable": 8,
+        "n_events": 173,
+        "usable": true
+       },
+       "F": {
+        "class_counts": {
+         "rat616": 5
+        },
+        "majority_baseline": 1.0,
+        "n_classes_usable": 1,
+        "n_events": 5,
+        "reason": "only 1 class reaches min_events_per_class=5; LDA needs >= 2",
+        "usable": false
+       },
+       "PS": {
+        "class_counts": {
+         "rat613": 6,
+         "rat635": 5
+        },
+        "majority_baseline": 0.545455,
+        "n_classes_usable": 2,
+        "n_events": 11,
+        "usable": true
+       },
+       "__any__": {
+        "class_counts": {
+         "rat613": 61,
+         "rat616": 26,
+         "rat617": 9,
+         "rat620": 5,
+         "rat629": 27,
+         "rat630": 16,
+         "rat634": 27,
+         "rat635": 62
+        },
+        "majority_baseline": 0.266094,
+        "n_classes_usable": 8,
+        "n_events": 233,
+        "usable": true
+       }
+      },
+      "outcome_labels": {
+       "__any__": {
+        "class_counts": {
+         "loser": 7,
+         "winner": 12
+        },
+        "majority_baseline": 0.631579,
+        "n_classes_usable": 2,
+        "n_events": 19,
+        "usable": true
+       }
+      },
+      "unusable_types": {
+       "C": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "D": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "EC": {
+        "outcome_labels": "no usable events"
+       },
+       "F": {
+        "outcome_labels": "no usable events"
+       },
+       "HD": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "P": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "PO": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "PS": {
+        "outcome_labels": "no usable events"
+       },
+       "R": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "SN": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       },
+       "UD": {
+        "group_labels": "no usable events",
+        "opponent_labels": "no usable events",
+        "outcome_labels": "no usable events"
+       }
+      }
+     }
+    },
+    "sync_probe_ok": true
    },
    "pixels_per_cm": 4.0,
    "provenance": {
     "errors": [],
-    "probe_level": "paths",
-    "probe_seconds": 4.55,
+    "probe_level": "full",
+    "probe_seconds": 88.26,
     "sources": {
+     "events": {
+      "20251216_behavior_event_df.csv": {
+       "mtime": 1772489473,
+       "path": "\\\\nearline\\karpova\\TervoLab\\analysis\\RatCityBehavior\\cohort7\\20251216\\20251216_behavior_event_df.csv",
+       "size": 142567
+      }
+     },
      "kilosort": {
       "rat613": {
        "mtime": 1774380422,
@@ -3313,8 +4003,51 @@
    "session_id": "20251216_094334",
    "tracking": {
     "available": true,
+    "coverage_by_animal": {
+     "rat613": 0.3975,
+     "rat615": 0.8117,
+     "rat630": 0.4042,
+     "rat631": 0.753
+    },
+    "coverage_exceeds_recording": [
+     "rat615"
+    ],
+    "coverage_reference_animal": "rat613",
+    "ephys_window": [
+     687.291,
+     8187.169
+    ],
+    "ephys_window_span_seconds": 7499.878,
+    "error": null,
+    "frac_of_ephys_duration_covered": 0.3975,
+    "frame_rate_hz": 9.998,
+    "identity_resolved_animals": [
+     "rat631"
+    ],
+    "n_frames": 74989,
+    "n_identity_resolved_animals": 1,
+    "n_objects": 1,
     "n_tracking_files": 1,
-    "tracking_file": "\\\\nearline\\karpova\\TervoLab\\analysis\\Tracking\\manual_tracking\\cohort7\\merged_20251216_0950_1200\\merged_20251216_0950_1200_mask_metrics.csv"
+    "objects": {
+     "rat631": {
+      "bbox_px": [
+       86.0,
+       2021.0,
+       86.0,
+       1031.0
+      ],
+      "frac_frames_present": 0.9999,
+      "identity_resolved": true,
+      "median_speed_px_s": 4.356,
+      "n_frames_present": 74985,
+      "x_std_cm": 85.984,
+      "x_std_px": 343.935,
+      "y_std_cm": 34.745,
+      "y_std_px": 138.979
+     }
+    },
+    "tracking_file": "\\\\nearline\\karpova\\TervoLab\\analysis\\Tracking\\manual_tracking\\cohort7\\merged_20251216_0950_1200\\merged_20251216_0950_1200_mask_metrics.csv",
+    "unresolved_object_names": []
    }
   },
   "20251217_095130": {
@@ -3424,7 +4157,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 4.52,
+    "probe_seconds": 0.03,
     "sources": {
      "kilosort": {
       "rat613": {
@@ -3561,7 +4294,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 4.43,
+    "probe_seconds": 0.03,
     "sources": {
      "kilosort": {
       "rat613": {
@@ -3698,7 +4431,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 4.51,
+    "probe_seconds": 0.03,
     "sources": {
      "kilosort": {
       "rat613": {
@@ -3835,7 +4568,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 4.76,
+    "probe_seconds": 0.03,
     "sources": {
      "kilosort": {
       "rat613": {
@@ -3957,7 +4690,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 3.2,
+    "probe_seconds": 0.02,
     "sources": {
      "kilosort": {
       "rat630": {
@@ -4074,7 +4807,7 @@
    "provenance": {
     "errors": [],
     "probe_level": "paths",
-    "probe_seconds": 2.98,
+    "probe_seconds": 0.01,
     "sources": {
      "kilosort": {
       "rat630": {

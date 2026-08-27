@@ -93,11 +93,29 @@ def passthrough(value: Any = None) -> Any:
 
 # ---------------------------------------------------------- statistical
 
+#: The decoder's raw result dict and the notebook's curated summary spell the
+#: majority-class baseline differently, and this detector is used against both.
+#: Reading only one key made it silently report "cannot check" on correctly-logged
+#: iterations - on the very runs where the accuracy was below baseline.
+_BASELINE_KEYS = ('population_baseline_accuracy', 'baseline_accuracy')
+_ACCURACY_KEYS = ('population_accuracy_mean', 'accuracy', 'mean_accuracy')
+
+
+def _first_present(source: Any, keys: Sequence[str]) -> Any:
+    if not isinstance(source, Mapping):
+        return None
+    for key in keys:
+        if source.get(key) is not None:
+            return source[key]
+    return None
+
+
 def accuracy_beats_baseline(
-    accuracy: Any,
+    accuracy: Any = None,
     class_counts: Any = None,
     baseline: Any = None,
     margin: float = 0.0,
+    results: Any = None,
 ) -> Dict[str, Any]:
     """Compare an observed accuracy against the *majority-class* baseline.
 
@@ -113,6 +131,14 @@ def accuracy_beats_baseline(
     anything runs.
     """
     from ephys._stats_utils import majority_class_baseline
+
+    # Accept a whole result mapping and find the keys, since the raw result dict
+    # and the curated summary use different names for the same quantities.
+    if results is not None:
+        if accuracy is None:
+            accuracy = _first_present(results, _ACCURACY_KEYS)
+        if baseline is None and class_counts is None:
+            baseline = _first_present(results, _BASELINE_KEYS)
 
     acc = _as_float(accuracy, 'accuracy')
 

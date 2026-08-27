@@ -87,6 +87,41 @@ class TestAccuracyBeatsBaseline:
         with pytest.raises(MissingValue):
             accuracy_beats_baseline(float('nan'), baseline=0.5)
 
+    @pytest.mark.parametrize('baseline_key', [
+        'population_baseline_accuracy',   # the decoder's raw result dict
+        'baseline_accuracy',              # the notebook's curated summary
+    ])
+    def test_accepts_either_spelling_of_the_baseline(self, baseline_key):
+        """Reading only one key made this silently unrunnable.
+
+        The raw result dict and the curated summary name the baseline
+        differently, and this detector runs against both. Bound to a single key,
+        it reported "cannot check" on correctly-logged iterations - including
+        rat630 and rat613 of hypothesis 4, which were genuinely below baseline.
+        That is the worst possible failure for this particular check.
+        """
+        out = accuracy_beats_baseline(
+            results={'population_accuracy_mean': 0.2184, baseline_key: 0.2358})
+        assert out['beats_baseline'] is False
+        assert out['margin'] < 0
+
+    def test_results_mapping_detects_an_above_baseline_run(self):
+        out = accuracy_beats_baseline(
+            results={'population_accuracy_mean': 0.2881,
+                     'population_baseline_accuracy': 0.2775})
+        assert out['beats_baseline'] is True
+
+    def test_an_empty_results_mapping_is_missing_not_a_pass(self):
+        with pytest.raises(MissingValue):
+            accuracy_beats_baseline(results={})
+
+    def test_explicit_arguments_still_win_over_the_mapping(self):
+        out = accuracy_beats_baseline(0.9, baseline=0.1,
+                                      results={'population_accuracy_mean': 0.1,
+                                               'baseline_accuracy': 0.9})
+        assert out['accuracy'] == 0.9
+        assert out['beats_baseline'] is True
+
 
 class TestPinnedAtPFloor:
     def test_iteration_12_rat613_is_pinned(self):

@@ -213,4 +213,8 @@ __marimo__/
 # AI-in-the-loop discovery platform: generated HTML reports and lab-notebook
 # snapshots. Both are derived artifacts - the notebook DB is the source of truth.
 reports/out/
+# Analysis PNGs: derived, binary, and regenerable from the notebook.
+# Committed reports embed them as base64, so the HTML is self-contained
+# without these being in git.
+reports/figures/
 habitat_pipeline.db.bak_*

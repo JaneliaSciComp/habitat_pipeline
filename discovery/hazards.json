@@ -18,9 +18,22 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["propose", "run", "interpret"],
-        "modules": ["ephys._lda_decoding", "ephys.social_spatial_fields", "ephys.decode_location"],
-        "analyses": ["ephys.decode_opponent_identity", "ephys.decode_event_outcome", "ephys.social_spatial_fields", "ephys.decode_location"]
+        "stages": [
+          "propose",
+          "run",
+          "interpret"
+        ],
+        "modules": [
+          "ephys._lda_decoding",
+          "ephys.social_spatial_fields",
+          "ephys.decode_location"
+        ],
+        "analyses": [
+          "ephys.decode_opponent_identity",
+          "ephys.decode_event_outcome",
+          "ephys.social_spatial_fields",
+          "ephys.decode_location"
+        ]
       },
       "symptom": "A '0 of N cells significant' result gets written up as biology.",
       "mechanism": "A permutation test floors p at 1/(n_shuffles+1), and Benjamini-Hochberg multiplies the smallest p by n_tests, so a lone strongly-tuned test can only ever reach q = n_tests/(n_shuffles+1).",
@@ -33,7 +46,10 @@
           "n_shuffles": "$params.n_shuffles",
           "alpha": "$params.alpha"
         },
-        "pass_if": {"field": "resolvable", "op": "is_true"},
+        "pass_if": {
+          "field": "resolvable",
+          "op": "is_true"
+        },
         "on_fail": "Best achievable q for a lone strong test is {best_achievable_q:.3f}, which is not below alpha. Either raise n_shuffles to {recommended_n_shuffles}, switch to null_mode='pooled' (about n_cells finer p-floor at identical compute), or report the single-test significance_population p-value instead. Note {min_tests_at_floor} tests would have to hit the p-floor simultaneously for BH to pass any of them."
       },
       "remedies": [
@@ -68,9 +84,17 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["run", "interpret"],
-        "modules": ["ephys._lda_decoding"],
-        "analyses": ["ephys.decode_opponent_identity", "ephys.decode_event_outcome"]
+        "stages": [
+          "run",
+          "interpret"
+        ],
+        "modules": [
+          "ephys._lda_decoding"
+        ],
+        "analyses": [
+          "ephys.decode_opponent_identity",
+          "ephys.decode_event_outcome"
+        ]
       },
       "symptom": "A decoder is reported as 'above chance' while scoring below what always guessing the most common class would score.",
       "mechanism": "chance_level = 1/n_classes is prevalence-blind. Plain unweighted accuracy - what every cross_val_score in this repo uses - must be compared against the majority-class rate.",
@@ -79,10 +103,12 @@
         "type": "callable",
         "callable": "discovery.detectors:accuracy_beats_baseline",
         "args_from": {
-          "accuracy": "$results.population_accuracy_mean",
-          "baseline": "$results.population_baseline_accuracy"
+          "results": "$results"
         },
-        "pass_if": {"field": "beats_baseline", "op": "is_true"},
+        "pass_if": {
+          "field": "beats_baseline",
+          "op": "is_true"
+        },
         "on_fail": "Accuracy {accuracy:.3f} is BELOW the majority-class baseline {baseline_accuracy:.3f} (margin {margin:+.3f}). This is not evidence of coding."
       },
       "remedies": [
@@ -91,7 +117,8 @@
         "at propose time the manifest's per-analysis majority_baseline gives the same bar before anything runs"
       ],
       "known_gaps": [
-        "ephys/decoding_plots.py still draws chance lines and 'Cells > Chance' counts at 1/n_classes - deliberately, to avoid changing published figures. See HZ-INTERP-001."
+        "ephys/decoding_plots.py still draws chance lines and 'Cells > Chance' counts at 1/n_classes - deliberately, to avoid changing published figures. See HZ-INTERP-001.",
+        "The decoder's raw result dict and the notebook's curated summary name the baseline differently (population_baseline_accuracy vs baseline_accuracy). The detector takes the whole results mapping and accepts either, because reading one key made it report 'cannot check' on correctly-logged iterations - including two runs that were genuinely below baseline."
       ],
       "evidence": {
         "occurred": true,
@@ -115,8 +142,15 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["implement", "run"],
-        "modules": ["ephys._stats_utils", "ephys._lda_decoding", "ephys.social_spatial_fields"]
+        "stages": [
+          "implement",
+          "run"
+        ],
+        "modules": [
+          "ephys._stats_utils",
+          "ephys._lda_decoding",
+          "ephys.social_spatial_fields"
+        ]
       },
       "symptom": "A p-value of exactly 0.0 appears in a result, and survives BH as q = 0.",
       "mechanism": "The plain k/n form returns exactly 0.0 when no shuffle beats the observed value. A finite permutation test cannot justify p == 0; the smallest defensible value is the add-one floor 1/(n+1).",
@@ -127,7 +161,11 @@
           "tests/test_stats_utils.py::TestEmpiricalPValue::test_add_one_form_never_returns_zero",
           "tests/test_stats_utils.py::TestEmpiricalPValue::test_floor_matches_fdr_resolution_p_floor"
         ],
-        "pass_if": {"field": "returncode", "op": "==", "value": 0},
+        "pass_if": {
+          "field": "returncode",
+          "op": "==",
+          "value": 0
+        },
         "on_fail": "The add-one p-value guarantee is broken. Every null in this repo must route through ephys._stats_utils.empirical_p_value."
       },
       "remedies": [
@@ -156,8 +194,14 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["implement", "run"],
-        "modules": ["ephys._stats_utils", "ephys._lda_decoding"]
+        "stages": [
+          "implement",
+          "run"
+        ],
+        "modules": [
+          "ephys._stats_utils",
+          "ephys._lda_decoding"
+        ]
       },
       "symptom": "p-values are systematically smaller than they should be when events are few.",
       "mechanism": "A degenerate cross-validation fold yields a NaN score, and `nan >= x` evaluates False, so a naive exceedance count treats every NaN draw as a non-exceedance while still counting it in the denominator.",
@@ -167,7 +211,11 @@
         "test": [
           "tests/test_stats_utils.py::TestEmpiricalPValue::test_nan_draws_excluded_from_numerator_and_denominator"
         ],
-        "pass_if": {"field": "returncode", "op": "==", "value": 0},
+        "pass_if": {
+          "field": "returncode",
+          "op": "==",
+          "value": 0
+        },
         "on_fail": "Non-finite null draws are no longer excluded from both numerator and denominator."
       },
       "remedies": [
@@ -195,8 +243,15 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["implement", "run"],
-        "modules": ["ephys.decode_location", "ephys.decode_partner_distance", "ephys.inter_brain_dynamics"]
+        "stages": [
+          "implement",
+          "run"
+        ],
+        "modules": [
+          "ephys.decode_location",
+          "ephys.decode_partner_distance",
+          "ephys.inter_brain_dynamics"
+        ]
       },
       "symptom": "Both the real decode and its null look implausibly tight, and a real effect hides between two artificially small numbers.",
       "mechanism": "Shuffled folds put adjacent, near-identical samples of an autocorrelated signal into train and test. Position at 0.5 s bins is strongly autocorrelated, so a shuffled fold is close to training on the test set.",
@@ -205,7 +260,10 @@
         "type": "callable",
         "callable": "discovery.detectors:kfold_shuffle_audit",
         "args_from": {},
-        "pass_if": {"field": "no_unapproved_sites", "op": "is_true"},
+        "pass_if": {
+          "field": "no_unapproved_sites",
+          "op": "is_true"
+        },
         "on_fail": "{n_unapproved} unreviewed shuffle=True CV site(s): {unapproved_sites}. On a time-ordered axis use KFold(shuffle=False), matching ephys/decode_partner_distance.py and ephys.inter_brain_dynamics._fit_r2. If the axis is genuinely exchangeable, document why in a 'Statistical notes' docstring section and add the file to the allowlist."
       },
       "remedies": [
@@ -239,9 +297,17 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["propose", "run", "interpret"],
-        "modules": ["ephys.decode_location"],
-        "analyses": ["ephys.decode_location"]
+        "stages": [
+          "propose",
+          "run",
+          "interpret"
+        ],
+        "modules": [
+          "ephys.decode_location"
+        ],
+        "analyses": [
+          "ephys.decode_location"
+        ]
       },
       "symptom": "Several targets 'beat the null', sometimes including one that barely moves, and sometimes the null outperforms the real decode outright.",
       "mechanism": "Per its own docstring the reverse null only reverses trajectory order, preserving every marginal and the full autocorrelation. It tests temporal-order asymmetry, not 'better than chance'.",
@@ -249,8 +315,14 @@
       "detector": {
         "type": "callable",
         "callable": "discovery.detectors:param_equals",
-        "args_from": {"value": "$params.null", "expected": "shuffle"},
-        "pass_if": {"field": "matches", "op": "is_true"},
+        "args_from": {
+          "value": "$params.null",
+          "expected": "shuffle"
+        },
+        "pass_if": {
+          "field": "matches",
+          "op": "is_true"
+        },
         "on_fail": "null={value!r} is not a chance null. Use null='shuffle' with ephys._stats_utils.empirical_p_value and a BH-FDR pass for any real claim."
       },
       "remedies": [
@@ -279,9 +351,18 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["propose", "run", "interpret"],
-        "modules": ["ephys.decode_location"],
-        "analyses": ["ephys.decode_location", "ephys.decode_partner_distance"]
+        "stages": [
+          "propose",
+          "run",
+          "interpret"
+        ],
+        "modules": [
+          "ephys.decode_location"
+        ],
+        "analyses": [
+          "ephys.decode_location",
+          "ephys.decode_partner_distance"
+        ]
       },
       "symptom": "A partner's position appears exceptionally decodable, with a median error near zero.",
       "mechanism": "Any decoder achieves near-zero error on a target whose position has almost no variance, because predicting the mean is already almost exactly right.",
@@ -293,7 +374,10 @@
           "x_std": "$manifest.tracking.objects.{object_name}.x_std_px",
           "y_std": "$manifest.tracking.objects.{object_name}.y_std_px"
         },
-        "pass_if": {"field": "moves_enough", "op": "is_true"},
+        "pass_if": {
+          "field": "moves_enough",
+          "op": "is_true"
+        },
         "on_fail": "Target moves too little to score: x_std={x_std:.1f}, y_std={y_std:.1f} {units} against a minimum of {min_std:.0f}. Exclude it from the declared test family BEFORE running, not after."
       },
       "remedies": [
@@ -323,8 +407,15 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["run", "interpret"],
-        "modules": ["ephys._lda_decoding", "ephys.decode_location", "ephys.social_spatial_fields"]
+        "stages": [
+          "run",
+          "interpret"
+        ],
+        "modules": [
+          "ephys._lda_decoding",
+          "ephys.decode_location",
+          "ephys.social_spatial_fields"
+        ]
       },
       "symptom": "A q-value clears 0.05 but the underlying p is exactly 1/(n_shuffles+1).",
       "mechanism": "A p at the floor means no shuffle beat the observed value. That is a lower bound on the p-value, not a measurement of it, and it is equally consistent with a huge effect and with a budget too small to resolve anything.",
@@ -332,8 +423,14 @@
       "detector": {
         "type": "callable",
         "callable": "discovery.detectors:pinned_at_p_floor",
-        "args_from": {"p_value": "$results.p_value", "n_shuffles": "$params.n_shuffles"},
-        "pass_if": {"field": "not_pinned", "op": "is_true"},
+        "args_from": {
+          "p_value": "$results.p_value",
+          "n_shuffles": "$params.n_shuffles"
+        },
+        "pass_if": {
+          "field": "not_pinned",
+          "op": "is_true"
+        },
         "on_fail": "p={p_value:.6f} is pinned at the floor 1/(n_shuffles+1)={p_floor:.6f} for n_shuffles={n_shuffles}. Raise the budget before treating this as a finding."
       },
       "remedies": [
@@ -363,9 +460,16 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["propose", "run"],
-        "modules": ["ephys.social_spatial_fields"],
-        "analyses": ["ephys.social_spatial_fields"]
+        "stages": [
+          "propose",
+          "run"
+        ],
+        "modules": [
+          "ephys.social_spatial_fields"
+        ],
+        "analyses": [
+          "ephys.social_spatial_fields"
+        ]
       },
       "symptom": "A social place field sweep reports no tuned cells, with no warning that it could not have found any.",
       "mechanism": "Unlike compute_population_significance, this module never calls fdr_resolution. Its default sig_alpha=0.01 across 3-4 targets needs at least ~300 shuffles before a lone target can reach significance.",
@@ -378,7 +482,10 @@
           "n_shuffles": "$params.n_shuffles",
           "alpha": "$params.sig_alpha"
         },
-        "pass_if": {"field": "resolvable", "op": "is_true"},
+        "pass_if": {
+          "field": "resolvable",
+          "op": "is_true"
+        },
         "on_fail": "At sig_alpha={alpha} across {n_tests} targets, {n_shuffles} shuffles gives a best achievable q of {best_achievable_q:.3f}. Raise n_shuffles to at least {recommended_n_shuffles}."
       },
       "remedies": [
@@ -410,9 +517,18 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["propose", "run"],
-        "modules": ["video.behavioral_events", "ephys._lda_decoding"],
-        "analyses": ["ephys.decode_opponent_identity", "ephys.decode_event_outcome"]
+        "stages": [
+          "propose",
+          "run"
+        ],
+        "modules": [
+          "video.behavioral_events",
+          "ephys._lda_decoding"
+        ],
+        "analyses": [
+          "ephys.decode_opponent_identity",
+          "ephys.decode_event_outcome"
+        ]
       },
       "symptom": "A decoding run returns nothing, or an unexplained empty result, for a behaviour type that clearly has events.",
       "mechanism": "extract_opponent_labels drops any class with fewer than min_events_per_class (default 5) events. LDA needs at least 2 classes, so a behaviour type with one well-sampled opponent yields empty arrays rather than an error.",
@@ -423,7 +539,10 @@
         "args_from": {
           "value": "$manifest.events.per_animal.{animal_id}.opponent_labels.{behavior_type}.n_classes_usable"
         },
-        "pass_if": {"op": ">=", "value": 2},
+        "pass_if": {
+          "op": ">=",
+          "value": 2
+        },
         "on_fail": "Only {value} opponent class(es) reach min_events_per_class for this behavior_type. Check the manifest for a viable alternative before running."
       },
       "remedies": [
@@ -453,8 +572,15 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["run", "interpret"],
-        "modules": ["database.lab_notebook", "ephys.decode_location", "ephys._lda_decoding"]
+        "stages": [
+          "run",
+          "interpret"
+        ],
+        "modules": [
+          "database.lab_notebook",
+          "ephys.decode_location",
+          "ephys._lda_decoding"
+        ]
       },
       "symptom": "A sweep runs N tests, then reports q-values computed over fewer than N, with prose reasons for the drops.",
       "mechanism": "BH divides by the number of tests in the family. Dropping members after seeing their results is selection on the outcome, and it shrinks the denominator that every surviving q-value is divided by.",
@@ -462,8 +588,13 @@
       "detector": {
         "type": "callable",
         "callable": "discovery.detectors:passthrough",
-        "args_from": {"value": "$results.denominator_status"},
-        "pass_if": {"op": "==", "value": "clean"},
+        "args_from": {
+          "value": "$results.denominator_status"
+        },
+        "pass_if": {
+          "op": "==",
+          "value": "clean"
+        },
         "on_fail": "Declared-family denominator status is {value!r}, not 'clean'. Compute q against the pre-registered n_tests via LabNotebook.family_fdr, never against len(what_i_kept)."
       },
       "remedies": [
@@ -496,8 +627,12 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["run"],
-        "modules": ["database.lab_notebook"]
+        "stages": [
+          "run"
+        ],
+        "modules": [
+          "database.lab_notebook"
+        ]
       },
       "symptom": "recompute_family_significance returns an empty dict, or a campaign's q-values look implausibly good.",
       "mechanism": "Campaign-level correction is per TestFamily. An iteration with test_family_id NULL is invisible to it, so the number of analyses run against one dataset is undercounted.",
@@ -505,8 +640,12 @@
       "detector": {
         "type": "callable",
         "callable": "discovery.detectors:passthrough",
-        "args_from": {"value": "$results.test_family_id"},
-        "pass_if": {"op": "is_present"},
+        "args_from": {
+          "value": "$results.test_family_id"
+        },
+        "pass_if": {
+          "op": "is_present"
+        },
         "on_fail": "This iteration is not attached to a test family. Use LabNotebook.get_or_create_test_family so a duplicate name cannot silently halve the denominator."
       },
       "remedies": [
@@ -536,9 +675,20 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["propose", "run", "interpret"],
-        "modules": ["ephys._lda_decoding", "video.behavioral_events"],
-        "analyses": ["ephys.decode_opponent_identity", "ephys.decode_event_outcome", "ephys.decode_location"]
+        "stages": [
+          "propose",
+          "run",
+          "interpret"
+        ],
+        "modules": [
+          "ephys._lda_decoding",
+          "video.behavioral_events"
+        ],
+        "analyses": [
+          "ephys.decode_opponent_identity",
+          "ephys.decode_event_outcome",
+          "ephys.decode_location"
+        ]
       },
       "symptom": "Accuracy climbs across a series of runs as the class set is narrowed and the event floor is lowered, and the last run is the one that gets reported.",
       "mechanism": "Hand-picking a subset of classes turns an N-way problem into a 2-way one, which raises accuracy far more than it raises the majority-class baseline. Independently, lowering min_events_per_class below this repo's own default of 5 admits classes with too few events to cross-validate. Neither choice appears anywhere in the result except the params dict.",
@@ -546,8 +696,13 @@
       "detector": {
         "type": "callable",
         "callable": "discovery.detectors:class_selection_is_prespecified",
-        "args_from": {"params": "$params"},
-        "pass_if": {"field": "is_prespecified", "op": "is_true"},
+        "args_from": {
+          "params": "$params"
+        },
+        "pass_if": {
+          "field": "is_prespecified",
+          "op": "is_true"
+        },
         "on_fail": "This run narrows its own problem: min_events_per_class={min_events_per_class} (floor {min_floor}), {subset_key}={selected_classes}. Declare it as a member of a test family via declare_family_tests BEFORE running, so the denominator counts it."
       },
       "remedies": [
@@ -582,9 +737,21 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["propose", "run"],
-        "modules": ["video.tracking_import", "ephys.social_spatial_fields", "ephys.decode_location", "ephys.decode_partner_distance"],
-        "analyses": ["ephys.social_spatial_fields", "ephys.decode_location", "ephys.decode_partner_distance"]
+        "stages": [
+          "propose",
+          "run"
+        ],
+        "modules": [
+          "video.tracking_import",
+          "ephys.social_spatial_fields",
+          "ephys.decode_location",
+          "ephys.decode_partner_distance"
+        ],
+        "analyses": [
+          "ephys.social_spatial_fields",
+          "ephys.decode_location",
+          "ephys.decode_partner_distance"
+        ]
       },
       "symptom": "A partner-position or social-field analysis is proposed, then fails or returns nothing once the tracking file is actually read.",
       "mechanism": "Identity resolution in the merged mask_metrics file is per-session. Some sessions resolve only the focal animal; the rest of the detected objects carry non-identity names.",
@@ -592,8 +759,13 @@
       "detector": {
         "type": "callable",
         "callable": "discovery.detectors:passthrough",
-        "args_from": {"value": "$manifest.tracking.n_identity_resolved_animals"},
-        "pass_if": {"op": ">=", "value": 2},
+        "args_from": {
+          "value": "$manifest.tracking.n_identity_resolved_animals"
+        },
+        "pass_if": {
+          "op": ">=",
+          "value": 2
+        },
         "on_fail": "Only {value} identity-resolved animal(s) in this session's tracking. A partner analysis needs at least 2 - use suggest_sessions to find one."
       },
       "remedies": [
@@ -623,9 +795,22 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["propose", "run", "interpret"],
-        "modules": ["video.tracking_import", "ephys.social_spatial_fields", "ephys.decode_location", "ephys.decode_partner_distance"],
-        "analyses": ["ephys.social_spatial_fields", "ephys.decode_location", "ephys.decode_partner_distance"]
+        "stages": [
+          "propose",
+          "run",
+          "interpret"
+        ],
+        "modules": [
+          "video.tracking_import",
+          "ephys.social_spatial_fields",
+          "ephys.decode_location",
+          "ephys.decode_partner_distance"
+        ],
+        "analyses": [
+          "ephys.social_spatial_fields",
+          "ephys.decode_location",
+          "ephys.decode_partner_distance"
+        ]
       },
       "symptom": "Nothing visible. Occupancy maps and rate estimates are computed over a window that includes time with no position data at all.",
       "mechanism": "Tracking coverage is a time window, not a boolean, and it is per ANIMAL rather than per session: animals in one session share a clock but not a recording length. resolve_tracking_on_ephys_clock and compute_social_place_fields both accept a window and both default to the whole recording, and nothing in the repo computes what the window should be.",
@@ -637,7 +822,10 @@
           "frac_covered": "$manifest.tracking.coverage_by_animal.{animal_id}",
           "ephys_window": "$manifest.tracking.ephys_window"
         },
-        "pass_if": {"field": "covers_enough", "op": "is_true"},
+        "pass_if": {
+          "field": "covers_enough",
+          "op": "is_true"
+        },
         "on_fail": "Tracking covers only {frac_covered:.0%} of THIS animal's recording (below {min_frac:.0%}). Pass t_window_ephys={ephys_window} explicitly, or the uncovered fraction silently enters every occupancy map."
       },
       "remedies": [
@@ -671,9 +859,18 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["propose", "run"],
-        "modules": ["video.tracking_import"],
-        "analyses": ["ephys.decode_location", "ephys.social_spatial_fields", "ephys.decode_partner_distance"]
+        "stages": [
+          "propose",
+          "run"
+        ],
+        "modules": [
+          "video.tracking_import"
+        ],
+        "analyses": [
+          "ephys.decode_location",
+          "ephys.social_spatial_fields",
+          "ephys.decode_partner_distance"
+        ]
       },
       "symptom": "An object is identity-resolved, so it looks usable, but its trajectory has large gaps.",
       "mechanism": "Detection and identity assignment can drop out for long stretches. Presence is per-frame, and a low presence fraction leaves too few paired spike/position samples to estimate anything.",
@@ -681,15 +878,22 @@
       "detector": {
         "type": "callable",
         "callable": "discovery.detectors:passthrough",
-        "args_from": {"value": "$manifest.tracking.objects.{object_name}.frac_frames_present"},
-        "pass_if": {"op": ">=", "value": 0.5},
+        "args_from": {
+          "value": "$manifest.tracking.objects.{object_name}.frac_frames_present"
+        },
+        "pass_if": {
+          "op": ">=",
+          "value": 0.5
+        },
         "on_fail": "Object present in only {value:.0%} of frames."
       },
       "remedies": [
         "exclude sparsely-tracked objects when declaring the test family, not after"
       ],
       "known_gaps": [],
-      "evidence": {"occurred": false},
+      "evidence": {
+        "occurred": false
+      },
       "references": [
         "video/tracking_import.py::parse_tracking",
         "docs/HYPOTHESIS_BACKLOG.md - Cross-cutting caveats, item 1"
@@ -704,9 +908,19 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["propose", "run", "interpret"],
-        "modules": ["video.tracking_import"],
-        "analyses": ["ephys.decode_partner_distance", "ephys.social_spatial_fields", "ephys.decode_location"]
+        "stages": [
+          "propose",
+          "run",
+          "interpret"
+        ],
+        "modules": [
+          "video.tracking_import"
+        ],
+        "analyses": [
+          "ephys.decode_partner_distance",
+          "ephys.social_spatial_fields",
+          "ephys.decode_location"
+        ]
       },
       "symptom": "Distance and speed thresholds behave as if the arena were a different size; a single warning is logged and easily missed.",
       "mechanism": "pixels_per_cm is an optional config key, null by default. When null, positions stay in pixels and every parameter named *_cm is interpreted in pixels.",
@@ -714,8 +928,12 @@
       "detector": {
         "type": "callable",
         "callable": "discovery.detectors:passthrough",
-        "args_from": {"value": "$manifest.pixels_per_cm"},
-        "pass_if": {"op": "is_present"},
+        "args_from": {
+          "value": "$manifest.pixels_per_cm"
+        },
+        "pass_if": {
+          "op": "is_present"
+        },
         "on_fail": "pixels_per_cm is null for this cohort, so *_cm parameters mean pixels. State the units in the result, or set the config key."
       },
       "remedies": [
@@ -723,7 +941,9 @@
         "set pixels_per_cm in the cohort config (needs scientist approval - config/ is off-limits to the agent)"
       ],
       "known_gaps": [],
-      "evidence": {"occurred": false},
+      "evidence": {
+        "occurred": false
+      },
       "references": [
         "CLAUDE.md - Gotchas I keep tripping over",
         "video/tracking_import.py::resolve_tracking_on_ephys_clock"
@@ -738,8 +958,13 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["propose", "run"],
-        "modules": ["ingestion.ephys_sync"]
+        "stages": [
+          "propose",
+          "run"
+        ],
+        "modules": [
+          "ingestion.ephys_sync"
+        ]
       },
       "symptom": "Event-aligned or tracking-aligned analyses produce noise, or fail deep inside label extraction.",
       "mechanism": "Everything event- or tracking-aligned depends on a single linear DataSyncManager map per session. A failed pulse match or a degenerate slope invalidates every downstream alignment.",
@@ -747,8 +972,12 @@
       "detector": {
         "type": "callable",
         "callable": "discovery.detectors:passthrough",
-        "args_from": {"value": "$manifest.ephys.per_animal.{animal_id}.sync.ok"},
-        "pass_if": {"op": "is_true"},
+        "args_from": {
+          "value": "$manifest.ephys.per_animal.{animal_id}.sync.ok"
+        },
+        "pass_if": {
+          "op": "is_true"
+        },
         "on_fail": "Sync did not resolve for this animal/session. Nothing event- or tracking-aligned is testable here."
       },
       "remedies": [
@@ -756,7 +985,9 @@
         "DIO channel 1 is the sync channel by default; channels 1-4 exist"
       ],
       "known_gaps": [],
-      "evidence": {"occurred": false},
+      "evidence": {
+        "occurred": false
+      },
       "references": [
         "CLAUDE.md - Mental model",
         "ingestion/ephys_sync.py::find_sync_mapping"
@@ -771,9 +1002,17 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["propose", "run"],
-        "modules": ["video.behavioral_events"],
-        "analyses": ["ephys.decode_opponent_identity", "ephys.decode_event_outcome"]
+        "stages": [
+          "propose",
+          "run"
+        ],
+        "modules": [
+          "video.behavioral_events"
+        ],
+        "analyses": [
+          "ephys.decode_opponent_identity",
+          "ephys.decode_event_outcome"
+        ]
       },
       "symptom": "Event counts look adequate but many events yield no spikes.",
       "mechanism": "Behavioural scoring can extend beyond the ephys recording. Events mapped onto the ephys clock outside [0, duration] have no neural data behind them.",
@@ -781,15 +1020,22 @@
       "detector": {
         "type": "callable",
         "callable": "discovery.detectors:passthrough",
-        "args_from": {"value": "$manifest.events.frac_events_within_ephys_window"},
-        "pass_if": {"op": ">=", "value": 0.95},
+        "args_from": {
+          "value": "$manifest.events.frac_events_within_ephys_window"
+        },
+        "pass_if": {
+          "op": ">=",
+          "value": 0.95
+        },
         "on_fail": "Only {value:.0%} of events fall inside the ephys window."
       },
       "remedies": [
         "count usable events after windowing, not before"
       ],
       "known_gaps": [],
-      "evidence": {"occurred": false},
+      "evidence": {
+        "occurred": false
+      },
       "references": [
         "video/behavioral_events.py::synchronize_with_ephys"
       ]
@@ -803,9 +1049,19 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["propose", "run", "interpret"],
-        "modules": ["ingestion.data_paths", "video.behavioral_events"],
-        "analyses": ["ephys.decode_opponent_identity", "ephys.decode_event_outcome"]
+        "stages": [
+          "propose",
+          "run",
+          "interpret"
+        ],
+        "modules": [
+          "ingestion.data_paths",
+          "video.behavioral_events"
+        ],
+        "analyses": [
+          "ephys.decode_opponent_identity",
+          "ephys.decode_event_outcome"
+        ]
       },
       "symptom": "Nothing visible. An analysis reports a sample size, and a different version of the same session's scoring would have given a materially different one.",
       "mechanism": "DataStorageManager resolves behavioural events by looking inside date-named directories under the cohort's events root. Files sitting loose at that root are invisible to it, however recent they are, so which scoring an analysis reads is decided by directory layout rather than by choice.",
@@ -813,8 +1069,13 @@
       "detector": {
         "type": "callable",
         "callable": "discovery.detectors:resolved_from_dated_directory",
-        "args_from": {"event_files": "$params.event_files"},
-        "pass_if": {"field": "all_from_dated_directory", "op": "is_true"},
+        "args_from": {
+          "event_files": "$params.event_files"
+        },
+        "pass_if": {
+          "field": "all_from_dated_directory",
+          "op": "is_true"
+        },
         "on_fail": "Event file(s) resolved from outside a date-named directory: {loose_files}. The dated directory is canonical for this project - do not mix conventions within one analysis."
       },
       "remedies": [
@@ -849,8 +1110,13 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["implement", "run"],
-        "modules": ["ingestion.kilosort_data_import"]
+        "stages": [
+          "implement",
+          "run"
+        ],
+        "modules": [
+          "ingestion.kilosort_data_import"
+        ]
       },
       "symptom": "A TypeError on KilosortData construction, or a DataStorageManager passed where a path was wanted.",
       "mechanism": "KilosortData is a dataclass now; the entry point is load_kilosort_data(path). Passing a DataStorageManager works for load_tracking_data but not for load_kilosort_data, and older docs still show the constructor form.",
@@ -858,8 +1124,13 @@
       "detector": {
         "type": "callable",
         "callable": "discovery.detectors:repo_pattern_absent",
-        "args_from": {"pattern": "KilosortData(data_input"},
-        "pass_if": {"field": "absent", "op": "is_true"},
+        "args_from": {
+          "pattern": "KilosortData(data_input"
+        },
+        "pass_if": {
+          "field": "absent",
+          "op": "is_true"
+        },
         "on_fail": "Stale constructor found at {hits}. Use load_kilosort_data(dsm.get_kilosort_path()). No back-compat shims - all callers were migrated deliberately."
       },
       "remedies": [
@@ -887,9 +1158,17 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["implement", "run"],
-        "modules": ["video.behavioral_events"],
-        "analyses": ["ephys.decode_opponent_identity", "ephys.decode_event_outcome"]
+        "stages": [
+          "implement",
+          "run"
+        ],
+        "modules": [
+          "video.behavioral_events"
+        ],
+        "analyses": [
+          "ephys.decode_opponent_identity",
+          "ephys.decode_event_outcome"
+        ]
       },
       "symptom": "Label extraction returns nothing, or events cannot be aligned to spikes.",
       "mechanism": "Sync writes ts_start_ephys / ts_end_ephys onto the events frame. Anything calling extract_opponent_labels / extract_outcome_labels / extract_group_labels needs those columns to exist first.",
@@ -897,8 +1176,12 @@
       "detector": {
         "type": "callable",
         "callable": "discovery.detectors:passthrough",
-        "args_from": {"value": "$params.events_synchronized"},
-        "pass_if": {"op": "is_true"},
+        "args_from": {
+          "value": "$params.events_synchronized"
+        },
+        "pass_if": {
+          "op": "is_true"
+        },
         "on_fail": "Behavioural events are not synchronized. Build DataSyncManager(dsm, dio_channel=1) and call behavior.synchronize_with_ephys(sync) before extracting labels - except for NWB sessions, which are already synchronized."
       },
       "remedies": [
@@ -929,9 +1212,15 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["run"],
-        "modules": ["video.behavioral_events"],
-        "analyses": ["ephys.decode_opponent_identity"]
+        "stages": [
+          "run"
+        ],
+        "modules": [
+          "video.behavioral_events"
+        ],
+        "analyses": [
+          "ephys.decode_opponent_identity"
+        ]
       },
       "symptom": "AttributeError: 'int' object has no attribute 'startswith', raised deep inside label extraction.",
       "mechanism": "extract_opponent_labels calls .startswith('rat') on animal_of_interest directly. Only the CLI's argparse(type=str) enforces the type; an in-process caller gets no check.",
@@ -939,8 +1228,13 @@
       "detector": {
         "type": "callable",
         "callable": "discovery.detectors:param_is_str",
-        "args_from": {"value": "$params.animal_of_interest"},
-        "pass_if": {"field": "is_str", "op": "is_true"},
+        "args_from": {
+          "value": "$params.animal_of_interest"
+        },
+        "pass_if": {
+          "field": "is_str",
+          "op": "is_true"
+        },
         "on_fail": "animal_of_interest is {type}, must be str (e.g. '631' or 'rat631')."
       },
       "remedies": [
@@ -971,9 +1265,17 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["propose", "run", "interpret"],
-        "modules": ["ephys.decode_event_outcome"],
-        "analyses": ["ephys.decode_event_outcome"]
+        "stages": [
+          "propose",
+          "run",
+          "interpret"
+        ],
+        "modules": [
+          "ephys.decode_event_outcome"
+        ],
+        "analyses": [
+          "ephys.decode_event_outcome"
+        ]
       },
       "symptom": "A result described as being about fights actually pools every event type with a winner and a loser.",
       "mechanism": "decode_event_outcome_* defaults behavior_type=None, which selects every event where both winner and loser are populated - not just fights.",
@@ -981,15 +1283,22 @@
       "detector": {
         "type": "callable",
         "callable": "discovery.detectors:param_is_explicit",
-        "args_from": {"value": "$params.behavior_type"},
-        "pass_if": {"field": "is_explicit", "op": "is_true"},
+        "args_from": {
+          "value": "$params.behavior_type"
+        },
+        "pass_if": {
+          "field": "is_explicit",
+          "op": "is_true"
+        },
         "on_fail": "behavior_type was left at None, pooling every event with a winner and loser. Pass behavior_type='F' to restrict to fights, or state the pooling explicitly."
       },
       "remedies": [
         "pass behavior_type explicitly, and name it in the result's analysis_title"
       ],
       "known_gaps": [],
-      "evidence": {"occurred": false},
+      "evidence": {
+        "occurred": false
+      },
       "references": [
         "CLAUDE.md - Gotchas I keep tripping over",
         "ephys/decode_event_outcome.py"
@@ -1004,9 +1313,15 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["implement"],
-        "modules": ["ephys.social_spatial_fields"],
-        "analyses": ["ephys.social_spatial_fields"]
+        "stages": [
+          "implement"
+        ],
+        "modules": [
+          "ephys.social_spatial_fields"
+        ],
+        "analyses": [
+          "ephys.social_spatial_fields"
+        ]
       },
       "symptom": "Social place fields look plausible but track the focal animal's own occupancy.",
       "mechanism": "Occupancy must be computed over the target's (x, y), and speed-gating must be by the target too. When the partner is stationary, occupancy variance dominates the rate map, so a self/target swap produces a confident wrong answer rather than noise.",
@@ -1017,7 +1332,11 @@
           "tests/test_social_spatial_fields.py::TestMultiTargetSweep::test_self_only_classification",
           "tests/test_social_spatial_fields.py::TestMultiTargetSweep::test_partner_only_classification"
         ],
-        "pass_if": {"field": "returncode", "op": "==", "value": 0},
+        "pass_if": {
+          "field": "returncode",
+          "op": "==",
+          "value": 0
+        },
         "on_fail": "The self/target swap guardrail pair failed. BOTH halves must pass: a swapped implementation still passes either one alone."
       },
       "remedies": [
@@ -1025,7 +1344,9 @@
         "any new spatial module needs an equivalent paired guardrail test"
       ],
       "known_gaps": [],
-      "evidence": {"occurred": false},
+      "evidence": {
+        "occurred": false
+      },
       "references": [
         "CLAUDE.md - Gotchas I keep tripping over",
         "ephys/social_spatial_fields.py::compute_social_place_fields",
@@ -1041,14 +1362,23 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["propose", "interpret"],
-        "modules": ["video.behavioral_events"],
-        "analyses": ["ephys.decode_opponent_identity"]
+        "stages": [
+          "propose",
+          "interpret"
+        ],
+        "modules": [
+          "video.behavioral_events"
+        ],
+        "analyses": [
+          "ephys.decode_opponent_identity"
+        ]
       },
       "symptom": "A 'coarse group' decoding result is written up as evidence about social rank or dominance.",
       "mechanism": "_assign_id_groups pools opponents into 'low'/'high' halves by their trailing numeric ID. Rat ID numbers are arbitrary identifiers; they carry no rank information. For odd N the middle rat goes to whichever half its ID is numerically closer to.",
       "consequence": "A real statistical result gets an interpretation it cannot support. The analysis is about ID arithmetic, not social structure.",
-      "detector": {"type": "none"},
+      "detector": {
+        "type": "none"
+      },
       "remedies": [
         "describe group-mode results as an arbitrary ID split, not a rank or dominance split",
         "to ask about rank, build an actual rank variable from win/loss history first"
@@ -1077,9 +1407,16 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["propose", "implement"],
-        "modules": ["ephys.inter_brain_dynamics"],
-        "analyses": ["ephys.inter_brain_dynamics"]
+        "stages": [
+          "propose",
+          "implement"
+        ],
+        "modules": [
+          "ephys.inter_brain_dynamics"
+        ],
+        "analyses": [
+          "ephys.inter_brain_dynamics"
+        ]
       },
       "symptom": "A hypothesis proposes cohort-wide shared structure across 4 simultaneously-implanted animals and there is nothing to run it with.",
       "mechanism": "fit_shared_subspace and every test, CLI and README example are pairwise only. Generalized/multi-set CCA is a documented stretch goal, not code.",
@@ -1087,8 +1424,14 @@
       "detector": {
         "type": "callable",
         "callable": "discovery.detectors:method_implemented",
-        "args_from": {"module": "ephys.inter_brain_dynamics", "attr": "fit_multiset_subspace"},
-        "pass_if": {"field": "implemented", "op": "is_true"},
+        "args_from": {
+          "module": "ephys.inter_brain_dynamics",
+          "attr": "fit_multiset_subspace"
+        },
+        "pass_if": {
+          "field": "implemented",
+          "op": "is_true"
+        },
         "on_fail": "{module} has no {attr}. N>2 shared-subspace work needs new math implemented first; the N-choose-2 pairwise route reuses existing code."
       },
       "remedies": [
@@ -1096,7 +1439,9 @@
         "treat multi-set CCA as an implement-module task with its own approval gate"
       ],
       "known_gaps": [],
-      "evidence": {"occurred": false},
+      "evidence": {
+        "occurred": false
+      },
       "references": [
         "docs/HYPOTHESIS_BACKLOG.md - section I",
         "ephys/README.md - stretch goals",
@@ -1112,14 +1457,23 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["interpret"],
-        "modules": ["ephys.decoding_plots"],
-        "analyses": ["ephys.decode_opponent_identity", "ephys.decode_event_outcome"]
+        "stages": [
+          "interpret"
+        ],
+        "modules": [
+          "ephys.decoding_plots"
+        ],
+        "analyses": [
+          "ephys.decode_opponent_identity",
+          "ephys.decode_event_outcome"
+        ]
       },
       "symptom": "A figure shows many cells above its chance line for a result that does not beat naive guessing.",
       "mechanism": "ephys/decoding_plots.py draws its chance lines and computes its 'Cells > Chance' counts at 1/n_classes. This was left in place on purpose, to avoid changing already-published figures.",
       "consequence": "The figure and the statistics disagree by construction, and the figure is the more persuasive of the two. This is the specific reason the Interpreter must reason over the numbers first and the image second.",
-      "detector": {"type": "none"},
+      "detector": {
+        "type": "none"
+      },
       "remedies": [
         "read every chance line in these figures as 1/n_classes, and compare against baseline_accuracy separately",
         "when the numbers and a figure disagree, the numbers win and the mismatch must be stated explicitly"
@@ -1150,12 +1504,16 @@
       "status": "active",
       "added": "2026-08-20",
       "applies_to": {
-        "stages": ["interpret"]
+        "stages": [
+          "interpret"
+        ]
       },
       "symptom": "A number is quoted from a result dict and believed because it is in a result dict.",
       "mechanism": "Every trap in this registry was found the same way: someone recomputed a headline number from its inputs and noticed it did not add up. No amount of stored provenance substitutes for that arithmetic.",
       "consequence": "This registry can only ratchet against traps already known. The mechanism that discovers new ones is independent recomputation, so it has to be a norm rather than a check.",
-      "detector": {"type": "none"},
+      "detector": {
+        "type": "none"
+      },
       "remedies": [
         "re-derive the headline statistic from the logged inputs: accuracy against the class counts, q against the declared n_tests and n_shuffles",
         "state what you recomputed and what you took on trust"

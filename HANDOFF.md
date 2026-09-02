@@ -542,14 +542,178 @@ start-over flag.
 Manifest state after all this: 34 sessions, `probe_level=mixed`, 1 fully probed,
 correctly self-reporting as `partial`. Suite: 781 passing.
 
+## First fully pre-registered cycle — hypothesis 4 refuted — 2026-08-26/27
+
+Not previously recorded here. The Layer 7 machinery ran end to end for the first
+time, on its own terms: **frozen prediction #1** (`min_q_value < 0.05`, alpha 0.05,
+200 shuffles planned, 3 declared test keys, `registered_post_hoc=False`,
+`spec_hash 2c21bb0e…`), **family 6 declared before any run**, then iterations
+19-21, then a verdict.
+
+Hypothesis 4: the EC opponent-identity effect is a property of this cohort's
+coding rather than of animal 631 — it should also appear in rat630 and rat613,
+recorded simultaneously in the same session. Family 6 is the first clean
+denominator in the project: *3 declared, 3 run, 0 abandoned, m=3, status
+`clean`, resolvable at 200 shuffles* (best achievable q 0.0149).
+
+| test | p | q | accuracy vs own majority baseline |
+|---|---|---|---|
+| `animal=rat631` | 0.004975 | 0.0075 | 0.2881 vs 0.2775 — clears it |
+| `animal=rat630` | 0.004975 | 0.0075 | 0.2184 vs 0.2358 — **below** |
+| `animal=rat613` | 0.920398 | 0.9204 | 0.3449 vs 0.4068 — **below**, 0/187 cells |
+
+**Verdict: `refuted`** (tier `exploratory`, denominator known, m=3, decided_by
+`agent`). rat630 beats its permutation null while failing to beat
+always-guessing-the-most-frequent-opponent, which is exactly the pair of
+statistics Phase 1.5 exists to report together. `evidence_tier(4)` still returns
+`exploratory`, blocked at condition 1 — no holdout was reserved or spent.
+
+## Recording-level path resolution — 2026-09-02
+
+`DataStorageManager` could address **47 of the 94 animal-recordings that exist on
+the share**, and the "47 animal/session pairs" figure quoted throughout this file
+was that reach, not the dataset. Two independent causes, both in
+`ingestion/data_paths.py`, which hard-coded `f"{session}_merged.kilosort"` in three
+places:
+
+1. **A `.rec` directory is a day, not a recording.** `20251216_094334.rec/rat613/`
+   holds `20251216_094334_merged.*`, `20251216_144334_merged.*` and
+   `20251216_194334_merged.*` — morning, afternoon and evening blocks, each with its
+   own kilosort output, DIO (all Din channels), LFP and timestampoffset. Only the
+   block whose timestamp matched the directory name was ever resolvable. **26 nested
+   recordings in cohort 7, 25 with real spike files**, that no analysis has touched.
+2. **The suffix is not fixed.** Cohort 5 writes `_merge` (21 of 24 animal
+   directories), one directory has no suffix, and one cohort-7 directory is
+   `rat613_20251209_160716_merge`. So **22 of 24 cohort-5 animal directories were
+   unreachable while containing spike files.** The two cohort-5 sessions that ever
+   ran (`20250819_141715`, iterations 17-18) did so because they happen to use
+   `_merged` — a filename coincidence, not a property of the data.
+
+**Fixed** by discovering the stem from disk (`_discover_recordings`) instead of
+building it. `session_id` may now name any recording. Backwards compatibility is
+the load-bearing property and is pinned by
+`tests/test_data_paths_recordings.py::TestNothingThatResolvedBeforeMoves`:
+`'20251216'` and `'20251216_094334'` still resolve to the morning block, so all 21
+logged iterations still mean what they said. A full stamp matching nothing now
+**raises** rather than falling back to the primary (the first version silently
+returned the morning recording for `'20251216_030303'` — caught by its own test);
+several matches with no primary among them also raise. `get_animals_and_sessions`
+yields one row per recording with `recording_id`/`stem`/`session_dir`/`is_primary`,
+and the GUI picker, `enumerate_targets` and `suggest_sessions` all follow from it.
+Paths cache bumped to `_CACHE_VERSION = 2`, because a v1 entry holds a `_merged`
+path that may not exist.
+
+Counts after the fix: **cohort 7 72 rows / 28 sessions, cohort 5 24 rows / 20
+sessions** — 96 animal-recordings, 94 with spike files, against 47 addressable
+before. The 14:43 block of 20251216 loads (177 clusters) and syncs cleanly.
+
+**But addressable is not loadable, and the full probe is what established the
+difference** (see below): 63 of the 96 load end to end, up from 38. Cohort 5 gains
+almost nothing in practice.
+
+### The hazard the fix created — `HZ-DATA-008`
+
+Tracking and events resolve by **8-digit date**, so on a multi-recording day every
+block is offered the same files. `20251216` has exactly one tracking file spanning
+09:50-12:00 — inside the morning block. Mapped through the 14:43 block's own sync it
+falls outside that recording entirely, and since that recording loads and syncs
+cleanly, **nothing would have errored**.
+
+**The blocks of a day share one clock and run back to back**, which is what makes
+the overlap check possible and what made the first version of it wrong. Measured on
+20251216/rat613: `[6.7, 18897.5]`, `[19017.6, 36569.2]`, `[36732.6, 42054.0]` s —
+sequential, non-overlapping, so the nested blocks are genuinely new data rather than
+re-sortings of the same period. But my first attachment check compared the tracking
+window against `[0, duration]`, and `duration_seconds` is a *span*, so every block
+looked like it started at the origin: the afternoon block reported
+`overlap_verified` against a file recorded five hours before it began. Now
+`probe_ephys` records the measured `ephys_window` and everything downstream uses the
+real interval. Pinned by
+`tests/test_manifest_build.py::TestAttachmentToTheRightRecording`, which keeps the
+wrong answer beside the right one.
+
+**Two documented numbers were wrong as a result**, both corrected in `CLAUDE.md`:
+
+- rat615's "impossible 205% coverage" — offered on 2026-08-26 as the *tell* that a
+  session-wide scalar was incoherent — was this bug, not bad data. Its recording is
+  `[377.0, 4028.7]`, a 3651 s block starting 377 s into the day; against its real
+  interval the coverage is **91.5%**.
+- rat631's duration of **9960 s is not real**. It comes from a cached pkl whose raw
+  `spike_times` is empty and whose stale `_duration_seconds` therefore wins, while
+  the `spike_times_by_cell` in the *same file* span 18370 s. So the 75.3% coverage
+  recorded for rat631 on 2026-08-26 — itself the correction to an earlier error — is
+  also wrong; it is **40.8%**. `probe_ephys` now sets
+  `duration_disagrees_with_window` when the two disagree by more than 5%.
+
+Per the scope decision, attachment is decided **by overlap, computed at probe time**:
+`probe_tracking`/`probe_events` map the file's window through *this* recording's sync
+and record `attachment_status` ∈ {`overlap_verified`, `no_overlap`, `undetermined`},
+setting `available=False` on `no_overlap`. An uncomputable answer stays
+`undetermined` and never becomes a pass, per the layer's central invariant. Path
+resolution cannot decide this (it needs a DIO read and must stay cheap), so
+`DataStorageManager` only logs a warning — hence "structural in the manifest,
+advisory in the resolver". Registry now 30 entries; two warning-severity
+requirements added so `check_testable` surfaces it.
+
+## The full manifest probe — done 2026-09-02
+
+`--probe-level full --rebuild`, 3156 s (53 min), 48 sessions, 96 animal-recordings,
+zero fatal build errors. `manifest_status()` now reports **fresh, `probe_level=full`,
+48 of 48 fully probed** — the first time the artifact has been anything other than
+`partial`, and the item has been open since 2026-08-20.
+
+### The inventory, honestly
+
+| | count |
+|---|---|
+| animal-recordings enumerated | 96 |
+| with spike files | 94 |
+| **loadable end to end** | **63** (was 38 before the resolver fix) |
+| of those, newly-addressable non-primary blocks | 25, carrying **4320 of 12227 quality cells** |
+
+**"Addressable" and "loadable" are not the same thing, and the gap is 31
+recordings.** `load_kilosort_data` needs a `*.timestamps.dat` beside `kilosort4/` —
+`_read_timestamps` uses it to map Kilosort's spike *indices* onto the day's absolute
+sample clock — and that ~2 GB file is absent for:
+
+- **23 of cohort 5's 24 animal-recordings.** So cohort 5's paths now resolve and its
+  data still cannot be loaded; the practical gain there is one recording
+  (`20250819_141715`, the one that already worked). Anything planned on cohort 5
+  is blocked on those files, not on code.
+- **every animal of cohort-7 `20251209_160716` and `20251213_102418`** — two entire
+  sessions.
+
+`verify_kilosort_path` reports these as verified because it only checks
+`spike_times.npy`/`spike_clusters.npy`, so the failure appears at load time. Recorded
+per animal in the manifest as a `FileNotFoundError` load error and documented in
+`CLAUDE.md`; it is a missing-file problem on the share.
+
+### Other things the probe established
+
+- **`duration_disagrees_with_window` fires on 7 animal-recordings**, six of them
+  rat631 (`20251212`, `20251214` ×2 with rat630, `20251215`, `20251216`,
+  `20251219_151017`, `20251220_104752`). So the stale-cached-duration problem is not
+  a one-off on 20251216 — any coverage figure derived from `duration_seconds` for
+  those animals is suspect.
+- **20 recordings sit on multi-block days**, which is the population `HZ-DATA-008`
+  guards. The three non-primary blocks of 20251216 correctly report `no_overlap` for
+  both tracking and events, and `check_testable` returns not-testable for every
+  tracking- and event-based analysis on them.
+- Tracking attachment is `overlap_verified` for exactly two sessions
+  (`20251210_110059`, `20251216_094334`) and events for two
+  (`20251216_094334`, cohort-5 `20250819_141715`) — the rest is `undetermined`
+  because no file exists for those dates at all.
+
 ### Still not done
 
-- **Step 10, the retroactive backfill** (`scripts/backfill_ledger.py`) — not yet
-  written. Agreed approach: dry-run first, review the denominator table at
-  m in {7,9,10,11,12} together, then decide the six judgment calls before applying.
-- **The full manifest probe** (`--probe-level full`) — hours; the artifact currently
-  says `probe_level: 'paths'`, so `manifest_status()` correctly reports `partial` and
-  content facts (cell counts, event class counts, tracking coverage) are absent.
+- **Holdout reservations.** The decision was to probe first, then reserve from the
+  inventory — the probe reads metadata only and tests no hypothesis, so it spent
+  nothing. The 25 newly-loadable blocks are the obvious candidate pool.
+- **~25 recordings have never been analysed.** They have no video and no scoring, so
+  they are **ephys-only**: inter-brain, population geometry, and anything that does
+  not need behaviour. Whether they are behaviourally comparable to the morning
+  blocks is unknown.
+- The 31 unloadable recordings need their `*.timestamps.dat` produced or copied.
 - `docs/AI_DISCOVERY_LOOP_DESIGN.md` §5/§6 amendments.
 - Every gate at the *compute* seam is still instructional. Per the scope decision only
   the git entries were removed from `.claude/settings.local.json`; the broad

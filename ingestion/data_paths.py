@@ -8,14 +8,33 @@ default_paths.json file.
 
 import json
 import logging
+import re
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import NamedTuple, Optional, List, Dict
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-_CACHE_VERSION = 1
+# Bumped to 2 when recording-level resolution landed: a v1 cache holds a
+# ``{session}_merged.*`` path that may not exist on disk at all (cohort 5 writes
+# ``_merge``), so those entries must be rebuilt rather than trusted.
+_CACHE_VERSION = 2
 _DEFAULT_CACHE_DIR = Path(__file__).parent.parent / ".cache" / "data_paths"
+
+#: The timestamp embedded in a recording's on-disk prefix. Trodes writes
+#: ``<YYYYmmdd>_<HHMMSS>`` and every artifact for one recording shares it.
+_RECORDING_STAMP_RE = re.compile(r'(20\d{6}_\d{6})')
+
+#: A query that is exactly a recording stamp names one recording and nothing
+#: else, so failing to find it must raise rather than fall back to the day's
+#: primary recording.
+_FULL_RECORDING_ID_RE = re.compile(r'20\d{6}_\d{6}')
+
+#: Prefix assumed when an animal directory holds no ``*.kilosort`` directory at
+#: all. Preserves the pre-recording-discovery behaviour of returning a path
+#: that does not exist rather than raising, which callers rely on to report
+#: "no ephys here" instead of crashing.
+_LEGACY_STEM_SUFFIX = '_merged'
 
 
 def _load_config(config_path: Optional[str] = None) -> dict:
@@ -76,24 +95,151 @@ def _parse_session_date(session_id: str) -> str:
     return session_date
 
 
+class Recording(NamedTuple):
+    """One continuous recording of one animal, as it exists on disk.
+
+    A ``.rec`` directory is a *day* of acquisition, not a single recording:
+    ``20251216_094334.rec/rat613/`` holds ``20251216_094334_merged.*``,
+    ``20251216_144334_merged.*`` and ``20251216_194334_merged.*`` — morning,
+    afternoon and evening blocks, each with its own kilosort output, DIO,
+    LFP and timestampoffset. ``stem`` is the shared on-disk prefix; every
+    artifact path for this recording is built from it.
+    """
+
+    animal_dir: Path
+    stem: str
+    recording_id: str
+    session_dir_id: str
+    is_primary: bool
+
+
+def _discover_recordings(animal_dir: Path, session_dir_id: str) -> List[Recording]:
+    """List the recordings under one animal directory, newest naming and old.
+
+    Anchored on ``*.kilosort`` directories because that is the artifact every
+    caller ultimately wants, and because the suffix between the timestamp and
+    the extension is not fixed: cohort 7 writes ``_merged``, cohort 5 writes
+    ``_merge`` (21 of 24 animal directories), one cohort-5 directory has no
+    suffix, and one cohort-7 directory prefixes the animal name
+    (``rat613_20251209_160716_merge``). Discovering the stem from disk covers
+    all four without a precedence rule — verified across both cohorts, no
+    animal directory carries two stems for the same timestamp.
+
+    The recording whose timestamp equals the ``.rec`` directory's own is the
+    *primary* one; it is what every id resolved to before recording-level
+    lookup existed, and what a date-level query still resolves to.
+    """
+    recordings: List[Recording] = []
+    try:
+        entries = sorted(animal_dir.iterdir())
+    except (PermissionError, OSError):
+        return recordings
+
+    for entry in entries:
+        if not (entry.is_dir() and entry.name.endswith('.kilosort')):
+            continue
+        stem = entry.name[:-len('.kilosort')]
+        match = _RECORDING_STAMP_RE.search(stem)
+        recording_id = match.group(1) if match else session_dir_id
+        recordings.append(Recording(
+            animal_dir=animal_dir, stem=stem, recording_id=recording_id,
+            session_dir_id=session_dir_id,
+            is_primary=(recording_id == session_dir_id)))
+    return recordings
+
+
+def _select_recording(recordings: List[Recording], session_id: str,
+                      session_dir: Path) -> Recording:
+    """Pick the one recording a query names, or fail closed.
+
+    Resolution order, chosen so that every id that resolved before still
+    resolves to the same recording:
+
+    1. an exact ``recording_id`` match wins outright;
+    2. a query that *is* a full recording stamp and matches nothing raises,
+       rather than falling back. Asking for ``'20251216_030303'`` and being
+       handed the 09:43 recording would silently answer a different question
+       than the one asked;
+    3. otherwise partial matches are collected (the module's long-standing
+       substring convention, so ``'613'`` matches ``'rat613'``);
+    4. if several match and one of them is the primary recording, the primary
+       wins — a date-level query such as ``'20251216'`` means the day's first
+       recording, as it always has;
+    5. if several match and none is primary, raise. Silently picking one of
+       three afternoon blocks would attach a result to the wrong recording,
+       and nothing downstream could detect it.
+    """
+    exact = [r for r in recordings if r.recording_id == session_id]
+    if len(exact) == 1:
+        return exact[0]
+
+    if not exact and _FULL_RECORDING_ID_RE.fullmatch(session_id):
+        raise FileNotFoundError(
+            f"No recording '{session_id}' in {session_dir.name}; it holds "
+            f"{', '.join(sorted(r.recording_id for r in recordings))}")
+
+    partial = exact or [r for r in recordings
+                        if session_id in r.recording_id or session_id in r.stem]
+    if not partial:
+        # The query matched the .rec directory but no recording inside it
+        # (e.g. a bare date against a directory named for a later time).
+        partial = list(recordings)
+
+    if len(partial) == 1:
+        return partial[0]
+
+    primary = [r for r in partial if r.is_primary]
+    if len(primary) == 1:
+        if len(partial) > 1:
+            logger.info(
+                "'%s' matches %d recordings in %s (%s); using the primary one "
+                "(%s). Pass a full recording id to select another.",
+                session_id, len(partial), session_dir.name,
+                ', '.join(r.recording_id for r in partial),
+                primary[0].recording_id)
+        return primary[0]
+
+    raise ValueError(
+        f"Session id '{session_id}' matches {len(partial)} recordings in "
+        f"{session_dir.name} and none of them is the primary recording: "
+        f"{', '.join(sorted(r.recording_id for r in partial))}. "
+        "Pass a full recording id (e.g. '20251216_144334').")
+
+
 def _resolve_session_animal(animal_id: str, session_id: str, config: dict) -> List[tuple]:
-    """Resolve [(animal_dir, full_session_id), ...] for matching sessions.
+    """Resolve [(animal_dir, stem), ...] for matching recordings.
 
     Centralises the two iterdir() walks shared by get_kilosort_path / get_dio_path
     so callers needing several files under the same animal directory only pay the
     network listing cost once.
+
+    ``stem`` replaced the old ``full_session_id`` when recording-level lookup
+    landed. Callers must not rebuild it as ``f"{session}_merged"``: that string
+    is wrong for cohort 5 and for every non-primary recording.
     """
     if 'ephys' not in config:
         raise KeyError("'ephys' key not found in configuration file")
     ephys_base = Path(config['ephys'])
 
-    session_matches = _find_matching_directories(ephys_base, session_id, ".rec")
+    session_matches = sorted(_find_matching_directories(ephys_base, session_id, ".rec"))
+    if not session_matches:
+        # The id may name a recording nested inside a .rec directory named for
+        # a different time of the same day, which is the common case for
+        # afternoon and evening blocks.
+        session_date = None
+        try:
+            session_date = _parse_session_date(session_id)
+        except ValueError:
+            session_date = None
+        if session_date:
+            session_matches = sorted(
+                _find_matching_directories(ephys_base, session_date, ".rec"))
     if not session_matches:
         raise FileNotFoundError(f"No session directory found matching '{session_id}' in {ephys_base}")
 
     results: List[tuple] = []
     for session_dir in session_matches:
-        full_session_id = session_dir.name.replace('.rec', '')
+        session_dir_id = session_dir.name.replace('.rec', '')
         animal_matches = _find_matching_directories(session_dir, animal_id)
         if not animal_matches:
             if len(session_matches) == 1:
@@ -101,11 +247,63 @@ def _resolve_session_animal(animal_id: str, session_id: str, config: dict) -> Li
             continue
         if len(animal_matches) > 1:
             raise ValueError(f"Multiple animal directories found matching '{animal_id}': {animal_matches}")
-        results.append((animal_matches[0], full_session_id))
+        animal_dir = animal_matches[0]
+
+        recordings = _discover_recordings(animal_dir, session_dir_id)
+        if not recordings:
+            # No kilosort output at all. Keep the pre-existing behaviour of
+            # handing back a path that does not exist, so callers report "no
+            # ephys" rather than crashing.
+            results.append((animal_dir, f"{session_dir_id}{_LEGACY_STEM_SUFFIX}"))
+            continue
+        try:
+            selected = _select_recording(recordings, session_id, session_dir)
+        except (ValueError, FileNotFoundError):
+            # With several candidate .rec directories the recording may live
+            # in one of the others; with only one there is nowhere left to
+            # look and the caller needs the reason.
+            if len(session_matches) == 1:
+                raise
+            continue
+        results.append((animal_dir, selected.stem))
 
     if not results:
         raise FileNotFoundError(f"No animal directory found matching '{animal_id}' in any of the matched sessions")
     return results
+
+
+def resolve_recordings(animal_id: str, session_id: str,
+                       config_path: Optional[str] = None,
+                       _config: Optional[dict] = None) -> List[Recording]:
+    """Every recording of *animal_id* on the day *session_id* names.
+
+    The inventory behind :func:`get_kilosort_path`'s single answer. Use it to
+    find out that a day holds more than one recording — the manifest builder
+    enumerates with this, and ``DataStorageManager`` uses it to warn when a
+    non-primary recording inherits date-resolved tracking or events.
+    """
+    config = _config or _load_config(config_path)
+    if 'ephys' not in config:
+        raise KeyError("'ephys' key not found in configuration file")
+    ephys_base = Path(config['ephys'])
+
+    session_matches = sorted(_find_matching_directories(ephys_base, session_id, ".rec"))
+    if not session_matches:
+        try:
+            session_date = _parse_session_date(session_id)
+        except ValueError:
+            return []
+        session_matches = sorted(
+            _find_matching_directories(ephys_base, session_date, ".rec"))
+
+    found: List[Recording] = []
+    for session_dir in session_matches:
+        session_dir_id = session_dir.name.replace('.rec', '')
+        animal_matches = _find_matching_directories(session_dir, animal_id)
+        if len(animal_matches) != 1:
+            continue
+        found.extend(_discover_recordings(animal_matches[0], session_dir_id))
+    return found
 
 
 def get_kilosort_path(animal_id: str, session_id: str, config_path: Optional[str] = None,
@@ -117,9 +315,17 @@ def get_kilosort_path(animal_id: str, session_id: str, config_path: Optional[str
     the full path following the expected directory structure. Supports partial matching
     for both animal_id and session_id (e.g., "613" will match "rat613").
 
+    The directory suffix is discovered from disk rather than assumed: cohort 7
+    writes ``_merged``, cohort 5 ``_merge``, and a ``.rec`` directory holds one
+    recording per acquisition block. ``session_id`` may therefore name a
+    non-primary block (``"20251216_144334"``); a bare date still resolves to
+    the day's primary recording, unchanged. See :func:`_discover_recordings`.
+
     Args:
         animal_id: Full or partial identifier for the animal (e.g., "613" or "rat613")
-        session_id: Full or partial identifier for the recording session (e.g., "20251210" or "20251210_110059")
+        session_id: Full or partial identifier for the recording session (e.g.,
+            "20251210", "20251210_110059", or a non-primary block id such as
+            "20251216_144334")
         config_path: Optional path to config file. If None, uses default location.
         _config: Optional pre-loaded config dict to avoid redundant file I/O.
 
@@ -136,8 +342,8 @@ def get_kilosort_path(animal_id: str, session_id: str, config_path: Optional[str
         >>> print(paths[0])
     """
     config = _config or _load_config(config_path)
-    return [animal_dir / f"{full_session_id}_merged.kilosort" / "kilosort4"
-            for animal_dir, full_session_id in _resolve_session_animal(animal_id, session_id, config)]
+    return [animal_dir / f"{stem}.kilosort" / "kilosort4"
+            for animal_dir, stem in _resolve_session_animal(animal_id, session_id, config)]
 
 def get_dio_path(animal_id: str, session_id: str, dio_channel: int = 1,
                  config_path: Optional[str] = None, _config: Optional[dict] = None) -> List[Path]:
@@ -165,9 +371,8 @@ def get_dio_path(animal_id: str, session_id: str, dio_channel: int = 1,
     """
     config = _config or _load_config(config_path)
     dio_channel_str = f"Controller_Din{dio_channel}"
-    return [animal_dir / f"{full_session_id}_merged.DIO"
-            / f"{full_session_id}_merged.dio_{dio_channel_str}.dat"
-            for animal_dir, full_session_id in _resolve_session_animal(animal_id, session_id, config)]
+    return [animal_dir / f"{stem}.DIO" / f"{stem}.dio_{dio_channel_str}.dat"
+            for animal_dir, stem in _resolve_session_animal(animal_id, session_id, config)]
 
 def get_pulse_log_path(config_path: Optional[str] = None, _config: Optional[dict] = None) -> Path:
     """
@@ -385,42 +590,65 @@ def get_animals_and_sessions(config_path: Optional[str] = None,
         _config: Optional pre-loaded config dict to avoid redundant file I/O.
 
     Returns:
-        pd.DataFrame: DataFrame with columns: session, animal, kilosort_path
+        pd.DataFrame: DataFrame with columns: session, animal, kilosort_path,
+            recording_id, stem, session_dir, is_primary.
+
+    One row per *recording*, not per ``.rec`` directory. A day holding morning,
+    afternoon and evening blocks contributes three rows per animal, and
+    ``session`` carries the recording id, so the value can be handed straight
+    back to :class:`DataStorageManager`. For a primary recording the recording
+    id equals the ``.rec`` directory name, so every id this function returned
+    before it enumerated recordings is still returned, unchanged.
     """
     config = _config or _load_config(config_path)
-    
+
     # Get the ephys base path
     if 'ephys' not in config:
         raise KeyError("'ephys' key not found in configuration file")
-    
+
     ephys_base = Path(config['ephys'])
-    
+
     if not ephys_base.exists():
         raise FileNotFoundError(f"Ephys directory not found: {ephys_base}")
-    
+
     data_rows = []
-    
+
     try:
         # Iterate through all session directories (*.rec)
-        for session_dir in ephys_base.iterdir():
+        for session_dir in sorted(ephys_base.iterdir()):
             if session_dir.is_dir() and session_dir.name.endswith('.rec'):
-                session_id = session_dir.name.replace('.rec', '')
-                
+                session_dir_id = session_dir.name.replace('.rec', '')
+
                 # Look for animal directories within this session
-                for animal_dir in session_dir.iterdir():
+                for animal_dir in sorted(session_dir.iterdir()):
                     if animal_dir.is_dir() and animal_dir.name.startswith('rat'):
                         animal_id = animal_dir.name
-                        
-                        # Construct kilosort path
-                        kilosort_path = animal_dir / f"{session_id}_merged.kilosort" / "kilosort4"
-                        
-                        # Add row to data
-                        data_rows.append({
-                            'session': session_id,
-                            'animal': animal_id,
-                            'kilosort_path': kilosort_path
-                        })
-    
+
+                        recordings = _discover_recordings(animal_dir, session_dir_id)
+                        if not recordings:
+                            # Keep the animal visible with the path that would
+                            # have been built, so "no ephys here" stays
+                            # reportable rather than silently absent.
+                            recordings = [Recording(
+                                animal_dir=animal_dir,
+                                stem=f"{session_dir_id}{_LEGACY_STEM_SUFFIX}",
+                                recording_id=session_dir_id,
+                                session_dir_id=session_dir_id,
+                                is_primary=True)]
+
+                        for recording in recordings:
+                            data_rows.append({
+                                'session': recording.recording_id,
+                                'animal': animal_id,
+                                'kilosort_path': (animal_dir
+                                                  / f"{recording.stem}.kilosort"
+                                                  / "kilosort4"),
+                                'recording_id': recording.recording_id,
+                                'stem': recording.stem,
+                                'session_dir': session_dir_id,
+                                'is_primary': recording.is_primary,
+                            })
+
     except (PermissionError, OSError) as e:
         raise RuntimeError(f"Error accessing ephys directory {ephys_base}: {e}")
     
@@ -517,6 +745,13 @@ class DataStorageManager:
         self.behavioral_event_files: List[Path] = []
         self.pulse_log_path = None
 
+        # Which recording of the day this manager resolved to. ``None`` until
+        # the ephys paths load (or when they fail to resolve at all).
+        self.recording_id: Optional[str] = None
+        self.recording_stem: Optional[str] = None
+        self.is_primary_recording: Optional[bool] = None
+        self.recording_ids_on_date: List[str] = []
+
         if auto_load:
             self.load_all_paths()
 
@@ -527,6 +762,7 @@ class DataStorageManager:
         directories and writes a fresh cache file.
         """
         if self.use_cache and self._load_cache():
+            self._warn_if_date_resolved_files_may_not_belong()
             self._log_availability_summary()
             return
         logger.info("Loading data paths for %s/%s", self.animal_id, self.session_id)
@@ -535,6 +771,7 @@ class DataStorageManager:
         self._load_tracking_paths()
         self._load_behavioral_events()
         self._load_sync_paths()
+        self._warn_if_date_resolved_files_may_not_belong()
         self._log_availability_summary()
         if self.use_cache:
             self._save_cache()
@@ -547,6 +784,7 @@ class DataStorageManager:
         self._load_tracking_paths()
         self._load_behavioral_events()
         self._load_sync_paths()
+        self._warn_if_date_resolved_files_may_not_belong()
         self._log_availability_summary()
         if self.use_cache:
             self._save_cache()
@@ -565,6 +803,10 @@ class DataStorageManager:
             "tracking_files": [str(p) for p in self.tracking_files],
             "behavioral_event_files": [str(p) for p in self.behavioral_event_files],
             "pulse_log_path": str(self.pulse_log_path) if self.pulse_log_path else None,
+            "recording_id": self.recording_id,
+            "recording_stem": self.recording_stem,
+            "is_primary_recording": self.is_primary_recording,
+            "recording_ids_on_date": list(self.recording_ids_on_date),
         }
 
     def _apply_cache_dict(self, data: dict) -> None:
@@ -574,6 +816,10 @@ class DataStorageManager:
         self.tracking_files = [Path(p) for p in data.get("tracking_files", [])]
         self.behavioral_event_files = [Path(p) for p in data.get("behavioral_event_files", [])]
         self.pulse_log_path = Path(data["pulse_log_path"]) if data.get("pulse_log_path") else None
+        self.recording_id = data.get("recording_id")
+        self.recording_stem = data.get("recording_stem")
+        self.is_primary_recording = data.get("is_primary_recording")
+        self.recording_ids_on_date = list(data.get("recording_ids_on_date") or [])
 
     def _save_cache(self) -> None:
         try:
@@ -614,18 +860,62 @@ class DataStorageManager:
 
     def _load_ephys_paths(self):
         try:
-            animal_dir, full_session_id = _resolve_session_animal(
+            animal_dir, stem = _resolve_session_animal(
                 self.animal_id, self.session_id, self._config)[0]
-            self.kilosort_path = animal_dir / f"{full_session_id}_merged.kilosort" / "kilosort4"
-            dio_dir = animal_dir / f"{full_session_id}_merged.DIO"
+            self.kilosort_path = animal_dir / f"{stem}.kilosort" / "kilosort4"
+            dio_dir = animal_dir / f"{stem}.DIO"
             self.dio_paths = {
-                ch: dio_dir / f"{full_session_id}_merged.dio_Controller_Din{ch}.dat"
+                ch: dio_dir / f"{stem}.dio_Controller_Din{ch}.dat"
                 for ch in range(1, 5)
             }
+            self.recording_stem = stem
+            match = _RECORDING_STAMP_RE.search(stem)
+            self.recording_id = match.group(1) if match else None
+            try:
+                siblings = _discover_recordings(
+                    animal_dir, animal_dir.parent.name.replace('.rec', ''))
+            except Exception as e:                   # pragma: no cover - listing
+                logger.debug("Could not enumerate sibling recordings: %s", e)
+                siblings = []
+            self.recording_ids_on_date = sorted({r.recording_id for r in siblings})
+            self.is_primary_recording = next(
+                (r.is_primary for r in siblings if r.stem == stem), None)
         except Exception as e:
             logger.warning("Error loading ephys paths: %s", e)
             self.kilosort_path = None
             self.dio_paths = {}
+            self.recording_id = None
+            self.recording_stem = None
+            self.is_primary_recording = None
+            self.recording_ids_on_date = []
+
+    def _warn_if_date_resolved_files_may_not_belong(self):
+        """Flag date-resolved files landing on a non-primary recording.
+
+        Tracking and behavioural events resolve by 8-digit date, so on a day
+        with several recordings every one of them inherits the same files.
+        That is right for the recording the video actually covers and wrong
+        for the others: session ``20251216``'s only tracking file spans
+        09:50-12:00, inside the 09:43 recording, while the 14:43 and 19:43
+        blocks have no video at all. Mapped onto their clocks the window lands
+        outside the recording entirely.
+
+        This manager cannot settle it — deciding needs the sync mapping, hence
+        a DIO read, and path resolution has to stay cheap. The overlap is
+        computed by the capability-manifest probe, which builds a
+        ``DataSyncManager`` anyway; here we only make the inheritance visible
+        rather than silent. Guarded as ``HZ-DATA-008``.
+        """
+        if self.is_primary_recording is False and (
+                self.tracking_files or self.behavioral_event_files):
+            logger.warning(
+                "%s/%s is not the primary recording of its day (%s on this "
+                "date), but tracking/events were resolved by date and may "
+                "belong to a different recording. Check "
+                "tracking.attachment_status in the capability manifest before "
+                "using them (HZ-DATA-008).",
+                self.animal_id, self.recording_id or self.session_id,
+                ', '.join(self.recording_ids_on_date) or 'unknown')
 
     def _load_video_paths(self):
         try:
@@ -658,8 +948,10 @@ class DataStorageManager:
 
     def _log_availability_summary(self):
         logger.info(
-            "Data availability — ephys: %s, DIO channels: %s, video: %d, "
-            "tracking: %d, events: %d, pulse_log: %s",
+            "Data availability — recording: %s (primary: %s), ephys: %s, "
+            "DIO channels: %s, video: %d, tracking: %d, events: %d, "
+            "pulse_log: %s",
+            self.recording_id or 'unresolved', self.is_primary_recording,
             self.kilosort_path is not None,
             list(self.dio_paths.keys()) or "None",
             len(self.video_files),

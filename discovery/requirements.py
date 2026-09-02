@@ -192,6 +192,14 @@ _EVENT_DECODING = _COMMON + (
         reason='Some scored events fall outside THIS animal\'s recording, so the '
                'usable event count is lower than the total suggests.',
         hazards=('HZ-DATA-006',)),
+    # Event files resolve by date, and a date can hold several recordings.
+    Req('events.attachment_status', '==', 'overlap_verified',
+        severity='warning',
+        reason='Nobody has verified that this date\'s scoring covers THIS '
+               'recording; a day can hold several, and each has its own clock.',
+        remedy='Rebuild the manifest at --probe-level full for this recording, '
+               'or use the day\'s primary recording.',
+        hazards=('HZ-DATA-008',)),
 )
 
 _TRACKING_BASED = _COMMON + (
@@ -212,6 +220,16 @@ _TRACKING_BASED = _COMMON + (
         reason='pixels_per_cm is unset for this cohort, so any parameter named *_cm '
                'is really in pixels.',
         hazards=('HZ-DATA-004',)),
+    # Tracking files resolve by date too. 20251216's only tracking file spans
+    # 09:50-12:00 and the day holds three recordings; mapped onto the 14:43
+    # block's clock it lands outside that recording entirely.
+    Req('tracking.attachment_status', '==', 'overlap_verified',
+        severity='warning',
+        reason='Nobody has verified that this date\'s tracking file covers THIS '
+               'recording; a day can hold several, and each has its own clock.',
+        remedy='Rebuild the manifest at --probe-level full for this recording, '
+               'or use the day\'s primary recording.',
+        hazards=('HZ-DATA-008',)),
 )
 
 _PARTNER_TRACKING = _TRACKING_BASED + (

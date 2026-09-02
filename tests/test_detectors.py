@@ -16,6 +16,7 @@ from discovery._predicates import MissingValue
 from discovery.detectors import (
     accuracy_beats_baseline,
     class_selection_is_prespecified,
+    date_resolved_files_belong_to_recording,
     kfold_shuffle_audit,
     method_implemented,
     param_equals,
@@ -185,6 +186,62 @@ class TestTrackingCoverageOk:
     def test_missing_fraction_is_missing(self):
         with pytest.raises(MissingValue):
             tracking_coverage_ok(None)
+
+
+class TestDateResolvedFilesBelongToRecording:
+    """Session 20251216 holds three recordings and one tracking file."""
+
+    THREE = ['20251216_094334', '20251216_144334', '20251216_194334']
+
+    def test_verified_overlap_passes(self):
+        out = date_resolved_files_belong_to_recording(
+            attachment_status='overlap_verified', is_primary=True,
+            recording_ids_on_date=self.THREE)
+        assert out['belongs_to_recording'] is True
+        assert out['n_recordings_on_date'] == 3
+
+    def test_no_overlap_fails(self):
+        """The 14:43 block, offered the 09:50-12:00 tracking file."""
+        out = date_resolved_files_belong_to_recording(
+            attachment_status='no_overlap', is_primary=False,
+            recording_ids_on_date=self.THREE)
+        assert out['belongs_to_recording'] is False
+
+    def test_undetermined_on_a_multi_recording_date_fails(self):
+        """Unverified is not the same as fine.
+
+        The file may well be the right one. But nothing has checked, and the
+        wrong one yields a plausible rate map rather than an error, so the
+        unchecked case has to fail.
+        """
+        out = date_resolved_files_belong_to_recording(
+            attachment_status='undetermined', is_primary=False,
+            recording_ids_on_date=self.THREE)
+        assert out['attachment_verified'] is False
+        assert out['belongs_to_recording'] is False
+
+    def test_single_recording_on_the_date_passes_unverified(self):
+        """Most sessions: one recording, nothing to confuse it with."""
+        out = date_resolved_files_belong_to_recording(
+            attachment_status='undetermined', is_primary=True,
+            recording_ids_on_date=['20251210_110059'])
+        assert out['single_recording_on_date'] is True
+        assert out['belongs_to_recording'] is True
+
+    def test_primary_alone_does_not_excuse_an_unverified_attachment(self):
+        """Being the morning block is not evidence the video covers it.
+
+        20251210's tracking starts at 13:59 against an 11:00 recording, so
+        'primary' says nothing about whether the file lands inside.
+        """
+        out = date_resolved_files_belong_to_recording(
+            attachment_status='undetermined', is_primary=True,
+            recording_ids_on_date=self.THREE)
+        assert out['belongs_to_recording'] is False
+
+    def test_no_context_at_all_is_missing(self):
+        with pytest.raises(MissingValue):
+            date_resolved_files_belong_to_recording()
 
 
 class TestParamDetectors:

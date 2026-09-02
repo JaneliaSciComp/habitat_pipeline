@@ -39,6 +39,14 @@ Assumptions:
       with tracking and events but no ephys are invisible to it and are picked
       up by a separate scan, or the manifest silently under-reports the
       dataset.
+    - **A manifest session is one *recording*, not one ``.rec`` directory.**
+      A day of acquisition holds several blocks, each with its own kilosort
+      output, DIO and sync mapping, and each is probed separately. For the
+      primary block the recording id equals the ``.rec`` directory name, so
+      every session key the manifest used before is still a session key.
+      ``record['recording']`` says which block it is; tracking and events
+      resolve by date and are therefore *attachment-checked* per recording
+      (see :func:`probe_tracking`), never assumed to belong to it.
     - **Metadata, not content, for provenance.** ``mtime`` and ``size`` per
       source file. Hashing gigabytes over SMB to detect drift would be theatre;
       replacement and re-export both change one of those two.
@@ -228,6 +236,8 @@ def probe_ephys(animal_id: str, session_id: str, dsm) -> Dict[str, Any]:
     out: Dict[str, Any] = {
         'kilosort_path': None, 'path_exists': False, 'files_verified': None,
         'n_clusters': None, 'n_quality_cells': None, 'duration_seconds': None,
+        'ephys_window': None, 'recording_span_seconds': None,
+        'starts_at_clock_origin': None, 'duration_disagrees_with_window': None,
         'quality_thresholds': dict(DEFAULT_QUALITY_THRESHOLDS),
         'load_error': None,
     }
@@ -258,6 +268,32 @@ def probe_ephys(animal_id: str, session_id: str, dsm) -> Dict[str, Any]:
         duration = getattr(ks, 'duration_seconds', None)
         if duration is not None:
             out['duration_seconds'] = float(duration)
+        # The real interval this recording occupies, which is NOT [0, duration]:
+        # the blocks of one day share a clock origin and run back to back. On
+        # 20251216 rat613 they are [6.7, 18897.5], [19017.6, 36569.2] and
+        # [36732.6, 42054.0] s. Assuming a zero start made the day's single
+        # tracking file look like it covered all three.
+        with contextlib.suppress(Exception):
+            spans = [(float(s[0]), float(s[-1]))
+                     for s in ks.spike_times_by_cell if len(s)]
+            if spans:
+                first = min(a for a, _ in spans)
+                last = max(b for _, b in spans)
+                span = last - first
+                out['ephys_window'] = [round(first, 3), round(last, 3)]
+                out['recording_span_seconds'] = round(span, 3)
+                out['starts_at_clock_origin'] = bool(first < 60.0)
+                # duration_seconds and the spike window are computed from
+                # different fields, and a cached pkl can carry a
+                # _duration_seconds that contradicts the spike_times_by_cell
+                # sitting beside it in the same file. That is how rat631's
+                # duration was recorded as 9960 s against a measured span of
+                # 18370 s, which then propagated into a documented coverage
+                # figure. Disagreement is a fact about the cache, so record it.
+                if duration is not None and span > 0:
+                    out['duration_disagrees_with_window'] = bool(
+                        abs(span - float(duration)) > max(60.0, 0.05 * span))
+        if out.get('ephys_window') is None and duration is not None:
             out['ephys_window'] = [0.0, float(duration)]
         with contextlib.suppress(Exception):
             with _quiet():
@@ -292,7 +328,32 @@ def probe_sync(dsm, dio_channel: int = 1) -> Dict[str, Any]:
         return out
 
 
+def _intervals(durations: Optional[Mapping[str, float]],
+               windows: Optional[Mapping[str, Any]]) -> Dict[str, tuple]:
+    """Per-animal ``(t_first, t_last)`` on the day's ephys clock.
+
+    Prefers the measured spike window. Falls back to ``[0, duration]``, which
+    is right only for a recording that starts at the clock origin — the day's
+    primary block. A later block of the same day starts tens of thousands of
+    seconds in, and treating it as starting at zero is what made the morning's
+    tracking file look attachable to the afternoon's recording.
+    """
+    out: Dict[str, tuple] = {}
+    for animal, duration in sorted((durations or {}).items()):
+        if duration:
+            out[animal] = (0.0, float(duration))
+    for animal, window in sorted((windows or {}).items()):
+        try:
+            first, last = float(window[0]), float(window[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if last > first:
+            out[animal] = (first, last)
+    return out
+
+
 def probe_tracking(dsm, sync=None, *, durations: Optional[Mapping[str, float]] = None,
+                   windows: Optional[Mapping[str, Any]] = None,
                    pixels_per_cm: Optional[float] = None) -> Dict[str, Any]:
     """Per-object tracking facts, read cheaply.
 
@@ -315,11 +376,24 @@ def probe_tracking(dsm, sync=None, *, durations: Optional[Mapping[str, float]] =
         - A ratio above 1.0 means the tracking file outlives that animal's
           recording, which is a real inconsistency rather than a coverage
           measurement, so it is flagged rather than clamped silently.
+        - **Tracking files resolve by 8-digit date, but a date can hold
+          several recordings.** ``20251216`` has morning, afternoon and
+          evening blocks and exactly one tracking file, spanning 09:50-12:00 —
+          inside the morning recording only. Every recording of that day is
+          therefore *offered* the same file, and for two of the three it is
+          simply the wrong clock. Attachment is decided here, by mapping the
+          file's window through this recording's own sync and asking whether
+          it overlaps at all; ``available`` is set to False when it does not.
+          When the mapping cannot be computed the answer is ``undetermined``,
+          never ``attached`` — a check that could not run must not report a
+          pass.
     """
     from video.tracking_import import _compute_speed, load_timestamps
 
     out: Dict[str, Any] = {
         'available': False, 'tracking_file': None, 'n_tracking_files': 0,
+        'file_present_for_date': False, 'attached': None,
+        'attachment_status': 'undetermined', 'overlap_seconds': None,
         'n_frames': None, 'frame_rate_hz': None, 'ephys_window': None,
         'ephys_window_span_seconds': None,
         'coverage_by_animal': {}, 'coverage_reference_animal': None,
@@ -358,6 +432,7 @@ def probe_tracking(dsm, sync=None, *, durations: Optional[Mapping[str, float]] =
         return out
 
     out['available'] = True
+    out['file_present_for_date'] = True
     timestamps = None
     with contextlib.suppress(Exception):
         timestamps = load_timestamps(path)
@@ -375,13 +450,15 @@ def probe_tracking(dsm, sync=None, *, durations: Optional[Mapping[str, float]] =
                 end = float(sync.convert_behavior_to_ephys(seconds[-1]))
                 out['ephys_window'] = [round(start, 3), round(end, 3)]
                 out['ephys_window_span_seconds'] = round(end - start, 3)
-                for animal, duration in sorted((durations or {}).items()):
-                    if not duration:
+                intervals = _intervals(durations, windows)
+                for animal, (t_first, t_last) in sorted(intervals.items()):
+                    span = t_last - t_first
+                    if span <= 0:
                         continue
-                    covered = max(0.0, min(end, float(duration)) - max(start, 0.0))
-                    fraction = round(covered / float(duration), 4)
+                    covered = max(0.0, min(end, t_last) - max(start, t_first))
+                    fraction = round(covered / span, 4)
                     out['coverage_by_animal'][animal] = fraction
-                    if end > float(duration) * 1.001:
+                    if end > t_last * 1.001:
                         # The tracking file outlives this animal's recording:
                         # an inconsistency to surface, not a coverage figure.
                         out['coverage_exceeds_recording'].append(animal)
@@ -391,6 +468,30 @@ def probe_tracking(dsm, sync=None, *, durations: Optional[Mapping[str, float]] =
                     out['coverage_reference_animal'] = reference
                     out['frac_of_ephys_duration_covered'] = \
                         out['coverage_by_animal'][reference]
+
+                # Does this file belong to THIS recording? Against each
+                # animal's real interval, and attached if any of them overlaps
+                # - the most generous verdict the data supports.
+                if intervals:
+                    overlap = max(
+                        min(end, t_last) - max(start, t_first)
+                        for t_first, t_last in intervals.values())
+                    out['overlap_seconds'] = round(float(overlap), 3)
+                    out['attached'] = bool(overlap > 0)
+                    out['attachment_status'] = (
+                        'overlap_verified' if overlap > 0 else 'no_overlap')
+
+    if out['attached'] is False:
+        # Present for the date, but not for this recording. Reporting it as
+        # available would let an analysis mix another block's positions into
+        # this one's clock, which nothing downstream could detect.
+        out['available'] = False
+        out['error'] = (
+            f"tracking file {Path(str(out['tracking_file'])).name} maps to "
+            f"{out['ephys_window']} on this recording's clock, which does not "
+            "overlap it; the file belongs to another recording on this date "
+            "(HZ-DATA-008)")
+        return out
 
     total_frames = out['n_frames'] or int(frame['frame'].nunique()) \
         if 'frame' in frame.columns else None
@@ -439,6 +540,7 @@ def probe_tracking(dsm, sync=None, *, durations: Optional[Mapping[str, float]] =
 
 def probe_events(dsm, animal_ids: Sequence[str], sync=None, *,
                  durations: Optional[Mapping[str, float]] = None,
+                 windows: Optional[Mapping[str, Any]] = None,
                  min_events_per_class: int = 5) -> Dict[str, Any]:
     """Event counts and, per focal animal, the real usable label sets.
 
@@ -451,11 +553,20 @@ def probe_events(dsm, animal_ids: Sequence[str], sync=None, *,
           other animal. The per-animal figure lives in
           ``per_animal[animal]['frac_events_within_recording']``; the top-level
           scalar is the most conservative of them and names its reference.
+        - **Event files resolve by date, and a date can hold several
+          recordings.** Same trap as :func:`probe_tracking`: the scoring for
+          ``20251216`` covers the morning block, and the afternoon and evening
+          recordings are offered the same file. Attachment is decided by
+          whether any event lands inside this recording once synced; an
+          uncomputable answer stays ``undetermined`` rather than becoming a
+          pass.
     """
     from video.behavioral_events import load_behavioral_events
 
     out: Dict[str, Any] = {
         'available': False, 'event_files': [], 'n_events_total': None,
+        'file_present_for_date': False, 'attached': None,
+        'attachment_status': 'undetermined',
         'by_type': {}, 'animals_seen': [], 'sync_probe_ok': False,
         'frac_events_within_recording_by_animal': {},
         'events_window_reference_animal': None,
@@ -480,6 +591,7 @@ def probe_events(dsm, animal_ids: Sequence[str], sync=None, *,
         return out
 
     out['available'] = True
+    out['file_present_for_date'] = True
     frame = getattr(behavior, 'events_data', None)
     if frame is not None:
         out['n_events_total'] = int(len(frame))
@@ -501,17 +613,16 @@ def probe_events(dsm, animal_ids: Sequence[str], sync=None, *,
                     behavior.synchronize_with_ephys(sync, create_new_columns=True))
         except Exception as exc:
             out['error'] = f"sync failed: {type(exc).__name__}: {exc}"
-        if out['sync_probe_ok'] and durations:
+        intervals = _intervals(durations, windows)
+        if out['sync_probe_ok'] and intervals:
             with contextlib.suppress(Exception):
                 starts = pd.to_numeric(behavior.events_data['ts_start_ephys'],
                                        errors='coerce').to_numpy(dtype=float)
                 finite = np.isfinite(starts)
                 if finite.any():
                     per_animal_frac: Dict[str, float] = {}
-                    for animal, duration in sorted(durations.items()):
-                        if not duration:
-                            continue
-                        inside = ((starts >= 0.0) & (starts <= float(duration))
+                    for animal, (t_first, t_last) in sorted(intervals.items()):
+                        inside = ((starts >= t_first) & (starts <= t_last)
                                   & finite).sum()
                         per_animal_frac[animal] = round(
                             float(inside) / float(finite.sum()), 4)
@@ -521,6 +632,20 @@ def probe_events(dsm, animal_ids: Sequence[str], sync=None, *,
                         out['events_window_reference_animal'] = reference
                         out['frac_events_within_ephys_window'] = \
                             per_animal_frac[reference]
+                        # Most generous reading: attached if any animal's
+                        # recording contains any scored event.
+                        best = max(per_animal_frac.values())
+                        out['attached'] = bool(best > 0.0)
+                        out['attachment_status'] = (
+                            'overlap_verified' if best > 0.0 else 'no_overlap')
+
+    if out['attached'] is False:
+        out['available'] = False
+        out['error'] = (
+            "no scored event falls inside this recording once synced; the "
+            "event file belongs to another recording on this date "
+            "(HZ-DATA-008)")
+        return out
 
     # Label sets, computed by the very functions the analyses call.
     if not out['sync_probe_ok']:
@@ -651,6 +776,13 @@ def build_session_record(session_id: str, animals: Sequence[str], *,
                   'n_animals_with_ephys': len(animals), 'per_animal': {}},
         'tracking': {'available': False},
         'events': {'available': False},
+        #: Which block of the day this is. A ``.rec`` directory holds one
+        #: recording per acquisition block, and only the block whose timestamp
+        #: matches the directory is "primary" - the one every date-level id
+        #: resolves to, and the only one date-resolved tracking and events can
+        #: be assumed to belong to.
+        'recording': {'recording_id': None, 'is_primary': None,
+                      'session_dir': None, 'recording_ids_on_date': []},
         'provenance': {'sources': {}, 'probe_level': probe_level, 'errors': []},
     }
     errors: List[Dict[str, Any]] = []
@@ -658,6 +790,10 @@ def build_session_record(session_id: str, animals: Sequence[str], *,
     #: Per animal, because animals in one session share a clock but not a
     #: recording length - see probe_tracking's assumptions.
     durations: Dict[str, float] = {}
+    #: Per animal, the measured [first spike, last spike] interval. Not
+    #: [0, duration]: the blocks of one day share a clock origin and run back
+    #: to back, so a later block starts tens of thousands of seconds in.
+    windows: Dict[str, Any] = {}
     sync = None
 
     for animal in sorted(str(a) for a in animals):
@@ -672,6 +808,15 @@ def build_session_record(session_id: str, animals: Sequence[str], *,
             primary_dsm = dsm
             with contextlib.suppress(Exception):
                 record['pixels_per_cm'] = dsm.get_pixels_per_cm()
+            record['recording'] = {
+                'recording_id': getattr(dsm, 'recording_id', None),
+                'is_primary': getattr(dsm, 'is_primary_recording', None),
+                'session_dir': (dsm.get_kilosort_path().parent.parent.parent.name
+                                .replace('.rec', '')
+                                if dsm.get_kilosort_path() else None),
+                'recording_ids_on_date': list(
+                    getattr(dsm, 'recording_ids_on_date', []) or []),
+            }
 
         if probe_level == 'paths':
             path = None
@@ -693,6 +838,8 @@ def build_session_record(session_id: str, animals: Sequence[str], *,
                            'error': block['load_error']})
         if block.get('duration_seconds'):
             durations[animal] = float(block['duration_seconds'])
+        if block.get('ephys_window'):
+            windows[animal] = list(block['ephys_window'])
 
         sync_block = probe_sync(dsm, dio_channel=dio_channel)
         if sync is None and sync_block.get('ok'):
@@ -704,7 +851,7 @@ def build_session_record(session_id: str, animals: Sequence[str], *,
 
     if primary_dsm is not None and probe_level != 'paths':
         record['tracking'] = probe_tracking(
-            primary_dsm, sync, durations=durations,
+            primary_dsm, sync, durations=durations, windows=windows,
             pixels_per_cm=record.get('pixels_per_cm'))
         if record['tracking'].get('error'):
             errors.append({'stage': 'tracking', 'error': record['tracking']['error']})
@@ -713,7 +860,7 @@ def build_session_record(session_id: str, animals: Sequence[str], *,
 
         record['events'] = probe_events(
             primary_dsm, sorted(record['ephys']['per_animal']), sync,
-            durations=durations)
+            durations=durations, windows=windows)
         if record['events'].get('error'):
             errors.append({'stage': 'events', 'error': record['events']['error']})
         record['provenance']['sources']['events'] = {

@@ -48,6 +48,7 @@ __all__ = [
     'pinned_at_p_floor',
     'target_position_variance_ok',
     'tracking_coverage_ok',
+    'date_resolved_files_belong_to_recording',
     'param_equals',
     'param_is_explicit',
     'param_is_str',
@@ -249,6 +250,47 @@ def tracking_coverage_ok(
         'min_frac': float(min_frac),
         'ephys_window': list(ephys_window) if ephys_window is not None else None,
         'covers_enough': bool(frac >= float(min_frac)),
+    }
+
+
+def date_resolved_files_belong_to_recording(
+    attachment_status: Any = None,
+    is_primary: Any = None,
+    recording_ids_on_date: Any = None,
+) -> Dict[str, Any]:
+    """Do this recording's date-resolved tracking/events actually cover it?
+
+    Tracking files and behavioural event files resolve by 8-digit date, but a
+    date is not a recording. ``20251216_094334.rec/rat613/`` holds three
+    recordings — 09:43, 14:43 and 19:43 — and the day's single tracking file
+    spans 09:50-12:00. All three are offered that file; for two of them it
+    maps outside the recording entirely once put on their clock.
+
+    Passes when the capability manifest has *verified* the overlap
+    (``attachment_status='overlap_verified'``), or when only one recording
+    exists on the date and there is nothing to confuse. An unverified
+    attachment on a day with several recordings is a fail, not a pass: the
+    file may well be the right one, but nothing has checked, and the wrong
+    one produces a plausible rate map rather than an error.
+    """
+    status = attachment_status
+    on_date = list(recording_ids_on_date or [])
+
+    if status is None and not on_date and is_primary is None:
+        raise MissingValue(
+            'attachment_status, is_primary and recording_ids_on_date are all '
+            'absent; cannot tell which recording these files belong to')
+
+    single_recording_on_date = len(on_date) == 1
+    verified = status == 'overlap_verified'
+    return {
+        'attachment_status': status,
+        'is_primary': is_primary,
+        'recording_ids_on_date': on_date,
+        'n_recordings_on_date': len(on_date),
+        'single_recording_on_date': single_recording_on_date,
+        'attachment_verified': verified,
+        'belongs_to_recording': bool(verified or single_recording_on_date),
     }
 
 

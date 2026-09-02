@@ -1102,6 +1102,76 @@
       ]
     },
     {
+      "id": "HZ-DATA-008",
+      "slug": "one-date-several-recordings",
+      "title": "A date holds several recordings, but tracking and events resolve by date",
+      "severity": "critical",
+      "kind": "data",
+      "status": "active",
+      "added": "2026-09-02",
+      "applies_to": {
+        "stages": [
+          "propose",
+          "run",
+          "interpret"
+        ],
+        "modules": [
+          "ingestion.data_paths",
+          "video.tracking_import",
+          "video.behavioral_events"
+        ],
+        "analyses": [
+          "ephys.social_spatial_fields",
+          "ephys.decode_location",
+          "ephys.decode_partner_distance",
+          "ephys.decode_opponent_identity",
+          "ephys.decode_event_outcome"
+        ]
+      },
+      "symptom": "Nothing visible. An analysis of an afternoon or evening recording is handed the morning's tracking and scored events, and produces a plausible-looking result on the wrong clock.",
+      "mechanism": "A '.rec' directory is a day of acquisition, not one recording: 20251216_094334.rec/rat613/ holds 20251216_094334_merged.*, 20251216_144334_merged.* and 20251216_194334_merged.*, each with its own kilosort output, DIO, LFP and timestampoffset. Ephys paths resolve per recording, but get_tracking_files_by_date and get_event_files_by_date key on the 8-digit date only, so every recording of a day is offered the same tracking file and the same scoring - and each recording has its own sync mapping, so the same file lands on a different clock in each.",
+      "consequence": "Session 20251216 has exactly one tracking file, spanning 09:50-12:00, i.e. inside the 09:43 recording. Mapped through the 14:43 recording's own sync it falls outside that recording entirely. An analysis that accepts the date-resolved file for a non-primary recording therefore correlates spikes against positions recorded hours earlier, and every occupancy-normalised quantity is meaningless without erroring.",
+      "detector": {
+        "type": "callable",
+        "callable": "discovery.detectors:date_resolved_files_belong_to_recording",
+        "args_from": {
+          "attachment_status": "$manifest.tracking.attachment_status",
+          "is_primary": "$manifest.recording.is_primary",
+          "recording_ids_on_date": "$manifest.recording.recording_ids_on_date"
+        },
+        "pass_if": {
+          "field": "belongs_to_recording",
+          "op": "is_true"
+        },
+        "on_fail": "This date holds {n_recordings_on_date} recordings ({recording_ids_on_date}) and the tracking/event attachment for this one is '{attachment_status}', not verified. Rebuild the capability manifest at --probe-level full for this recording, or use the primary recording, before treating date-resolved tracking or events as belonging to it."
+      },
+      "remedies": [
+        "consult the manifest's tracking.attachment_status / events.attachment_status: 'overlap_verified' means the file's window was mapped through THIS recording's sync and does overlap it",
+        "a non-primary recording with unverified attachment is ephys-only; run inter-brain or population analyses on it, not tracking- or event-based ones",
+        "DataStorageManager logs a warning when a non-primary recording inherits date-resolved files; do not filter that warning out",
+        "if a day genuinely has per-block video, file it so the name distinguishes the blocks, and teach get_tracking_files_by_date the recording id rather than the date"
+      ],
+      "known_gaps": [
+        "Path resolution cannot decide attachment on its own: the answer needs the sync mapping, hence a DIO read, and get_tracking_files_by_date must stay cheap. So the check is structural in the manifest and advisory (a log warning) in DataStorageManager.",
+        "Only the manifest's full probe level computes attachment. At --probe-level paths the status stays 'undetermined', and this detector then fails rather than passing, which is the intended direction."
+      ],
+      "evidence": {
+        "occurred": true,
+        "date": "2026-09-02",
+        "where": [
+          "Found while fixing kilosort path resolution: 26 recordings in cohort 7 were nested inside .rec directories named for a different block of the same day, and no analysis could address them - get_kilosort_path hard-coded '{session}_merged.kilosort', which only ever names the block whose timestamp matches the directory",
+          "Making them addressable created this hazard: DataStorageManager('rat613', '20251216_144334') resolves the afternoon recording's ephys correctly and is still handed merged_20251216_0950_1200 as its tracking file and the 20251216 scoring as its events, both of which belong to the morning block",
+          "The afternoon recording loads cleanly (177 clusters, 17551 s) and syncs cleanly, so nothing about the wrong attachment would have surfaced as an error"
+        ]
+      },
+      "references": [
+        "ingestion/data_paths.py::_discover_recordings",
+        "ingestion/data_paths.py::DataStorageManager._warn_if_date_resolved_files_may_not_belong",
+        "discovery/manifest_build.py::probe_tracking",
+        "discovery/manifest_build.py::probe_events"
+      ]
+    },
+    {
       "id": "HZ-API-001",
       "slug": "stale-kilosortdata-constructor",
       "title": "Pre-dataclass KilosortData(data_input=...) API reappearing",

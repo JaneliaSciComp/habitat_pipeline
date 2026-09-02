@@ -222,6 +222,86 @@ class TestProbeTracking:
         assert 'path resolution failed' in out['error']
 
 
+class TestAttachmentToTheRightRecording:
+    """HZ-DATA-008. The blocks of one day share a clock and run back to back.
+
+    Measured on 20251216/rat613: [6.7, 18897.5], [19017.6, 36569.2] and
+    [36732.6, 42054.0] s. The day's only tracking file maps to [687, 8187],
+    inside the first block and nowhere near the other two — but the first
+    version of this check compared against ``[0, duration]``, and since
+    ``duration`` is a *span* every block looked like it started at zero. The
+    afternoon block therefore reported ``overlap_verified`` against a file
+    recorded five hours before it began, which is precisely the silent wrong
+    answer the attachment check exists to prevent.
+    """
+
+    def test_the_primary_block_is_attached(self, tmp_path):
+        path = _write_tracking(tmp_path, n_frames=400, frame_rate=40.0,
+                               start_second=100.0)
+        out = probe_tracking(_StubDsm(tracking=path), _StubSync(),
+                             windows={'rat613': [5.0, 200.0]})
+        assert out['attachment_status'] == 'overlap_verified'
+        assert out['attached'] is True
+        assert out['available'] is True
+
+    def test_a_later_block_of_the_same_day_is_not_attached(self, tmp_path):
+        """Tracking at 100-110 s against a block spanning 19000-36000 s."""
+        path = _write_tracking(tmp_path, n_frames=400, frame_rate=40.0,
+                               start_second=100.0)
+        out = probe_tracking(_StubDsm(tracking=path), _StubSync(),
+                             windows={'rat613': [19017.6, 36569.2]})
+        assert out['attachment_status'] == 'no_overlap'
+        assert out['attached'] is False
+        assert out['available'] is False, (
+            'a file that does not overlap this recording must not be offered '
+            'to it as available')
+        assert out['overlap_seconds'] < 0
+        assert 'HZ-DATA-008' in out['error']
+
+    def test_zero_start_assumption_would_have_passed_it(self, tmp_path):
+        """The bug, pinned: [0, duration] makes every block start at zero."""
+        path = _write_tracking(tmp_path, n_frames=400, frame_rate=40.0,
+                               start_second=100.0)
+        wrong = probe_tracking(_StubDsm(tracking=path), _StubSync(),
+                               durations={'rat613': 36569.2 - 19017.6})
+        assert wrong['attached'] is True, (
+            'documents the wrong answer the duration-only path gives; the '
+            'windows= path above is the correct one')
+
+    def test_windows_take_precedence_over_durations(self, tmp_path):
+        path = _write_tracking(tmp_path, n_frames=400, frame_rate=40.0,
+                               start_second=100.0)
+        out = probe_tracking(_StubDsm(tracking=path), _StubSync(),
+                             durations={'rat613': 17551.6},
+                             windows={'rat613': [19017.6, 36569.2]})
+        assert out['attached'] is False
+
+    def test_coverage_uses_the_real_interval_not_the_span(self, tmp_path):
+        """rat615's 'impossible 205%' was this bug, not bad data.
+
+        Its recording is [377.0, 4028.7] s — a 3651 s block starting 377 s
+        into the day. Dividing by the span while assuming a zero start put
+        the tracking window mostly outside it and produced a ratio above one.
+        """
+        path = _write_tracking(tmp_path, n_frames=4000, frame_rate=40.0,
+                               start_second=377.0)
+        out = probe_tracking(_StubDsm(tracking=path), _StubSync(),
+                             windows={'rat615': [377.0, 4028.7]})
+        # 4000 frames at 40 Hz is a 100 s window, against a 3651.7 s block.
+        assert out['coverage_by_animal']['rat615'] == pytest.approx(0.0274,
+                                                                    abs=0.002)
+        assert out['coverage_by_animal']['rat615'] <= 1.0
+
+    def test_unknown_interval_stays_undetermined(self, tmp_path):
+        """No windows and no durations: cannot check, so no verdict."""
+        path = _write_tracking(tmp_path, n_frames=400, frame_rate=40.0)
+        out = probe_tracking(_StubDsm(tracking=path), _StubSync())
+        assert out['attachment_status'] == 'undetermined'
+        assert out['attached'] is None
+        assert out['available'] is True, (
+            'undetermined must not be reported as a confident negative either')
+
+
 class TestCostGuards:
     def test_tracking_probe_passes_usecols(self, tmp_path, monkeypatch):
         """A ~90 MB CSV must not be read in full to get five columns."""

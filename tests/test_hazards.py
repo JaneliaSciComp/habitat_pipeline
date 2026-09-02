@@ -301,14 +301,43 @@ class TestRealFailuresAreCaught:
         ctx = {'manifest': {'tracking': {'n_identity_resolved_animals': 1}}}
         assert run_detector(hazard, ctx).tripped
 
-    def test_the_undocumented_tracking_coverage_gap(self):
-        """20251216's tracking covers ~63% of the recording."""
+    def test_the_tracking_coverage_gap_is_read_per_animal(self):
+        """Measured on 20251216: rat631 at 75.3%, rat613 at 39.8%.
+
+        The same tracking window, the same session, two very different answers -
+        because the animals' recordings are 9960 s and 18866 s. The detector
+        therefore takes the animal's own coverage, and a context without an
+        animal cannot be checked at all.
+        """
         hazard = hazards_by_id()['HZ-DATA-002']
-        ctx = {'manifest': {'tracking': {'frac_of_ephys_duration_covered': 0.63,
-                                         'ephys_window': [412.7, 8231.4]}}}
-        result = run_detector(hazard, ctx)
-        assert result.tripped
-        assert '63%' in result.message
+        manifest = {'tracking': {
+            'coverage_by_animal': {'rat631': 0.753, 'rat613': 0.3975},
+            'ephys_window': [687.3, 8187.2]}}
+
+        focal = run_detector(hazard, {'params': {'animal_id': 'rat631'},
+                                      'manifest': manifest})
+        assert focal.tripped
+        assert '75%' in focal.message
+
+        other = run_detector(hazard, {'params': {'animal_id': 'rat613'},
+                                      'manifest': manifest})
+        assert other.tripped
+        assert '40%' in other.message
+
+    def test_coverage_cannot_be_checked_without_naming_an_animal(self):
+        """A session-wide coverage figure was never a coherent quantity."""
+        hazard = hazards_by_id()['HZ-DATA-002']
+        result = run_detector(hazard, {'params': {}, 'manifest': {'tracking': {
+            'coverage_by_animal': {'rat631': 0.753}}}})
+        assert (result.ran, result.passed) == (False, None)
+
+    def test_adequate_coverage_passes(self):
+        hazard = hazards_by_id()['HZ-DATA-002']
+        result = run_detector(hazard, {
+            'params': {'animal_id': 'rat631'},
+            'manifest': {'tracking': {'coverage_by_animal': {'rat631': 0.97},
+                                      'ephys_window': [0.0, 100.0]}}})
+        assert result.passed is True
 
     def test_the_int_animal_of_interest(self):
         hazard = hazards_by_id()['HZ-API-003']

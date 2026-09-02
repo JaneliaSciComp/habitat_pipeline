@@ -64,13 +64,28 @@ prose; this file is the actionable, feasibility-checked backlog to draw from.
    — discovered while testing Hypothesis #3 (`database/lab_notebook.py`, iteration 9,
    status `blocked`). Check `object_name` values in a session's `*_mask_metrics.csv`
    before assuming multi-animal position data exists.
-   **Additionally**: that session's tracking file (`merged_20251216_0950_1200`) covers
-   roughly **63%** of a recording that starts at 09:43:34, and both
-   `resolve_tracking_on_ephys_clock` and `compute_social_place_fields` accept a time
-   window that defaults to *everything*. An analysis run over the whole session
-   silently mixes ~37% no-position time into its occupancy maps. Pass
-   `t_window_ephys` from the manifest's `tracking.ephys_window`. Guarded as
-   `HZ-DATA-002`.
+   **Additionally — and this is per *animal*, not per session.** Measured by the
+   first full manifest probe (2026-08-26), `20251216`'s tracking window on the ephys
+   clock is `[687.3, 8187.2]` s, a span of 7499.9 s. The four animals' recordings are
+   18866 s (rat613), 3651 s (rat615), 18556 s (rat630) and 9960 s (rat631), so that
+   one window covers **39.8% / 205% / 40.4% / 75.3%** of "the recording" depending on
+   which animal you mean. 205% is impossible, which is the tell that a session-wide
+   coverage figure was never a coherent quantity.
+
+   > An earlier version of this file said "roughly 63%". That was filename arithmetic
+   > (09:50–12:00 against a 09:43:34 start), never measured, and wrong for every
+   > animal. Read coverage from `tracking.coverage_by_animal[animal]`, never from a
+   > session-wide scalar. **For rat631 — the focal animal of every analysis on record
+   > — the real figure is 75.3%.**
+
+   Both `resolve_tracking_on_ephys_clock` and `compute_social_place_fields` accept a
+   time window that defaults to *everything*, so an analysis over the whole session
+   silently mixes no-position time into its occupancy maps. Pass `t_window_ephys` from
+   the manifest's `tracking.ephys_window`. Guarded as `HZ-DATA-002`.
+
+   The same applies to events: **93.8%** of the 641 scored events fall inside rat631's
+   recording, but only 39.8% fall inside rat615's much shorter one. Read
+   `events.frac_events_within_recording_by_animal[animal]`.
 2. **N>2 simultaneous ephys is actually routine — confirmed 2026-08-19.**
    `get_animals_and_sessions()` shows most cohort-7 sessions (including `20251216`,
    the session behind the opponent-identity finding) have **4** simultaneously-

@@ -102,13 +102,17 @@ class ManifestStatus:
     state: str            # 'fresh' | 'aging' | 'partial'
     generated_at: str
     age_days: Optional[float]
+    #: Derived from the sessions, not from what the last run asked for:
+    #: 'paths' | 'mixed' | 'full' | 'unknown'.
     probe_level: str
     n_sessions: int
     warnings: Tuple[str, ...] = ()
+    n_fully_probed: int = 0
 
     def summary(self) -> str:
         line = (f"manifest {self.state}: generated {self.generated_at}, "
-                f"{self.n_sessions} session(s), probe_level={self.probe_level}")
+                f"{self.n_sessions} session(s), probe_level={self.probe_level} "
+                f"({self.n_fully_probed} fully probed)")
         return '\n'.join([line] + [f"  warning: {w}" for w in self.warnings])
 
 
@@ -275,21 +279,47 @@ def manifest_status(path: Optional[Path] = None, *,
         except ValueError:
             pass
 
-    probe_level = (manifest.get('generated_by') or {}).get('probe_level', 'unknown')
+    # The top-level probe_level records what the *last run* asked for, which is
+    # not what the artifact contains: probing one session at 'full' would leave
+    # that field saying 'full' while every other session is still paths-only.
+    # Derive it from the sessions instead, so the manifest cannot overstate
+    # itself.
+    sessions = manifest.get('sessions', {}) or {}
+    per_session = [((record.get('provenance') or {}).get('probe_level') or 'unknown')
+                   for record in sessions.values()]
+    n_full = sum(1 for level in per_session if level == 'full')
+    claimed = (manifest.get('generated_by') or {}).get('probe_level', 'unknown')
+    if not per_session:
+        probe_level = claimed
+    elif n_full == len(per_session):
+        probe_level = 'full'
+    elif n_full:
+        probe_level = 'mixed'
+    else:
+        probe_level = 'paths'
+
     notes: List[str] = []
     state = 'fresh'
     if probe_level == 'paths':
         state = 'partial'
-        notes.append("built with --probe-level paths: content facts (cell counts, "
-                     "event class counts, tracking coverage) are absent")
+        notes.append("every session is paths-only: content facts (cell counts, "
+                     "event class counts, tracking coverage) are absent, so "
+                     "check_testable will report content requirements as unmet "
+                     "because they are unrecorded, not because they are unmet")
+    elif probe_level == 'mixed':
+        state = 'partial'
+        notes.append(f"only {n_full} of {len(per_session)} session(s) are fully "
+                     "probed; the rest have no content facts. Consult "
+                     "session_probe_level(session_id) before trusting a negative "
+                     "check_testable result")
     if age_days is not None and age_days > MANIFEST_MAX_AGE_DAYS:
         state = 'aging' if state == 'fresh' else state
         notes.append(f"{age_days:.0f} days old (limit {MANIFEST_MAX_AGE_DAYS})")
 
     status = ManifestStatus(
         state=state, generated_at=generated_at, age_days=age_days,
-        probe_level=probe_level, n_sessions=len(manifest.get('sessions', {})),
-        warnings=tuple(notes),
+        probe_level=probe_level, n_sessions=len(sessions),
+        warnings=tuple(notes), n_fully_probed=n_full,
     )
     for note in notes:
         warnings.warn(f"capability manifest: {note}", RuntimeWarning, stacklevel=2)
@@ -350,6 +380,18 @@ def session_capabilities(session_id: str, path: Optional[Path] = None) -> Dict[s
     return _resolve_session(session_id, path)[1]
 
 
+def session_probe_level(session_id: str, path: Optional[Path] = None) -> str:
+    """How thoroughly this one session was probed: 'paths' | 'full' | 'unknown'.
+
+    Needed to read a negative :func:`check_testable` honestly. A paths-level
+    session has no content facts recorded, so a content requirement comes back
+    unsatisfied because nobody looked — which is a different statement from
+    "the data isn't there".
+    """
+    _, record = _resolve_session(session_id, path)
+    return (record.get('provenance') or {}).get('probe_level') or 'unknown'
+
+
 def list_sessions(cohort: str = None, path: Optional[Path] = None) -> Tuple[str, ...]:
     return tuple(sorted(
         key for key, record in _sessions(path).items()
@@ -388,6 +430,9 @@ def check_testable(analysis: str, session_id: str, animal_id: str = None,
     if animal_id is not None:
         supplied.setdefault('animal_id', animal_id)
 
+    probe_level = (record.get('provenance') or {}).get('probe_level') or 'unknown'
+    fully_probed = probe_level == 'full'
+
     unmet: List[Unmet] = []
     soft: List[Unmet] = []
     undetermined: List[Unmet] = []
@@ -398,6 +443,19 @@ def check_testable(analysis: str, session_id: str, animal_id: str = None,
         item = _to_unmet(result)
         if result.satisfied is None:
             undetermined.append(item)
+        elif not fully_probed and result.observed.startswith('absent'):
+            # The field is missing because this session was never fully probed,
+            # not because the data is absent. Reporting that as "not testable"
+            # would be a confident claim about data nobody has looked at.
+            undetermined.append(Unmet(
+                requirement=item.requirement,
+                observed=f"not probed (session is at probe_level={probe_level!r})",
+                reason=("This session has no content facts recorded, so this "
+                        "requirement cannot be evaluated. Run "
+                        f"`python scripts/build_capability_manifest.py "
+                        f"--probe-level full --sessions {record.get('session_date')}` "
+                        "before concluding anything from this."),
+                remedy=item.remedy, hazard_ids=item.hazard_ids))
         elif req.severity == 'warning':
             soft.append(item)
         else:

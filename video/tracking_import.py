@@ -61,6 +61,11 @@ class VideoTrackingData:
     ephys_timestamps: Optional[np.ndarray] = None
     tracking_file: Optional[Path] = None
     synchronized: bool = False
+    #: Which on-disk layout this was read from (see ``TRACKING_FORMAT_*``).
+    #: Worth checking before applying a pixel calibration: the two formats are
+    #: tracked on differently-sized video, so they do **not** share a
+    #: ``pixels_per_cm``.
+    tracking_format: str = 'unknown'
 
     # --- accessors ---------------------------------------------------------
 
@@ -511,6 +516,7 @@ def load_tracking_data(
         parsed_data=parsed,
         timestamps=timestamps,
         tracking_file=path,
+        tracking_format=fmt,
     )
 
 

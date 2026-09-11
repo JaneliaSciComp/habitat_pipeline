@@ -20,9 +20,14 @@ Per session, roughly in order of expense:
     worth doing up front rather than discovering the failure half an hour into
     an analysis.
 ``probe_tracking``
-    Reads the merged ``*_mask_metrics.csv``. These run to ~90 MB, so this
-    deliberately does **not** call ``load_tracking_data`` — it reads five
-    columns with ``usecols`` and groups them itself.
+    Reads the merged ``*_mask_metrics.csv`` or the wide APT ``TQT_named.csv``.
+    These run to ~90-100 MB, so this deliberately does **not** call
+    ``load_tracking_data`` — it goes through
+    ``video.tracking_import.read_tracking_centers``, which picks the format off
+    a header-only read and then pulls just the position columns with
+    ``usecols``. Both formats arrive here as the same long
+    ``(frame, object_name, center_x, center_y)`` table, so nothing below the
+    read needs to know which it got.
 ``probe_events``
     Trivial: a few hundred rows of pandas filtering.
 
@@ -102,9 +107,6 @@ DEFAULT_QUALITY_THRESHOLDS = {
 
 _IDENTITY_RE = re.compile(r'^rat\d+$', re.IGNORECASE)
 _DATE_RE = re.compile(r'(20\d{6})')
-
-_TRACKING_USECOLS = ['object_name', 'object_id', 'frame', 'center_x', 'center_y']
-
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
@@ -388,7 +390,8 @@ def probe_tracking(dsm, sync=None, *, durations: Optional[Mapping[str, float]] =
           never ``attached`` — a check that could not run must not report a
           pass.
     """
-    from video.tracking_import import _compute_speed, load_timestamps
+    from video.tracking_import import (_compute_speed, load_timestamps,
+                                       read_tracking_centers)
 
     out: Dict[str, Any] = {
         'available': False, 'tracking_file': None, 'n_tracking_files': 0,
@@ -414,8 +417,11 @@ def probe_tracking(dsm, sync=None, *, durations: Optional[Mapping[str, float]] =
 
     path = Path(str(files[0]))
     out['tracking_file'] = str(path)
+    # Both on-disk formats reduce to the same long (frame, object_name,
+    # center_x, center_y) shape, reading only those columns; everything below
+    # is written against that shape and does not need to know which it got.
     try:
-        frame = pd.read_csv(path, usecols=_TRACKING_USECOLS)
+        frame = read_tracking_centers(path)
     except ValueError:
         # Column set differs; fall back to a full read rather than guessing.
         try:

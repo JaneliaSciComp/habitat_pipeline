@@ -18,7 +18,11 @@ logger = logging.getLogger(__name__)
 # Bumped to 2 when recording-level resolution landed: a v1 cache holds a
 # ``{session}_merged.*`` path that may not exist on disk at all (cohort 5 writes
 # ``_merge``), so those entries must be rebuilt rather than trusted.
-_CACHE_VERSION = 2
+# v2 -> v3: tracking discovery gained multi-root support, searches *every*
+# date-named subdirectory instead of the first, and picks up date-less files
+# such as ``solution/TQT_named.csv``. A v2 entry's ``tracking_files`` is a
+# strict subset of what v3 finds, so cached entries must be rebuilt.
+_CACHE_VERSION = 3
 _DEFAULT_CACHE_DIR = Path(__file__).parent.parent / ".cache" / "data_paths"
 
 #: The timestamp embedded in a recording's on-disk prefix. Trodes writes
@@ -447,21 +451,87 @@ def get_video_files_by_date(session_id: str, config_path: Optional[str] = None,
     return matching_videos
 
 
+#: Tracking files whose *name* carries no date because their *directory* does.
+#: The APT/TQT exports land at
+#: ``<root>/cohort7_<date>_<HHMM>/solution/TQT_named.csv``, so the date-glob
+#: below would never see them. Only the ``_named`` solution is listed: the
+#: sibling ``TQT.csv`` uses numeric tracklet ids instead of animal names, and an
+#: analysis cannot tell which rat is which from it.
+_DATELESS_TRACKING_FILENAMES = ('TQT_named.csv',)
+
+#: Subdirectories of a date-named tracking directory to look inside for the
+#: files above, ``'.'`` meaning the directory itself.
+_DATELESS_TRACKING_SUBDIRS = ('.', 'solution')
+
+
+def _tracking_roots(config: dict) -> List[Path]:
+    """Tracking search roots, in configured precedence order.
+
+    ``config['tracking']`` is either a single path (historical) or a list of
+    paths. A list lets one cohort draw on several trackers — manual mask
+    metrics and APT/TQT exports live in different trees — and **order is
+    precedence**: results from earlier roots come first, so appending a root
+    cannot change which file an existing analysis picks up at index 0.
+    """
+    value = config['tracking']
+    entries = [value] if isinstance(value, (str, Path)) else list(value)
+    return [Path(entry) for entry in entries]
+
+
+def _tracking_search_dirs(root: Path, session_id: str, session_date: str,
+                          subfolder: Optional[str]) -> List[tuple]:
+    """``(directory, date_scoped)`` pairs to search under one *root*.
+
+    *date_scoped* is True when the directory itself is known to belong to this
+    session — either because the caller named it or because its own name
+    carries the date — which is what makes it safe to pick up files that have
+    no date in their name.
+    """
+    if subfolder is not None:
+        search_directory = root / subfolder
+        if not search_directory.exists():
+            raise FileNotFoundError(f"Subfolder not found: {search_directory}")
+        return [(search_directory, True)]
+
+    # Date-named subdirectories, one level deep. A date can hold several of
+    # them (the APT tree chunks a day into ``cohort7_<date>_<HHMM>``), so all
+    # matches are searched rather than only the first.
+    matched: List[tuple] = []
+    try:
+        for child in sorted(root.iterdir(), key=lambda p: p.name):
+            if child.is_dir() and (session_id in child.name or session_date in child.name):
+                matched.append((child, True))
+    except (PermissionError, OSError):
+        pass
+
+    return matched or [(root, False)]
+
+
 def get_tracking_files_by_date(session_id: str, config_path: Optional[str] = None,
                               tracking_extensions: List[str] = None, subfolder: Optional[str] = None,
                               _config: Optional[dict] = None) -> List[Path]:
     """
-    Find tracking files in the tracking directory that match the date from the session_id.
+    Find tracking files in the tracking director(ies) that match the date from the session_id.
+
+    Two on-disk layouts are found:
+
+    - files whose *name* contains the date (``*_mask_metrics.csv`` and friends),
+      matched by glob in the search directory;
+    - files whose *directory* carries the date but whose name does not
+      (``<root>/cohort7_<date>_<HHMM>/solution/TQT_named.csv``), matched by
+      name against :data:`_DATELESS_TRACKING_FILENAMES`.
 
     Args:
         session_id: Session identifier containing date (e.g., "20251210" or "20251210_110059")
         config_path: Optional path to config file. If None, uses default location.
         tracking_extensions: List of tracking file extensions to search for. If None, uses common tracking formats.
-        subfolder: Optional subfolder name within tracking directory to search in.
+        subfolder: Optional subfolder name within a tracking directory to search in.
         _config: Optional pre-loaded config dict to avoid redundant file I/O.
 
     Returns:
-        List[Path]: List of tracking file paths that match the session date
+        List[Path]: Tracking file paths matching the session date, ordered by
+        configured root first, then by filename, then by full path (which is
+        what separates same-named files such as several ``TQT_named.csv``).
     """
     if tracking_extensions is None:
         tracking_extensions = ['.csv', '.h5', '.hdf5', '.mat', '.pkl', '.npz', '.json', '.txt']
@@ -471,37 +541,47 @@ def get_tracking_files_by_date(session_id: str, config_path: Optional[str] = Non
     if 'tracking' not in config:
         raise KeyError("'tracking' key not found in configuration file")
 
-    tracking_base = Path(config['tracking'])
-    if not tracking_base.exists():
-        raise FileNotFoundError(f"Tracking directory not found: {tracking_base}")
+    roots = _tracking_roots(config)
+    existing_roots = [root for root in roots if root.exists()]
+    if not existing_roots:
+        raise FileNotFoundError(
+            "Tracking directory not found: "
+            + ", ".join(str(root) for root in roots))
+    for root in roots:
+        if root not in existing_roots:
+            logger.warning("Tracking root does not exist, skipping: %s", root)
 
     session_date = _parse_session_date(session_id)
-
-    if subfolder is not None:
-        search_directory = tracking_base / subfolder
-        if not search_directory.exists():
-            raise FileNotFoundError(f"Subfolder not found: {search_directory}")
-    else:
-        # Try to find a subfolder containing the session_id or session_date (one level deep)
-        search_directory = tracking_base
-        try:
-            for potential_subfolder in tracking_base.iterdir():
-                if potential_subfolder.is_dir() and (session_id in potential_subfolder.name or session_date in potential_subfolder.name):
-                    search_directory = potential_subfolder
-                    break
-        except (PermissionError, OSError):
-            pass
-
-    matching_tracking_files = []
     ext_set = {ext.lower() for ext in tracking_extensions}
-    try:
-        for tracking_file in search_directory.glob(f'*{session_date}*'):
-            if tracking_file.is_file() and tracking_file.suffix.lower() in ext_set:
-                matching_tracking_files.append(tracking_file)
-    except (PermissionError, OSError) as e:
-        raise RuntimeError(f"Error accessing directory {search_directory}: {e}")
 
-    matching_tracking_files.sort(key=lambda x: x.name)
+    matching_tracking_files: List[Path] = []
+    seen = set()
+    for root in existing_roots:
+        per_root: List[Path] = []
+        for search_directory, date_scoped in _tracking_search_dirs(
+                root, session_id, session_date, subfolder):
+            try:
+                for tracking_file in search_directory.glob(f'*{session_date}*'):
+                    if tracking_file.is_file() and tracking_file.suffix.lower() in ext_set:
+                        per_root.append(tracking_file)
+            except (PermissionError, OSError) as e:
+                raise RuntimeError(f"Error accessing directory {search_directory}: {e}")
+
+            if not date_scoped:
+                continue
+            for sub in _DATELESS_TRACKING_SUBDIRS:
+                for filename in _DATELESS_TRACKING_FILENAMES:
+                    candidate = search_directory / sub / filename
+                    if candidate.is_file() and candidate.suffix.lower() in ext_set:
+                        per_root.append(candidate)
+
+        per_root.sort(key=lambda p: (p.name, str(p)))
+        for path in per_root:
+            resolved = str(path)
+            if resolved not in seen:
+                seen.add(resolved)
+                matching_tracking_files.append(path)
+
     return matching_tracking_files
 
 

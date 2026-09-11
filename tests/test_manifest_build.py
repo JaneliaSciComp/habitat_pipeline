@@ -3,10 +3,11 @@
 All mock data; nothing here touches //nearline. Two things are pinned that
 would otherwise regress silently:
 
-`TestCostGuards` asserts the tracking probe passes `usecols` to `read_csv`.
-The merged mask-metrics files run to tens of megabytes and only five columns
-are needed, so a well-meaning switch to `load_tracking_data` would turn a
-cheap probe into a slow one across every session.
+`TestCostGuards` asserts the tracking probe never reads every column of every
+row. The merged mask-metrics files run to tens of megabytes, the APT/TQT
+exports to ~100, and only five columns are needed, so a well-meaning switch to
+`load_tracking_data` would turn a cheap probe into a slow one across every
+session.
 
 `TestBuildIsNeverFatal` asserts a session whose data is broken produces a
 record with the failure written into `provenance.errors` rather than aborting
@@ -304,20 +305,33 @@ class TestAttachmentToTheRightRecording:
 
 class TestCostGuards:
     def test_tracking_probe_passes_usecols(self, tmp_path, monkeypatch):
-        """A ~90 MB CSV must not be read in full to get five columns."""
+        """A ~90 MB CSV must not be read in full to get five columns.
+
+        Every ``read_csv`` the probe makes is inspected, not just the first:
+        the probe peeks at the header (``nrows=0``) to tell the long
+        mask-metrics format from the wide APT/TQT one, and a header peek is
+        free. What must never happen is a call that takes *all* columns and
+        *all* rows.
+        """
         path = _write_tracking(tmp_path)
-        seen = {}
+        calls = []
         original = pd.read_csv
 
         def _spy(*args, **kwargs):
-            seen.setdefault('usecols', kwargs.get('usecols'))
+            calls.append(kwargs)
             return original(*args, **kwargs)
 
         monkeypatch.setattr(pd, 'read_csv', _spy)
         probe_tracking(_StubDsm(tracking=path), _StubSync())
-        assert seen['usecols'] is not None, (
-            'the tracking probe read every column; keep usecols so this stays cheap')
-        assert 'center_x' in seen['usecols']
+
+        full_reads = [c for c in calls
+                      if c.get('usecols') is None and c.get('nrows') != 0]
+        assert not full_reads, (
+            'the tracking probe read every column of every row; keep usecols '
+            f'so this stays cheap (offending calls: {full_reads})')
+        assert any('center_x' in (c.get('usecols') or ()) for c in calls), (
+            'no call selected the position columns; the probe is not reading '
+            'what it reports on')
 
     def test_falls_back_to_a_full_read_when_columns_differ(self, tmp_path):
         """A differently-shaped file must still probe rather than fail."""

@@ -15,8 +15,12 @@ import numpy as np
 import pandas as pd
 
 from ingestion.ephys_sync import DataSyncManager
+from video.tracking_import import normalize_object_name
 
 logger = logging.getLogger(__name__)
+
+#: Rat identity columns that may carry the APT-style ``rat4635`` naming.
+_RAT_ID_COLUMNS = ('initiator', 'victim', 'winner', 'loser')
 
 
 # ---------------------------------------------------------------------------
@@ -469,6 +473,12 @@ def load_behavioral_events(
         missing = [c for c in expected if c not in df.columns]
         if missing:
             logger.warning("Missing columns in %s: %s", fp.name, missing)
+
+        for col in _RAT_ID_COLUMNS:
+            if col in df.columns:
+                df[col] = df[col].map(
+                    lambda v: normalize_object_name(v) if pd.notna(v) else v
+                )
 
         if 'type' in df.columns:
             df['behavior_full_name'] = (

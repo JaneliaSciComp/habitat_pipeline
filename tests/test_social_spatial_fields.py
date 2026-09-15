@@ -26,8 +26,11 @@ from ephys.social_spatial_fields import (
     compute_social_place_fields,
     field_similarity_across_targets,
     modal_occupancy_center,
+    read_stratum_mask,
     self_position_stratum,
+    _BINNING_DEFAULTS,
     _benjamini_hochberg,
+    _prep_from_kwargs,
 )
 from video.tracking_import import VideoTrackingData
 
@@ -411,6 +414,160 @@ def _correlated_pair(n, alpha, seed_a=1, seed_g=2):
         df["speed"] = np.sqrt(np.gradient(df["x"], t) ** 2
                               + np.gradient(df["y"], t) ** 2)
     return A, B
+
+
+class TestFastNullPath:
+    """The null loop hoists spike-independent work out; results must not move.
+
+    The reference here is the pre-optimization loop — three ``compute_rate_map``
+    calls per shuffle — driven by the same seeded RNG.
+    """
+
+    @staticmethod
+    def _reference(spike_times, target_xy, n_shuffles, null_method, seed, **kw):
+        rng = np.random.default_rng(seed)
+        t = target_xy["t"].to_numpy(dtype=np.float64)
+        tw = kw.get("t_window_ephys")
+        w0, w1 = (float(t.min()), float(t.max())) if tw is None else tw
+        span = max(w1 - w0, 1e-9)
+        median_dt = float(np.median(np.diff(t))) if t.size > 1 else 1.0
+
+        def _stats(sp, xy):
+            rm = compute_rate_map(sp, xy, **kw)
+            return spatial_information(rm)[0], spatial_sparsity(rm)
+
+        st = np.asarray(spike_times, dtype=np.float64)
+        true_sk, true_sp = _stats(st, target_xy)
+        sk = np.full(n_shuffles, np.nan)
+        spar = np.full(n_shuffles, np.nan)
+        x0 = target_xy["x"].to_numpy()
+        y0 = target_xy["y"].to_numpy()
+        s0 = read_stratum_mask(target_xy)
+        roll_rows = np.flatnonzero(s0) if s0 is not None else None
+        for i in range(n_shuffles):
+            tau = rng.uniform(0.1 * span, 0.9 * span)
+            if null_method == "circular_shift":
+                sp_i, xy_i = w0 + np.mod(st - w0 + tau, span), target_xy
+            else:
+                k = int(round(tau / max(median_dt, 1e-9)))
+                if roll_rows is None:
+                    xi, yi = np.roll(x0, k), np.roll(y0, k)
+                else:
+                    k_eff = int(round(k * roll_rows.size / max(x0.size, 1)))
+                    if roll_rows.size > 1:
+                        k_eff = max(k_eff, 1)
+                    xi, yi = x0.copy(), y0.copy()
+                    xi[roll_rows] = np.roll(x0[roll_rows], k_eff)
+                    yi[roll_rows] = np.roll(y0[roll_rows], k_eff)
+                xy_i = target_xy.copy()
+                xy_i["x"], xy_i["y"] = xi, yi
+                sp_i = st
+            sk[i], spar[i] = _stats(sp_i, xy_i)
+        return true_sk, true_sp, sk, spar
+
+    def _assert_matches(self, xy, spikes, null_method, n_shuffles=25, **kw):
+        true_sk, true_sp, ref_sk, ref_spar = self._reference(
+            spikes, xy, n_shuffles, null_method, 0, **kw)
+        got = field_significance(spikes, xy, n_shuffles=n_shuffles,
+                                 null_method=null_method, seed=0, **kw)
+        np.testing.assert_array_equal(ref_sk, got.shuffle_skaggs)
+
+        def p_geq(tv, sh):
+            v = sh[np.isfinite(sh)]
+            return float((1 + np.sum(v >= tv)) / (1 + v.size))
+
+        def p_leq(tv, sh):
+            v = sh[np.isfinite(sh)]
+            return float((1 + np.sum(v <= tv)) / (1 + v.size))
+
+        assert got.p_skaggs == p_geq(true_sk, ref_sk)
+        assert got.p_sparsity == p_leq(true_sp, ref_spar)
+
+    def test_binning_defaults_track_compute_rate_map(self):
+        """Two places declare binning defaults; a drift breaks the fast path.
+
+        ``_BINNING_DEFAULTS`` feeds the hoisted prep while ``compute_rate_map``
+        keeps its explicit signature, so the values must stay identical.
+        """
+        import inspect
+        sig = inspect.signature(compute_rate_map).parameters
+        for name, default in _BINNING_DEFAULTS.items():
+            assert name in sig, f"{name} is not a compute_rate_map parameter"
+            assert sig[name].default == default, (
+                f"{name}: compute_rate_map defaults to {sig[name].default!r} "
+                f"but _BINNING_DEFAULTS says {default!r}")
+
+    @pytest.mark.parametrize("null_method", ["circular_shift", "position_shuffle"])
+    def test_matches_reference(self, null_method):
+        xy = _make_xy(n=12000, seed=600)
+        spikes = _poisson_spikes_from_field(
+            xy, center=(45.0, 35.0), sigma=8.0, peak_hz=20.0, base_hz=0.5, seed=601)
+        self._assert_matches(xy, spikes, null_method, bin_size_cm=BIN,
+                             arena_bounds=ARENA, smoothing_sigma_cm=5.0,
+                             speed_xy=xy[["t", "speed"]], speed_threshold_cms=5.0)
+
+    @pytest.mark.parametrize("null_method", ["circular_shift", "position_shuffle"])
+    def test_matches_reference_under_stratum(self, null_method):
+        xy = _make_xy(n=12000, seed=602)
+        spikes = _poisson_spikes_from_field(
+            xy, center=(40.0, 40.0), sigma=8.0, peak_hz=20.0, base_hz=0.5, seed=603)
+        mask, _ = self_position_stratum(
+            xy, xy["t"].to_numpy(), radius_cm=15.0, center=(40.0, 40.0),
+            bin_size_cm=BIN, arena_bounds=ARENA)
+        masked = xy.assign(**{STRATUM_COLUMN: mask})
+        self._assert_matches(masked, spikes, null_method, bin_size_cm=BIN,
+                             arena_bounds=ARENA, smoothing_sigma_cm=5.0,
+                             speed_threshold_cms=None)
+
+    def test_matches_reference_without_smoothing_or_bounds(self):
+        xy = _make_xy(n=8000, seed=604)
+        spikes = _poisson_spikes_from_field(
+            xy, center=(40.0, 40.0), sigma=8.0, peak_hz=20.0, base_hz=0.5, seed=605)
+        self._assert_matches(xy, spikes, "circular_shift", bin_size_cm=BIN,
+                             smoothing_sigma_cm=None, speed_threshold_cms=None)
+
+    def test_matches_reference_in_a_time_window(self):
+        xy = _make_xy(n=12000, seed=606)
+        spikes = _poisson_spikes_from_field(
+            xy, center=(40.0, 40.0), sigma=8.0, peak_hz=20.0, base_hz=0.5, seed=607)
+        self._assert_matches(xy, spikes, "circular_shift", bin_size_cm=BIN,
+                             arena_bounds=ARENA, smoothing_sigma_cm=5.0,
+                             speed_threshold_cms=None,
+                             t_window_ephys=(40.0, 300.0))
+
+    def test_split_half_null_is_opt_in(self):
+        """Two thirds of the old cost bought a p-value nothing reads."""
+        xy = _make_xy(n=6000, seed=608)
+        spikes = _poisson_spikes_from_field(
+            xy, center=(40.0, 40.0), sigma=8.0, peak_hz=20.0, base_hz=0.5, seed=609)
+        kw = dict(bin_size_cm=BIN, arena_bounds=ARENA, speed_threshold_cms=None)
+        off = field_significance(spikes, xy, n_shuffles=10, seed=0, **kw)
+        on = field_significance(spikes, xy, n_shuffles=10, seed=0,
+                                shuffle_split_half=True, **kw)
+        assert np.isnan(off.p_split_half)
+        assert np.isfinite(on.p_split_half)
+        # Skipping it must not perturb the statistics that are reported.
+        np.testing.assert_array_equal(off.shuffle_skaggs, on.shuffle_skaggs)
+        assert off.p_skaggs == on.p_skaggs
+
+    def test_shared_prep_matches_per_call_prep(self):
+        """The sweep shares one prep across cells; that must change nothing."""
+        xy = _make_xy(n=8000, seed=610)
+        spikes = _poisson_spikes_from_field(
+            xy, center=(40.0, 40.0), sigma=8.0, peak_hz=20.0, base_hz=0.5, seed=611)
+        kw = dict(bin_size_cm=BIN, arena_bounds=ARENA, smoothing_sigma_cm=5.0,
+                  speed_threshold_cms=None)
+        alone = field_significance(spikes, xy, n_shuffles=15, seed=0, **kw)
+        shared = field_significance(spikes, xy, n_shuffles=15, seed=0,
+                                    _prep=_prep_from_kwargs(xy, kw), **kw)
+        np.testing.assert_array_equal(alone.shuffle_skaggs, shared.shuffle_skaggs)
+        assert alone.p_skaggs == shared.p_skaggs
+
+    def test_unknown_null_method_still_rejected(self):
+        xy = _make_xy(n=2000, seed=612)
+        with pytest.raises(ValueError, match="Unknown null_method"):
+            field_significance(np.array([1.0, 2.0]), xy, n_shuffles=2,
+                               null_method="nope", arena_bounds=ARENA)
 
 
 class TestSelfPositionStratum:

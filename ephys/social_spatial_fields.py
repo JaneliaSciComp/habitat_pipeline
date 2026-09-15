@@ -320,6 +320,185 @@ def self_position_stratum(
 
 
 # ---------------------------------------------------------------------------
+# Binning internals
+#
+# Everything here is spike-independent, which is the whole point: a shuffle
+# changes only which spatial bin each spike lands in, never the tracking-side
+# work (dwell intervals, speed gate, digitizing, occupancy, occupancy
+# smoothing). Hoisting that out of the null loop — and out of the per-cell loop
+# — is where the speed comes from. ``compute_rate_map`` and the fast null path
+# in ``field_significance`` both go through these functions so there is exactly
+# one definition of the binning maths.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _BinPrep:
+    """Spike-independent binning state for one target trajectory + parameters."""
+
+    t: np.ndarray                 # kept samples' times, ascending
+    dt: np.ndarray                # dwell interval per kept sample
+    keep: np.ndarray              # speed gate AND self-position stratum
+    ix: np.ndarray                # x bin per kept sample
+    iy: np.ndarray                # y bin per kept sample
+    ix_raw: np.ndarray            # x bin per *original* row (for position rolls)
+    iy_raw: np.ndarray
+    sel: np.ndarray               # original-row index of each kept sample
+    x_edges: np.ndarray
+    y_edges: np.ndarray
+    n_x: int
+    n_y: int
+    w0: float
+    w1: float
+    arena_bounds: ArenaBounds
+    sigma_bins: Optional[float]   # None when smoothing is disabled
+    min_occupancy_sec: float
+    has_stratum: bool
+    occupancy: np.ndarray         # raw dwell time per bin
+    occ_smoothed: np.ndarray      # occupancy after Gaussian smoothing
+
+
+def _smooth(prep: "_BinPrep", arr: np.ndarray) -> np.ndarray:
+    if prep.sigma_bins is None:
+        return arr
+    return gaussian_filter(arr, sigma=prep.sigma_bins, mode="constant")
+
+
+def _accumulate(prep: "_BinPrep", iy: np.ndarray, ix: np.ndarray,
+                weights) -> np.ndarray:
+    out = np.zeros((prep.n_y, prep.n_x), dtype=np.float64)
+    if iy.size:
+        np.add.at(out, (iy, ix), weights)
+    return out
+
+
+def _prepare_binning(
+    target_xy: pd.DataFrame,
+    bin_size_cm: float,
+    arena_bounds: Optional[ArenaBounds],
+    smoothing_sigma_cm: Optional[float],
+    min_occupancy_sec: float,
+    speed_xy: Optional[pd.DataFrame],
+    speed_threshold_cms: Optional[float],
+    t_window_ephys: Optional[Tuple[float, float]],
+) -> _BinPrep:
+    """Window, filter, sort, speed-gate, digitize and accumulate occupancy."""
+    t_all = target_xy["t"].to_numpy(dtype=np.float64)
+    x_all = target_xy["x"].to_numpy(dtype=np.float64)
+    y_all = target_xy["y"].to_numpy(dtype=np.float64)
+    stratum = read_stratum_mask(target_xy)
+    n_rows = t_all.size
+
+    if t_window_ephys is not None:
+        w0, w1 = t_window_ephys
+        sel = np.flatnonzero((t_all >= w0) & (t_all <= w1))
+    else:
+        w0 = float(t_all.min()) if n_rows else 0.0
+        w1 = float(t_all.max()) if n_rows else 0.0
+        sel = np.arange(n_rows)
+
+    finite = (np.isfinite(t_all[sel]) & np.isfinite(x_all[sel])
+              & np.isfinite(y_all[sel]))
+    sel = sel[finite]
+    sel = sel[np.argsort(t_all[sel], kind="stable")]
+
+    t = t_all[sel]
+    x = x_all[sel]
+    y = y_all[sel]
+
+    if arena_bounds is None:
+        arena_bounds = _infer_bounds(target_xy) if n_rows else ((0.0, 1.0), (0.0, 1.0))
+    x_edges, y_edges = _edges_from_bounds(arena_bounds, bin_size_cm)
+    n_x = len(x_edges) - 1
+    n_y = len(y_edges) - 1
+
+    sigma_bins = None
+    if smoothing_sigma_cm is not None and smoothing_sigma_cm > 0 and n_x and n_y:
+        sigma_bins = smoothing_sigma_cm / bin_size_cm
+
+    if t.size >= 2:
+        dt = np.gradient(t)
+        dt[dt < 0] = 0.0
+
+        keep = np.ones(t.size, dtype=bool)
+        if stratum is not None:
+            keep &= stratum[sel]
+        if speed_xy is not None and speed_threshold_cms is not None:
+            sp_t = speed_xy["t"].to_numpy(dtype=np.float64)
+            sp_v = speed_xy["speed"].to_numpy(dtype=np.float64)
+            sp_at_t = np.interp(t, sp_t, sp_v, left=np.nan, right=np.nan)
+            keep &= np.isfinite(sp_at_t) & (sp_at_t >= speed_threshold_cms)
+
+        # Digitize over every original row so a position roll can be applied as
+        # a roll of bin indices (digitize is elementwise, so rolling before or
+        # after it is identical) instead of re-digitizing each shuffle.
+        ix_raw = np.clip(np.digitize(x_all, x_edges) - 1, 0, max(n_x - 1, 0))
+        iy_raw = np.clip(np.digitize(y_all, y_edges) - 1, 0, max(n_y - 1, 0))
+        ix = ix_raw[sel]
+        iy = iy_raw[sel]
+    else:
+        dt = np.zeros(t.size)
+        keep = np.zeros(t.size, dtype=bool)
+        ix_raw = np.zeros(n_rows, dtype=np.int64)
+        iy_raw = np.zeros(n_rows, dtype=np.int64)
+        ix = ix_raw[sel]
+        iy = iy_raw[sel]
+
+    prep = _BinPrep(
+        t=t, dt=dt, keep=keep, ix=ix, iy=iy, ix_raw=ix_raw, iy_raw=iy_raw,
+        sel=sel, x_edges=x_edges, y_edges=y_edges, n_x=n_x, n_y=n_y,
+        w0=w0, w1=w1, arena_bounds=arena_bounds, sigma_bins=sigma_bins,
+        min_occupancy_sec=min_occupancy_sec, has_stratum=stratum is not None,
+        occupancy=np.zeros((n_y, n_x), dtype=np.float64),
+        occ_smoothed=np.zeros((n_y, n_x), dtype=np.float64),
+    )
+    prep.occupancy = _accumulate(prep, iy[keep], ix[keep], dt[keep])
+    prep.occ_smoothed = _smooth(prep, prep.occupancy)
+    return prep
+
+
+# Mirrors compute_rate_map's binning-parameter defaults. A drift between the two
+# would make the fast null path disagree with the observed map, so
+# tests/test_social_spatial_fields.py::TestFastNullPath pins them together.
+_BINNING_DEFAULTS = dict(
+    bin_size_cm=5.0, arena_bounds=None, smoothing_sigma_cm=5.0,
+    min_occupancy_sec=0.1, speed_xy=None, speed_threshold_cms=5.0,
+    t_window_ephys=None,
+)
+
+
+def _prep_from_kwargs(target_xy: pd.DataFrame, rate_map_kwargs: dict) -> _BinPrep:
+    """Build a :class:`_BinPrep` from a partial ``compute_rate_map`` kwarg dict."""
+    kw = {k: rate_map_kwargs.get(k, v) for k, v in _BINNING_DEFAULTS.items()}
+    return _prepare_binning(target_xy, **kw)
+
+
+def _spike_sample_indices(prep: _BinPrep, spike_times: np.ndarray) -> np.ndarray:
+    """Kept-sample index nearest each in-window spike, gated samples dropped."""
+    t = prep.t
+    if t.size < 2:
+        return np.empty(0, dtype=np.int64)
+    st = np.asarray(spike_times, dtype=np.float64)
+    st = st[(st >= prep.w0) & (st <= prep.w1) & (st >= t[0]) & (st <= t[-1])]
+    if not st.size:
+        return np.empty(0, dtype=np.int64)
+    right = np.clip(np.searchsorted(t, st), 1, t.size - 1)
+    left = right - 1
+    idx = np.where((st - t[left]) <= (t[right] - st), left, right)
+    return idx[prep.keep[idx]]
+
+
+def _rates_from_counts(prep: _BinPrep, spike_counts: np.ndarray,
+                       occupancy: np.ndarray, occ_smoothed: np.ndarray
+                       ) -> np.ndarray:
+    """Smoothed counts / smoothed occupancy, NaN where raw occupancy is too low."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rates = _smooth(prep, spike_counts) / occ_smoothed
+    rates[occupancy < prep.min_occupancy_sec] = np.nan
+    rates[~np.isfinite(rates)] = np.nan
+    return rates
+
+
+# ---------------------------------------------------------------------------
 # Rate map
 # ---------------------------------------------------------------------------
 
@@ -353,101 +532,33 @@ def compute_rate_map(
     ``speed_filter_subject`` is recorded in ``parameters`` only; the caller
     chooses which animal's speed to pass as ``speed_xy``.
     """
-    t = target_xy["t"].to_numpy(dtype=np.float64)
-    x = target_xy["x"].to_numpy(dtype=np.float64)
-    y = target_xy["y"].to_numpy(dtype=np.float64)
-    stratum = read_stratum_mask(target_xy)
-
-    if t_window_ephys is not None:
-        w0, w1 = t_window_ephys
-        in_win = (t >= w0) & (t <= w1)
-        t, x, y = t[in_win], x[in_win], y[in_win]
-        if stratum is not None:
-            stratum = stratum[in_win]
-    else:
-        w0 = float(t.min()) if t.size else 0.0
-        w1 = float(t.max()) if t.size else 0.0
-
-    finite = np.isfinite(t) & np.isfinite(x) & np.isfinite(y)
-    t, x, y = t[finite], x[finite], y[finite]
-    order = np.argsort(t, kind="stable")
-    t, x, y = t[order], x[order], y[order]
-    if stratum is not None:
-        stratum = stratum[finite][order]
-
-    if arena_bounds is None:
-        arena_bounds = _infer_bounds(target_xy) if target_xy.shape[0] else ((0.0, 1.0), (0.0, 1.0))
-    x_edges, y_edges = _edges_from_bounds(arena_bounds, bin_size_cm)
-    n_x = len(x_edges) - 1
-    n_y = len(y_edges) - 1
-
-    occupancy = np.zeros((n_y, n_x), dtype=np.float64)
-    spike_counts = np.zeros((n_y, n_x), dtype=np.float64)
-    n_spikes_in_window = 0
-
-    if t.size >= 2:
-        # Dwell interval each sample represents (sums to ~ total duration).
-        dt = np.gradient(t)
-        dt[dt < 0] = 0.0
-
-        # Speed gate and self-position stratum over tracking samples.
-        keep = np.ones(t.size, dtype=bool)
-        if stratum is not None:
-            keep &= stratum
-        if speed_xy is not None and speed_threshold_cms is not None:
-            sp_t = speed_xy["t"].to_numpy(dtype=np.float64)
-            sp_v = speed_xy["speed"].to_numpy(dtype=np.float64)
-            sp_at_t = np.interp(t, sp_t, sp_v, left=np.nan, right=np.nan)
-            keep &= np.isfinite(sp_at_t) & (sp_at_t >= speed_threshold_cms)
-
-        ix = np.clip(np.digitize(x, x_edges) - 1, 0, n_x - 1)
-        iy = np.clip(np.digitize(y, y_edges) - 1, 0, n_y - 1)
-        np.add.at(occupancy, (iy[keep], ix[keep]), dt[keep])
-
-        # Spikes -> nearest tracking sample -> spatial bin.
-        st = np.asarray(spike_times, dtype=np.float64)
-        st = st[(st >= w0) & (st <= w1) & (st >= t[0]) & (st <= t[-1])]
-        n_spikes_in_window = int(st.size)
-        if st.size:
-            right = np.clip(np.searchsorted(t, st), 1, t.size - 1)
-            left = right - 1
-            choose_left = (st - t[left]) <= (t[right] - st)
-            idx = np.where(choose_left, left, right)
-            idx = idx[keep[idx]]
-            if idx.size:
-                np.add.at(spike_counts, (iy[idx], ix[idx]), 1.0)
-
-    # Smooth then divide.
-    if smoothing_sigma_cm is not None and smoothing_sigma_cm > 0 and n_x and n_y:
-        sigma_bins = smoothing_sigma_cm / bin_size_cm
-        occ_s = gaussian_filter(occupancy, sigma=sigma_bins, mode="constant")
-        sc_s = gaussian_filter(spike_counts, sigma=sigma_bins, mode="constant")
-    else:
-        occ_s, sc_s = occupancy, spike_counts
-
-    with np.errstate(divide="ignore", invalid="ignore"):
-        rates = sc_s / occ_s
-    rates[occupancy < min_occupancy_sec] = np.nan
-    rates[~np.isfinite(rates)] = np.nan
+    prep = _prepare_binning(
+        target_xy, bin_size_cm, arena_bounds, smoothing_sigma_cm,
+        min_occupancy_sec, speed_xy, speed_threshold_cms, t_window_ephys,
+    )
+    idx = _spike_sample_indices(prep, spike_times)
+    spike_counts = _accumulate(prep, prep.iy[idx], prep.ix[idx], 1.0)
+    rates = _rates_from_counts(prep, spike_counts, prep.occupancy,
+                               prep.occ_smoothed)
 
     parameters = {
         "bin_size_cm": bin_size_cm,
         "smoothing_sigma_cm": smoothing_sigma_cm,
         "speed_threshold_cms": speed_threshold_cms,
-        "arena_bounds": arena_bounds,
+        "arena_bounds": prep.arena_bounds,
         "min_occupancy_sec": min_occupancy_sec,
-        "t_window_ephys": (w0, w1),
+        "t_window_ephys": (prep.w0, prep.w1),
         "speed_filter_subject": speed_filter_subject,
-        "self_stratum_applied": stratum is not None,
+        "self_stratum_applied": prep.has_stratum,
         "class_label": CLASS_LABEL,
         "analysis_title": ANALYSIS_TITLE,
     }
     return RateMap(
         rates=rates,
-        occupancy=occupancy,
+        occupancy=prep.occupancy,
         spike_counts=spike_counts,
-        x_edges=x_edges,
-        y_edges=y_edges,
+        x_edges=prep.x_edges,
+        y_edges=prep.y_edges,
         focal_animal=focal_animal,
         target_animal=target_animal,
         cluster_id=cluster_id,
@@ -459,10 +570,9 @@ def compute_rate_map(
 # Spatial statistics
 # ---------------------------------------------------------------------------
 
-def _valid_pr(rate_map: RateMap) -> Tuple[np.ndarray, np.ndarray]:
+def _valid_pr_arrays(rates: np.ndarray, occ: np.ndarray
+                     ) -> Tuple[np.ndarray, np.ndarray]:
     """Return (p_i, r_i) over valid bins: occupancy probability and rate."""
-    rates = rate_map.rates
-    occ = rate_map.occupancy
     valid = np.isfinite(rates) & (occ > 0)
     r = rates[valid].astype(np.float64)
     o = occ[valid].astype(np.float64)
@@ -472,9 +582,11 @@ def _valid_pr(rate_map: RateMap) -> Tuple[np.ndarray, np.ndarray]:
     return o / total, r
 
 
-def spatial_information(rate_map: RateMap) -> Tuple[float, float]:
-    """Skaggs spatial information: ``(bits_per_spike, bits_per_second)``."""
-    p, r = _valid_pr(rate_map)
+def _valid_pr(rate_map: RateMap) -> Tuple[np.ndarray, np.ndarray]:
+    return _valid_pr_arrays(rate_map.rates, rate_map.occupancy)
+
+
+def _skaggs_from_pr(p: np.ndarray, r: np.ndarray) -> Tuple[float, float]:
     if p.size == 0:
         return 0.0, 0.0
     mean_rate = float(np.sum(p * r))
@@ -483,13 +595,10 @@ def spatial_information(rate_map: RateMap) -> Tuple[float, float]:
     pos = r > 0
     ratio = r[pos] / mean_rate
     bits_per_sec = float(np.sum(p[pos] * r[pos] * np.log2(ratio)))
-    bits_per_spike = bits_per_sec / mean_rate
-    return bits_per_spike, bits_per_sec
+    return bits_per_sec / mean_rate, bits_per_sec
 
 
-def spatial_sparsity(rate_map: RateMap) -> float:
-    """Occupancy-weighted sparsity ``(<r>)^2 / <r^2>`` (lower = more selective)."""
-    p, r = _valid_pr(rate_map)
+def _sparsity_from_pr(p: np.ndarray, r: np.ndarray) -> float:
     if p.size == 0:
         return np.nan
     num = float(np.sum(p * r)) ** 2
@@ -497,6 +606,18 @@ def spatial_sparsity(rate_map: RateMap) -> float:
     if den <= 0:
         return np.nan
     return num / den
+
+
+def spatial_information(rate_map: RateMap) -> Tuple[float, float]:
+    """Skaggs spatial information: ``(bits_per_spike, bits_per_second)``."""
+    p, r = _valid_pr(rate_map)
+    return _skaggs_from_pr(p, r)
+
+
+def spatial_sparsity(rate_map: RateMap) -> float:
+    """Occupancy-weighted sparsity ``(<r>)^2 / <r^2>`` (lower = more selective)."""
+    p, r = _valid_pr(rate_map)
+    return _sparsity_from_pr(p, r)
 
 
 def spatial_coherence(rate_map: RateMap) -> float:
@@ -595,6 +716,8 @@ def field_significance(
     seed: int = 0,
     cluster_id: int = -1,
     target_animal: str = "",
+    shuffle_split_half: bool = False,
+    _prep: Optional[_BinPrep] = None,
     **rate_map_kwargs,
 ) -> FieldSignificance:
     """Shuffle-based significance for a single rate map.
@@ -604,10 +727,21 @@ def field_significance(
     rolls the target ``(x, y)`` relative to the spikes. In both cases the shift
     magnitude is drawn from ``[0.1 T, 0.9 T]`` of the window.
 
-    For each shuffle the Skaggs bits/spike, sparsity, and split-half correlation
-    are recomputed. P-values are one-tailed in the meaningful direction:
-    ``p_skaggs`` and ``p_split`` are ``fraction(shuffle >= true)``; ``p_sparsity``
-    is ``fraction(shuffle <= true)`` because lower sparsity = more selective.
+    For each shuffle the Skaggs bits/spike and sparsity are recomputed.
+    P-values are one-tailed in the meaningful direction: ``p_skaggs`` and
+    ``p_split`` are ``fraction(shuffle >= true)``; ``p_sparsity`` is
+    ``fraction(shuffle <= true)`` because lower sparsity = more selective.
+
+    ``shuffle_split_half`` defaults to **False**: recomputing the split-half
+    correlation for every surrogate costs two extra rate maps per shuffle —
+    measured at roughly half the total runtime — and nothing in the repo reads
+    the resulting ``p_split_half`` (the plots use the *observed*
+    ``FieldStats.split_half_corr``, which is always computed). Turn it on only if
+    you specifically want that null; ``p_split_half`` is NaN otherwise.
+
+    The null loop hoists every spike-independent quantity out of the iteration
+    (see :func:`_prepare_binning`), and ``_prep`` lets a caller sweeping many
+    cells over one target share that work across cells too.
 
     When ``target_xy`` carries a restriction mask (:data:`STRATUM_COLUMN`),
     prefer ``position_shuffle``: it rolls positions *within* the retained samples
@@ -631,6 +765,9 @@ def field_significance(
     span = max(w1 - w0, 1e-9)
     median_dt = float(np.median(np.diff(t))) if t.size > 1 else 1.0
 
+    if null_method not in ("circular_shift", "position_shuffle"):
+        raise ValueError(f"Unknown null_method: {null_method!r}")
+
     def _stats(sp, xy):
         rm = compute_rate_map(sp, xy, cluster_id=cluster_id,
                               target_animal=target_animal, **rate_map_kwargs)
@@ -643,38 +780,71 @@ def field_significance(
     sh_skaggs = np.full(n_shuffles, np.nan)
     sh_sparsity = np.full(n_shuffles, np.nan)
     sh_split = np.full(n_shuffles, np.nan)
-    x0 = target_xy["x"].to_numpy()
-    y0 = target_xy["y"].to_numpy()
+
+    prep = _prep if _prep is not None else _prep_from_kwargs(target_xy, rate_map_kwargs)
     stratum0 = read_stratum_mask(target_xy)
     roll_rows = np.flatnonzero(stratum0) if stratum0 is not None else None
+    # Spike times are fixed under position_shuffle, so their nearest-sample
+    # indices are too — resolve them once instead of per shuffle.
+    idx_fixed = (_spike_sample_indices(prep, st)
+                 if null_method == "position_shuffle" else None)
+
     for i in range(n_shuffles):
         tau = rng.uniform(0.1 * span, 0.9 * span)
         if null_method == "circular_shift":
+            # Positions are untouched, so occupancy and its smoothing are the
+            # observed ones and need no recomputing.
             sp_i = w0 + np.mod(st - w0 + tau, span)
-            xy_i = target_xy
-        elif null_method == "position_shuffle":
+            idx = _spike_sample_indices(prep, sp_i)
+            occ_i, occ_s_i = prep.occupancy, prep.occ_smoothed
+            iy_i, ix_i = prep.iy, prep.ix
+        else:
             k = int(round(tau / max(median_dt, 1e-9)))
             if roll_rows is None:
-                xi, yi = np.roll(x0, k), np.roll(y0, k)
+                ix_r, iy_r = np.roll(prep.ix_raw, k), np.roll(prep.iy_raw, k)
             else:
                 # Roll only within the retained samples. Rolling the full array
                 # would pair in-stratum times with out-of-stratum positions, so
                 # the surrogate maps would no longer share the observed
                 # occupancy. Rolling within keeps occupancy and the retained
                 # spike count exactly fixed, making the null a pure re-pairing.
-                k_eff = int(round(k * roll_rows.size / max(x0.size, 1)))
+                k_eff = int(round(k * roll_rows.size / max(prep.ix_raw.size, 1)))
                 if roll_rows.size > 1:
                     k_eff = max(k_eff, 1)
-                xi, yi = x0.copy(), y0.copy()
-                xi[roll_rows] = np.roll(x0[roll_rows], k_eff)
-                yi[roll_rows] = np.roll(y0[roll_rows], k_eff)
-            xy_i = target_xy.copy()
-            xy_i["x"] = xi
-            xy_i["y"] = yi
-            sp_i = st
-        else:
-            raise ValueError(f"Unknown null_method: {null_method!r}")
-        sh_skaggs[i], sh_sparsity[i], sh_split[i] = _stats(sp_i, xy_i)
+                ix_r, iy_r = prep.ix_raw.copy(), prep.iy_raw.copy()
+                ix_r[roll_rows] = np.roll(prep.ix_raw[roll_rows], k_eff)
+                iy_r[roll_rows] = np.roll(prep.iy_raw[roll_rows], k_eff)
+            # Rolling bin indices == rolling positions then digitizing, since
+            # digitize is elementwise.
+            ix_i, iy_i = ix_r[prep.sel], iy_r[prep.sel]
+            occ_i = _accumulate(prep, iy_i[prep.keep], ix_i[prep.keep],
+                                prep.dt[prep.keep])
+            occ_s_i = _smooth(prep, occ_i)
+            idx = idx_fixed
+
+        counts = _accumulate(prep, iy_i[idx], ix_i[idx], 1.0)
+        rates = _rates_from_counts(prep, counts, occ_i, occ_s_i)
+        p_i, r_i = _valid_pr_arrays(rates, occ_i)
+        sh_skaggs[i] = _skaggs_from_pr(p_i, r_i)[0]
+        sh_sparsity[i] = _sparsity_from_pr(p_i, r_i)
+
+        if shuffle_split_half:
+            # Opt-in only: this rebuilds two more rate maps per shuffle and was
+            # measured at ~half the total runtime.
+            if null_method == "circular_shift":
+                sh_split[i] = split_half_stability(sp_i, target_xy, **rate_map_kwargs)
+            else:
+                x0 = target_xy["x"].to_numpy()
+                y0 = target_xy["y"].to_numpy()
+                if roll_rows is None:
+                    xi, yi = np.roll(x0, k), np.roll(y0, k)
+                else:
+                    xi, yi = x0.copy(), y0.copy()
+                    xi[roll_rows] = np.roll(x0[roll_rows], k_eff)
+                    yi[roll_rows] = np.roll(y0[roll_rows], k_eff)
+                xy_i = target_xy.copy()
+                xy_i["x"], xy_i["y"] = xi, yi
+                sh_split[i] = split_half_stability(st, xy_i, **rate_map_kwargs)
 
     # Add-one ("plus-one") estimator: (1 + #exceedances) / (1 + n_shuffles).
     # A finite permutation test cannot justify p == 0 — the plain k/n form
@@ -819,6 +989,7 @@ def compute_social_place_fields(
     null_method: Literal["circular_shift", "position_shuffle"] = "circular_shift",
     sig_alpha: float = 0.01,
     seed: int = 0,
+    shuffle_split_half: bool = False,
     self_stratum_radius_cm: Optional[float] = None,
     self_stratum_center: Optional[Tuple[float, float]] = None,
     self_stratum_max_gap_sec: float = 1.0,
@@ -961,6 +1132,10 @@ def compute_social_place_fields(
             speed_filter_subject=speed_filter_subject,
         )
 
+        # One binning prep per target, shared by every cell and every shuffle:
+        # the tracking-side work does not depend on which cell we are looking at.
+        prep = _prep_from_kwargs(target_xy, bin_kwargs)
+
         rate_maps[target] = {}
         stats[target] = {}
         signif[target] = {}
@@ -980,7 +1155,9 @@ def compute_social_place_fields(
             else:
                 signif[target][cid] = field_significance(
                     st, target_xy, n_shuffles=n_shuffles, null_method=null_method,
-                    seed=seed, cluster_id=cid, target_animal=target, **bin_kwargs,
+                    seed=seed, cluster_id=cid, target_animal=target,
+                    shuffle_split_half=shuffle_split_half, _prep=prep,
+                    **bin_kwargs,
                 )
 
         # Informative warning when speed gating leaves no occupancy.
@@ -1018,6 +1195,7 @@ def compute_social_place_fields(
         "arena_bounds": arena_bounds,
         "null_method": null_method,
         "sig_alpha": sig_alpha,
+        "shuffle_split_half": shuffle_split_half,
         "self_stratum_radius_cm": self_stratum_radius_cm,
         "self_stratum_center": stratum_center,
         "self_stratum_diagnostics": stratum_diagnostics,

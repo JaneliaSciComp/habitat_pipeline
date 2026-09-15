@@ -28,6 +28,44 @@ Conventions
   :func:`video.tracking_import.resolve_tracking_on_ephys_clock`.
 - "cm" parameter names refer to whatever spatial unit the tracking is in; if no
   ``pixels_per_cm`` calibration is configured, that unit is pixels.
+
+Self-position confound
+----------------------
+The default nulls (``circular_shift`` / ``position_shuffle``) break the
+spike↔target-position pairing *entirely*, so the hypothesis they reject is "this
+cell's firing is unrelated in time to the target's position". A pure **self**
+place cell violates that hypothesis whenever the two animals' trajectories are
+temporally correlated — which is the defining property of a shared arena. Such a
+cell will be reported as tuned to the partner even though it encodes only its
+own position.
+
+:func:`self_position_stratum` is the direct control: restrict the analysis to
+samples where the focal animal sat within ``radius_cm`` of one location, so its
+own position has almost no variance and cannot generate a map over the target's
+position. Pass ``self_stratum_radius_cm`` to
+:func:`compute_social_place_fields`, or use
+:func:`compare_self_stratum_control` to run the sweep with and without the
+restriction and read off which cells survive. Three things to keep in mind:
+
+- ``radius_cm`` must be small relative to a place field or self tuning leaks
+  through anyway; the trade-off is that small strata retain little data. The
+  returned diagnostics carry the retained fraction and the residual spread of
+  the focal's position so the tightness of the control is auditable.
+- A tight stratum keeps well under 1% of samples, so cells drop below
+  ``min_n_spikes`` and stop being testable. The loss is *uneven*: a cell whose
+  field coincides with the stratum keeps most of its spikes, while one that
+  fires elsewhere is starved. So the control is best powered against exactly the
+  cells it should kill, and worst powered for genuine partner cells — a
+  disappearance is only evidence of leakage if the spike count held up. Read
+  ``n_spikes_stratum`` before reading the p-value.
+- Skaggs bits/spike are **not** comparable across the two runs. Fewer retained
+  spikes bias it upward through noise while removing real signal pushes it down,
+  and neither effect is calibrated between runs. The permutation test is still
+  valid because each run builds its null from its own retained data — so compare
+  p-values, not magnitudes.
+- Conditioning on self *position* does not condition on self *behavioural
+  state*. A cell modulated by arousal as a partner approaches is not excluded by
+  this (or by any position-based) control.
 """
 
 from __future__ import annotations
@@ -50,6 +88,21 @@ CLASS_LABEL = "target_position"
 ANALYSIS_TITLE = "Social Place Fields"
 
 ArenaBounds = Tuple[Tuple[float, float], Tuple[float, float]]
+
+# Sample-level restriction mask, carried as a column on ``target_xy`` so it rides
+# through the window/finite/sort transforms alongside t/x/y, and propagates for
+# free through the ``**rate_map_kwargs`` chain into split_half_stability and
+# field_significance.
+STRATUM_COLUMN = "_in_self_stratum"
+
+# Default self-position stratum radius. Deliberately permissive. A radius at
+# place-field scale (~5 cm) is the tighter control, but measured on synthetic
+# sessions it retains under 1% of samples, which starves most cells below
+# min_n_spikes and leaves the control unable to detect a real partner field.
+# 12 cm keeps enough data to have power, at the cost of more residual
+# self-position variance inside the disc — read ``residual_spread_cm`` from the
+# diagnostics to see how much, and tighten it if the retained budget allows.
+DEFAULT_STRATUM_RADIUS_CM = 12.0
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +160,16 @@ class SocialFieldResults:
     parameters: dict
 
 
+@dataclass
+class StratumComparison:
+    """Unrestricted vs self-position-restricted sweeps, and their per-test diff."""
+
+    table: pd.DataFrame        # one row per (cluster_id, target)
+    unrestricted: SocialFieldResults
+    stratified: SocialFieldResults
+    parameters: dict
+
+
 # ---------------------------------------------------------------------------
 # Spatial-binning helpers
 # ---------------------------------------------------------------------------
@@ -131,6 +194,129 @@ def _infer_bounds(target_xy: pd.DataFrame, pad_cm: float = 5.0) -> ArenaBounds:
         (float(np.nanmin(x)) - pad_cm, float(np.nanmax(x)) + pad_cm),
         (float(np.nanmin(y)) - pad_cm, float(np.nanmax(y)) + pad_cm),
     )
+
+
+# ---------------------------------------------------------------------------
+# Self-position stratum (confound control)
+# ---------------------------------------------------------------------------
+
+def read_stratum_mask(xy: pd.DataFrame) -> Optional[np.ndarray]:
+    """Boolean restriction mask carried on ``xy``, or ``None`` if absent."""
+    if STRATUM_COLUMN not in xy.columns:
+        return None
+    col = pd.to_numeric(xy[STRATUM_COLUMN], errors="coerce").to_numpy(dtype=np.float64)
+    return np.nan_to_num(col, nan=0.0) > 0.5
+
+
+def modal_occupancy_center(focal_xy: pd.DataFrame, bin_size_cm: float = 5.0,
+                           arena_bounds: Optional[ArenaBounds] = None
+                           ) -> Tuple[float, float]:
+    """Centre of the focal animal's single highest dwell-time spatial bin."""
+    t = focal_xy["t"].to_numpy(dtype=np.float64)
+    x = focal_xy["x"].to_numpy(dtype=np.float64)
+    y = focal_xy["y"].to_numpy(dtype=np.float64)
+    finite = np.isfinite(t) & np.isfinite(x) & np.isfinite(y)
+    t, x, y = t[finite], x[finite], y[finite]
+    if t.size < 2:
+        raise ValueError("Need at least 2 finite focal tracking samples.")
+    order = np.argsort(t, kind="stable")
+    t, x, y = t[order], x[order], y[order]
+
+    if arena_bounds is None:
+        arena_bounds = _infer_bounds(focal_xy)
+    x_edges, y_edges = _edges_from_bounds(arena_bounds, bin_size_cm)
+    n_x, n_y = len(x_edges) - 1, len(y_edges) - 1
+
+    dt = np.gradient(t)
+    dt[dt < 0] = 0.0
+    occ = np.zeros((n_y, n_x), dtype=np.float64)
+    ix = np.clip(np.digitize(x, x_edges) - 1, 0, n_x - 1)
+    iy = np.clip(np.digitize(y, y_edges) - 1, 0, n_y - 1)
+    np.add.at(occ, (iy, ix), dt)
+
+    py, px = np.unravel_index(int(np.argmax(occ)), occ.shape)
+    return (float(0.5 * (x_edges[px] + x_edges[px + 1])),
+            float(0.5 * (y_edges[py] + y_edges[py + 1])))
+
+
+def self_position_stratum(
+    focal_xy: pd.DataFrame,
+    sample_t: np.ndarray,
+    *,
+    radius_cm: float,
+    center: Optional[Tuple[float, float]] = None,
+    bin_size_cm: float = 5.0,
+    arena_bounds: Optional[ArenaBounds] = None,
+    max_gap_sec: float = 1.0,
+) -> Tuple[np.ndarray, dict]:
+    """Mask of ``sample_t`` where the focal animal sat within ``radius_cm`` of one spot.
+
+    This is the single-stratum form of conditioning on self position: rather than
+    modelling the focal animal's contribution, hold it approximately constant and
+    throw the rest away. Within the mask the focal's own position has little
+    variance, so it cannot generate a rate map over a *target's* position — any
+    surviving tuning is not self-position leakage.
+
+    ``center`` defaults to the centre of the focal's modal dwell-time bin
+    (:func:`modal_occupancy_center`). The focal trajectory is interpolated onto
+    ``sample_t``; samples whose nearest focal observation is more than
+    ``max_gap_sec`` away are excluded rather than trusted, because tracking drops
+    undetected frames per animal and interpolating across a long gap invents a
+    position.
+
+    Returns ``(mask, diagnostics)``. ``diagnostics`` carries the retained
+    fraction and seconds, and ``residual_spread_cm`` — the RMS distance of the
+    focal's retained positions from ``center``. That last number is what makes
+    the control auditable: it must be small relative to a place field, or self
+    tuning leaks through the restriction anyway.
+    """
+    sample_t = np.asarray(sample_t, dtype=np.float64)
+    ft = focal_xy["t"].to_numpy(dtype=np.float64)
+    fx = focal_xy["x"].to_numpy(dtype=np.float64)
+    fy = focal_xy["y"].to_numpy(dtype=np.float64)
+    finite = np.isfinite(ft) & np.isfinite(fx) & np.isfinite(fy)
+    ft, fx, fy = ft[finite], fx[finite], fy[finite]
+    order = np.argsort(ft, kind="stable")
+    ft, fx, fy = ft[order], fx[order], fy[order]
+
+    if center is None:
+        center = modal_occupancy_center(focal_xy, bin_size_cm, arena_bounds)
+    cx, cy = center
+
+    if ft.size == 0 or sample_t.size == 0:
+        return np.zeros(sample_t.size, dtype=bool), {
+            "center": (float(cx), float(cy)), "radius_cm": float(radius_cm),
+            "n_retained": 0, "fraction_retained": 0.0, "retained_seconds": 0.0,
+            "residual_spread_cm": np.nan,
+        }
+
+    x_at = np.interp(sample_t, ft, fx, left=np.nan, right=np.nan)
+    y_at = np.interp(sample_t, ft, fy, left=np.nan, right=np.nan)
+
+    # Exclude samples that fall in a tracking gap rather than interpolating it.
+    right = np.clip(np.searchsorted(ft, sample_t), 1, ft.size - 1)
+    gap = np.minimum(np.abs(sample_t - ft[right - 1]), np.abs(ft[right] - sample_t))
+    if ft.size == 1:
+        gap = np.abs(sample_t - ft[0])
+
+    dist = np.hypot(x_at - cx, y_at - cy)
+    mask = np.isfinite(dist) & (dist <= float(radius_cm)) & (gap <= float(max_gap_sec))
+
+    dt = np.gradient(sample_t) if sample_t.size >= 2 else np.zeros(sample_t.size)
+    dt[dt < 0] = 0.0
+    n_ret = int(mask.sum())
+    diagnostics = {
+        "center": (float(cx), float(cy)),
+        "radius_cm": float(radius_cm),
+        "n_retained": n_ret,
+        "n_samples": int(sample_t.size),
+        "fraction_retained": float(n_ret / sample_t.size),
+        "retained_seconds": float(dt[mask].sum()),
+        "residual_spread_cm": float(np.sqrt(np.mean(dist[mask] ** 2))) if n_ret else np.nan,
+        "excluded_by_gap": int(np.sum(np.isfinite(dist) & (dist <= float(radius_cm))
+                                      & (gap > float(max_gap_sec)))),
+    }
+    return mask, diagnostics
 
 
 # ---------------------------------------------------------------------------
@@ -170,11 +356,14 @@ def compute_rate_map(
     t = target_xy["t"].to_numpy(dtype=np.float64)
     x = target_xy["x"].to_numpy(dtype=np.float64)
     y = target_xy["y"].to_numpy(dtype=np.float64)
+    stratum = read_stratum_mask(target_xy)
 
     if t_window_ephys is not None:
         w0, w1 = t_window_ephys
         in_win = (t >= w0) & (t <= w1)
         t, x, y = t[in_win], x[in_win], y[in_win]
+        if stratum is not None:
+            stratum = stratum[in_win]
     else:
         w0 = float(t.min()) if t.size else 0.0
         w1 = float(t.max()) if t.size else 0.0
@@ -183,6 +372,8 @@ def compute_rate_map(
     t, x, y = t[finite], x[finite], y[finite]
     order = np.argsort(t, kind="stable")
     t, x, y = t[order], x[order], y[order]
+    if stratum is not None:
+        stratum = stratum[finite][order]
 
     if arena_bounds is None:
         arena_bounds = _infer_bounds(target_xy) if target_xy.shape[0] else ((0.0, 1.0), (0.0, 1.0))
@@ -199,13 +390,15 @@ def compute_rate_map(
         dt = np.gradient(t)
         dt[dt < 0] = 0.0
 
-        # Speed gate over tracking samples.
+        # Speed gate and self-position stratum over tracking samples.
         keep = np.ones(t.size, dtype=bool)
+        if stratum is not None:
+            keep &= stratum
         if speed_xy is not None and speed_threshold_cms is not None:
             sp_t = speed_xy["t"].to_numpy(dtype=np.float64)
             sp_v = speed_xy["speed"].to_numpy(dtype=np.float64)
             sp_at_t = np.interp(t, sp_t, sp_v, left=np.nan, right=np.nan)
-            keep = np.isfinite(sp_at_t) & (sp_at_t >= speed_threshold_cms)
+            keep &= np.isfinite(sp_at_t) & (sp_at_t >= speed_threshold_cms)
 
         ix = np.clip(np.digitize(x, x_edges) - 1, 0, n_x - 1)
         iy = np.clip(np.digitize(y, y_edges) - 1, 0, n_y - 1)
@@ -245,6 +438,7 @@ def compute_rate_map(
         "min_occupancy_sec": min_occupancy_sec,
         "t_window_ephys": (w0, w1),
         "speed_filter_subject": speed_filter_subject,
+        "self_stratum_applied": stratum is not None,
         "class_label": CLASS_LABEL,
         "analysis_title": ANALYSIS_TITLE,
     }
@@ -414,6 +608,14 @@ def field_significance(
     are recomputed. P-values are one-tailed in the meaningful direction:
     ``p_skaggs`` and ``p_split`` are ``fraction(shuffle >= true)``; ``p_sparsity``
     is ``fraction(shuffle <= true)`` because lower sparsity = more selective.
+
+    When ``target_xy`` carries a restriction mask (:data:`STRATUM_COLUMN`),
+    prefer ``position_shuffle``: it rolls positions *within* the retained samples
+    only, so every surrogate keeps the observed occupancy and the observed
+    retained spike count. ``circular_shift`` moves spikes in wall-clock time, so
+    under a fragmented mask a surrogate retains a different number of spikes than
+    the observed train — noisier maps, higher Skaggs in the null, and a
+    correspondingly conservative test.
     """
     rng = np.random.default_rng(seed)
 
@@ -443,6 +645,8 @@ def field_significance(
     sh_split = np.full(n_shuffles, np.nan)
     x0 = target_xy["x"].to_numpy()
     y0 = target_xy["y"].to_numpy()
+    stratum0 = read_stratum_mask(target_xy)
+    roll_rows = np.flatnonzero(stratum0) if stratum0 is not None else None
     for i in range(n_shuffles):
         tau = rng.uniform(0.1 * span, 0.9 * span)
         if null_method == "circular_shift":
@@ -450,9 +654,23 @@ def field_significance(
             xy_i = target_xy
         elif null_method == "position_shuffle":
             k = int(round(tau / max(median_dt, 1e-9)))
+            if roll_rows is None:
+                xi, yi = np.roll(x0, k), np.roll(y0, k)
+            else:
+                # Roll only within the retained samples. Rolling the full array
+                # would pair in-stratum times with out-of-stratum positions, so
+                # the surrogate maps would no longer share the observed
+                # occupancy. Rolling within keeps occupancy and the retained
+                # spike count exactly fixed, making the null a pure re-pairing.
+                k_eff = int(round(k * roll_rows.size / max(x0.size, 1)))
+                if roll_rows.size > 1:
+                    k_eff = max(k_eff, 1)
+                xi, yi = x0.copy(), y0.copy()
+                xi[roll_rows] = np.roll(x0[roll_rows], k_eff)
+                yi[roll_rows] = np.roll(y0[roll_rows], k_eff)
             xy_i = target_xy.copy()
-            xy_i["x"] = np.roll(x0, k)
-            xy_i["y"] = np.roll(y0, k)
+            xy_i["x"] = xi
+            xy_i["y"] = yi
             sp_i = st
         else:
             raise ValueError(f"Unknown null_method: {null_method!r}")
@@ -601,6 +819,9 @@ def compute_social_place_fields(
     null_method: Literal["circular_shift", "position_shuffle"] = "circular_shift",
     sig_alpha: float = 0.01,
     seed: int = 0,
+    self_stratum_radius_cm: Optional[float] = None,
+    self_stratum_center: Optional[Tuple[float, float]] = None,
+    self_stratum_max_gap_sec: float = 1.0,
 ) -> SocialFieldResults:
     """Compute social place fields for every focal cell over every target animal.
 
@@ -616,6 +837,21 @@ def compute_social_place_fields(
     :class:`FieldStats`, and :class:`FieldSignificance`, then classifies each cell
     by which targets it is significantly tuned to (Benjamini–Hochberg FDR across
     targets on Skaggs bits/spike).
+
+    Setting ``self_stratum_radius_cm`` restricts every map to samples where the
+    focal animal sat within that radius of ``self_stratum_center`` (default: its
+    modal dwell-time bin), which is the self-position confound control described
+    in the module docstring — see :func:`self_position_stratum`. Two notes on
+    reading the output under a stratum: the **self** target is then a positive
+    control that is *expected* to collapse, since the focal is confined by
+    construction; and because occupancy is sparser, bits/spike is inflated
+    relative to the unrestricted run, so compare p-values rather than effect
+    sizes. :func:`compare_self_stratum_control` runs both and tabulates the
+    difference.
+
+    The FDR family here is targets within a cell, not cells. It does not control
+    the false-discovery rate over the cell population; take the denominator for
+    any population claim from ``LabNotebook.family_denominator``.
     """
     from ingestion.kilosort_data_import import _DEFAULT_QUALITY_THRESHOLDS
     from video.tracking_import import resolve_tracking_on_ephys_clock
@@ -648,15 +884,60 @@ def compute_social_place_fields(
     if focal_animal not in tracking_by_animal:
         logger.warning("Focal animal %s has no tracking; self-map unavailable.", focal_animal)
 
+    # Resolve the self-position stratum centre once, so every target is
+    # restricted to the same region of the focal animal's trajectory.
+    stratum_center = self_stratum_center
+    if self_stratum_radius_cm is not None:
+        focal_df = tracking_by_animal.get(focal_animal)
+        if focal_df is None or focal_df.shape[0] < 2:
+            raise ValueError(
+                f"self_stratum_radius_cm requires tracking for the focal animal "
+                f"{focal_animal!r}, which has none in session {session_id}."
+            )
+        if stratum_center is None:
+            stratum_center = modal_occupancy_center(focal_df, bin_size_cm, arena_bounds)
+        if null_method == "circular_shift":
+            logger.warning(
+                "null_method='circular_shift' under a self-position stratum gives "
+                "a conservative test: shifted spike trains land on a different "
+                "number of retained samples than the observed train. Prefer "
+                "null_method='position_shuffle'."
+            )
+
     rate_maps: Dict[str, Dict[int, RateMap]] = {}
     stats: Dict[str, Dict[int, FieldStats]] = {}
     signif: Dict[str, Dict[int, FieldSignificance]] = {}
+    stratum_diagnostics: Dict[str, dict] = {}
 
     for target in target_animals:
         target_xy = tracking_by_animal.get(target)
         if target_xy is None or target_xy.shape[0] < 2:
             logger.warning("No usable tracking for target %s; skipping.", target)
             continue
+
+        if self_stratum_radius_cm is not None:
+            mask, diag = self_position_stratum(
+                tracking_by_animal[focal_animal], target_xy["t"].to_numpy(),
+                radius_cm=self_stratum_radius_cm, center=stratum_center,
+                bin_size_cm=bin_size_cm, arena_bounds=arena_bounds,
+                max_gap_sec=self_stratum_max_gap_sec,
+            )
+            target_xy = target_xy.assign(**{STRATUM_COLUMN: mask})
+            stratum_diagnostics[target] = diag
+            if diag["n_retained"] == 0:
+                logger.warning(
+                    "Self-position stratum retains no samples for target %s "
+                    "(center=%s, radius=%s).", target, stratum_center,
+                    self_stratum_radius_cm,
+                )
+            elif diag["retained_seconds"] < 60.0:
+                logger.warning(
+                    "Self-position stratum retains only %.1f s for target %s "
+                    "(%.1f%% of samples); consider a larger radius, and raise "
+                    "min_occupancy_sec above its permissive %.2f s default.",
+                    diag["retained_seconds"], target,
+                    100.0 * diag["fraction_retained"], min_occupancy_sec,
+                )
 
         if speed_filter_subject == "none":
             speed_xy = None
@@ -737,6 +1018,9 @@ def compute_social_place_fields(
         "arena_bounds": arena_bounds,
         "null_method": null_method,
         "sig_alpha": sig_alpha,
+        "self_stratum_radius_cm": self_stratum_radius_cm,
+        "self_stratum_center": stratum_center,
+        "self_stratum_diagnostics": stratum_diagnostics,
         "class_label": CLASS_LABEL,
         "analysis_title": ANALYSIS_TITLE,
     }
@@ -822,4 +1106,114 @@ def _population_similarity(cluster_ids, targets, focal_animal, rate_maps):
             "similarity_matrix": mat,
             "diag_distribution": np.diag(mat).copy(),
         }
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Self-position confound control: paired sweep
+# ---------------------------------------------------------------------------
+
+def compare_self_stratum_control(
+    ks: "KilosortData",
+    tracking: "VideoTrackingData",
+    sync,
+    focal_animal: str,
+    target_animals: Optional[List[str]] = None,
+    *,
+    self_stratum_radius_cm: float = DEFAULT_STRATUM_RADIUS_CM,
+    self_stratum_center: Optional[Tuple[float, float]] = None,
+    null_method: Literal["circular_shift", "position_shuffle"] = "position_shuffle",
+    **kwargs,
+) -> StratumComparison:
+    """Run the sweep with and without the self-position restriction, and diff them.
+
+    This is the readout for the confound: a cell whose partner tuning is really
+    its own place field loses significance once the focal animal is held in one
+    place, while a cell that genuinely tracks the partner survives. The returned
+    ``table`` has one row per ``(cluster_id, target)`` with ``p_full`` /
+    ``p_stratum``, the two Skaggs values, retained spike counts, and
+    ``survives_stratum``.
+
+    Two things deserve separate reading. The **self** target is a positive
+    control that should collapse — the focal animal is confined by construction,
+    so its own map cannot be significant. And ``lost_to_stratum`` is only
+    evidence of self-position leakage when ``n_spikes_stratum`` stayed well above
+    ``min_n_spikes``; a tight stratum starves cells whose fields sit away from
+    it, and a cell that vanishes for want of spikes has not been shown to be a
+    confound. Compare ``p_full`` against ``p_stratum``, never ``bits_full``
+    against ``bits_stratum`` — the two runs bias Skaggs differently and the
+    magnitudes are not on a common scale.
+
+    Note this doubles the test count for the multiple-comparisons ledger. Declare
+    both runs up front via ``LabNotebook.declare_family_tests`` rather than
+    reporting whichever one is cleaner.
+    """
+    common = dict(kwargs)
+    common.pop("self_stratum_radius_cm", None)
+
+    res_full = compute_social_place_fields(
+        ks, tracking, sync, focal_animal, target_animals,
+        null_method=null_method, **common,
+    )
+    res_strat = compute_social_place_fields(
+        ks, tracking, sync, focal_animal, target_animals,
+        null_method=null_method,
+        self_stratum_radius_cm=self_stratum_radius_cm,
+        self_stratum_center=self_stratum_center,
+        **common,
+    )
+
+    alpha = res_full.parameters["sig_alpha"]
+    sig_full = _significant_targets_by_cell(res_full, alpha)
+    sig_strat = _significant_targets_by_cell(res_strat, alpha)
+
+    rows = []
+    for target in res_full.parameters["target_animals"]:
+        for cid in res_full.stats.get(target, {}):
+            in_strat = cid in res_strat.stats.get(target, {})
+            rows.append({
+                "cluster_id": cid,
+                "target": target,
+                "is_self": target == focal_animal,
+                "p_full": res_full.signif[target][cid].p_skaggs,
+                "p_stratum": res_strat.signif[target][cid].p_skaggs if in_strat else np.nan,
+                "bits_full": res_full.stats[target][cid].skaggs_bits_per_spike,
+                "bits_stratum": (res_strat.stats[target][cid].skaggs_bits_per_spike
+                                 if in_strat else np.nan),
+                "n_spikes_full": res_full.stats[target][cid].n_spikes_in_window,
+                "n_spikes_stratum": (res_strat.stats[target][cid].n_spikes_in_window
+                                     if in_strat else 0),
+                "sig_full": target in sig_full.get(cid, set()),
+                "survives_stratum": target in sig_strat.get(cid, set()),
+            })
+    table = pd.DataFrame(rows)
+    if not table.empty:
+        table["lost_to_stratum"] = table["sig_full"] & ~table["survives_stratum"]
+
+    parameters = {
+        "focal_animal": focal_animal,
+        "self_stratum_radius_cm": self_stratum_radius_cm,
+        "self_stratum_center": res_strat.parameters["self_stratum_center"],
+        "self_stratum_diagnostics": res_strat.parameters["self_stratum_diagnostics"],
+        "null_method": null_method,
+        "sig_alpha": alpha,
+        "class_label": CLASS_LABEL,
+        "analysis_title": f"{ANALYSIS_TITLE} — self-position stratum control",
+    }
+    return StratumComparison(table=table, unrestricted=res_full,
+                             stratified=res_strat, parameters=parameters)
+
+
+def _significant_targets_by_cell(res: SocialFieldResults, alpha: float
+                                 ) -> Dict[int, set]:
+    """``{cluster_id: {significant targets}}``, reusing the run's own BH family."""
+    out: Dict[int, set] = {}
+    targets = res.parameters["target_animals"]
+    for _, row in res.cell_classification.iterrows():
+        cid = row["cluster_id"]
+        pvals = np.array(
+            [row.get(f"p_value_{t}", np.nan) for t in targets], dtype=np.float64)
+        qvals = _benjamini_hochberg(pvals) if pvals.size else np.array([])
+        out[cid] = {t for t, q in zip(targets, qvals)
+                    if np.isfinite(q) and q < alpha}
     return out

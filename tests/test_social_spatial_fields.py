@@ -15,14 +15,18 @@ from types import SimpleNamespace
 
 from ephys.social_spatial_fields import (
     RateMap,
+    STRATUM_COLUMN,
     compute_rate_map,
     spatial_information,
     spatial_sparsity,
     spatial_coherence,
     split_half_stability,
     field_significance,
+    compare_self_stratum_control,
     compute_social_place_fields,
     field_similarity_across_targets,
+    modal_occupancy_center,
+    self_position_stratum,
     _benjamini_hochberg,
 )
 from video.tracking_import import VideoTrackingData
@@ -384,3 +388,229 @@ class TestMultiTargetSweep:
         assert res.parameters["class_label"] == "target_position"
         assert res.parameters["analysis_title"]
         assert res.parameters["focal_animal"] == "A"
+
+
+# ---------------------------------------------------------------------------
+# Self-position stratum (confound control)
+# ---------------------------------------------------------------------------
+
+def _correlated_pair(n, alpha, seed_a=1, seed_g=2):
+    """Focal A and partner B whose trajectories are correlated by ``alpha``.
+
+    This is the situation that makes the default nulls unsafe: B's position
+    carries information about A's, so a cell coding only A's own position shows
+    an apparent place field over B.
+    """
+    ax, ay = _random_walk(n, ARENA, 3.0, seed_a)
+    gx, gy = _random_walk(n, ARENA, 3.0, seed_g)
+    t = np.arange(n) * DT
+    A = pd.DataFrame({"t": t, "x": ax, "y": ay})
+    B = pd.DataFrame({"t": t, "x": alpha * ax + (1 - alpha) * gx,
+                      "y": alpha * ay + (1 - alpha) * gy})
+    for df in (A, B):
+        df["speed"] = np.sqrt(np.gradient(df["x"], t) ** 2
+                              + np.gradient(df["y"], t) ** 2)
+    return A, B
+
+
+class TestSelfPositionStratum:
+    def test_mask_confines_focal_position(self):
+        xy = _make_xy(n=20000, seed=500)
+        center = (40.0, 40.0)
+        mask, diag = self_position_stratum(
+            xy, xy["t"].to_numpy(), radius_cm=6.0, center=center,
+            bin_size_cm=BIN, arena_bounds=ARENA)
+        assert 0 < diag["n_retained"] < xy.shape[0]
+        # Every retained sample really is inside the disc.
+        d = np.hypot(xy["x"].to_numpy()[mask] - center[0],
+                     xy["y"].to_numpy()[mask] - center[1])
+        assert d.max() <= 6.0 + 1e-9
+        assert diag["residual_spread_cm"] <= 6.0
+        assert diag["retained_seconds"] == pytest.approx(mask.sum() * DT, rel=0.05)
+
+    def test_modal_center_finds_dwell_peak(self):
+        # Focal parked in a known corner for most of the session.
+        n = 6000
+        t = np.arange(n) * DT
+        x = np.full(n, 12.5)
+        y = np.full(n, 67.5)
+        x[:500] = np.linspace(0, 80, 500)   # brief traverse elsewhere
+        y[:500] = np.linspace(0, 80, 500)
+        xy = pd.DataFrame({"t": t, "x": x, "y": y, "speed": np.zeros(n)})
+        cx, cy = modal_occupancy_center(xy, BIN, ARENA)
+        assert abs(cx - 12.5) <= BIN
+        assert abs(cy - 67.5) <= BIN
+
+    def test_samples_in_a_tracking_gap_are_excluded(self):
+        # Focal sits at the centre, but its tracking has a 10 s hole.
+        t = np.concatenate([np.arange(0, 5, DT), np.arange(15, 20, DT)])
+        xy = pd.DataFrame({"t": t, "x": np.full(t.size, 40.0),
+                           "y": np.full(t.size, 40.0),
+                           "speed": np.zeros(t.size)})
+        sample_t = np.arange(0, 20, 0.5)
+        mask, diag = self_position_stratum(
+            xy, sample_t, radius_cm=5.0, center=(40.0, 40.0),
+            bin_size_cm=BIN, arena_bounds=ARENA, max_gap_sec=1.0)
+        # Interpolation would have happily invented a position across the hole.
+        assert not mask[(sample_t > 6.5) & (sample_t < 13.5)].any()
+        assert mask[sample_t < 4.5].all()
+        assert diag["excluded_by_gap"] > 0
+
+    def test_rate_map_occupancy_restricted_to_stratum(self):
+        xy = _make_xy(n=20000, seed=501)
+        mask, diag = self_position_stratum(
+            xy, xy["t"].to_numpy(), radius_cm=8.0, center=(40.0, 40.0),
+            bin_size_cm=BIN, arena_bounds=ARENA)
+        masked = xy.assign(**{STRATUM_COLUMN: mask})
+        rm_full = compute_rate_map(np.array([]), xy, bin_size_cm=BIN,
+                                   arena_bounds=ARENA, smoothing_sigma_cm=None,
+                                   speed_threshold_cms=None)
+        rm_str = compute_rate_map(np.array([]), masked, bin_size_cm=BIN,
+                                  arena_bounds=ARENA, smoothing_sigma_cm=None,
+                                  speed_threshold_cms=None)
+        assert rm_str.occupancy.sum() == pytest.approx(diag["retained_seconds"], rel=0.02)
+        assert rm_str.occupancy.sum() < rm_full.occupancy.sum()
+        assert rm_str.parameters["self_stratum_applied"] is True
+        assert rm_full.parameters["self_stratum_applied"] is False
+
+    def test_masked_roll_preserves_retained_spike_count(self):
+        """The mask-aware position_shuffle re-pairs only; it must not drop spikes.
+
+        Rolling the whole array instead would pair in-stratum times with
+        out-of-stratum positions and change how many spikes survive the mask,
+        inflating the null and making the test silently conservative.
+        """
+        xy = _make_xy(n=20000, seed=502)
+        spikes = _poisson_spikes_from_field(
+            xy, center=(40.0, 40.0), sigma=8.0, peak_hz=25.0, base_hz=0.5, seed=503)
+        mask, _ = self_position_stratum(
+            xy, xy["t"].to_numpy(), radius_cm=10.0, center=(40.0, 40.0),
+            bin_size_cm=BIN, arena_bounds=ARENA)
+        masked = xy.assign(**{STRATUM_COLUMN: mask})
+        observed = compute_rate_map(spikes, masked, bin_size_cm=BIN,
+                                    arena_bounds=ARENA, speed_threshold_cms=None)
+
+        rows = np.flatnonzero(mask)
+        rolled = masked.copy()
+        x0 = masked["x"].to_numpy().copy()
+        y0 = masked["y"].to_numpy().copy()
+        x0[rows] = np.roll(masked["x"].to_numpy()[rows], 137)
+        y0[rows] = np.roll(masked["y"].to_numpy()[rows], 137)
+        rolled["x"], rolled["y"] = x0, y0
+        surrogate = compute_rate_map(spikes, rolled, bin_size_cm=BIN,
+                                     arena_bounds=ARENA, speed_threshold_cms=None)
+
+        assert surrogate.spike_counts.sum() == observed.spike_counts.sum()
+        assert surrogate.occupancy.sum() == pytest.approx(observed.occupancy.sum())
+
+
+@pytest.mark.slow
+class TestSelfPositionConfound:
+    """The control's reason for existing, in both directions."""
+
+    N = 60000
+    ALPHA = 0.65
+    SELF_CENTER = (60.0, 60.0)
+    RADIUS = 4.0
+    SIGMA = 7.0
+    KW = dict(bin_size_cm=BIN, arena_bounds=ARENA, speed_threshold_cms=None)
+
+    def _p_pair(self, spikes, A, B, center, n_shuffles=200):
+        mask, diag = self_position_stratum(
+            A, B["t"].to_numpy(), radius_cm=self.RADIUS, center=center,
+            bin_size_cm=BIN, arena_bounds=ARENA)
+        B_masked = B.assign(**{STRATUM_COLUMN: mask})
+        full = field_significance(spikes, B, n_shuffles=n_shuffles,
+                                  null_method="position_shuffle", seed=0, **self.KW)
+        strat = field_significance(spikes, B_masked, n_shuffles=n_shuffles,
+                                   null_method="position_shuffle", seed=0, **self.KW)
+        return full.p_skaggs, strat.p_skaggs, diag, B_masked
+
+    def test_self_tuned_cell_fakes_a_partner_field(self):
+        """Motivating case: the default null calls a pure self cell partner-tuned."""
+        A, B = _correlated_pair(self.N, self.ALPHA)
+        spikes = _poisson_spikes_from_field(
+            A, center=self.SELF_CENTER, sigma=self.SIGMA, peak_hz=25.0,
+            base_hz=0.2, seed=510)
+        sig = field_significance(spikes, B, n_shuffles=200,
+                                 null_method="position_shuffle", seed=0, **self.KW)
+        # The cell never saw B, yet B-position tuning is maximally significant.
+        assert sig.p_skaggs == pytest.approx(1 / 201)
+
+    def test_stratum_removes_self_position_leakage(self):
+        A, B = _correlated_pair(self.N, self.ALPHA)
+        spikes = _poisson_spikes_from_field(
+            A, center=self.SELF_CENTER, sigma=self.SIGMA, peak_hz=25.0,
+            base_hz=0.2, seed=510)
+        p_full, p_strat, diag, B_masked = self._p_pair(
+            spikes, A, B, self.SELF_CENTER)
+
+        # The control is only meaningful if it actually pinned the focal animal
+        # and kept enough spikes to have had the power to detect a real field.
+        assert diag["residual_spread_cm"] < 0.5 * self.SIGMA
+        retained = compute_rate_map(spikes, B_masked, **self.KW).spike_counts.sum()
+        assert retained >= 50
+
+        assert p_full == pytest.approx(1 / 201)
+        assert p_strat > 0.05
+
+    def test_genuine_partner_cell_survives_the_stratum(self):
+        A, B = _correlated_pair(self.N, self.ALPHA)
+        spikes = _poisson_spikes_from_field(
+            B, center=(35.0, 45.0), sigma=self.SIGMA, peak_hz=25.0,
+            base_hz=0.2, seed=511)
+        p_full, p_strat, _, _ = self._p_pair(spikes, A, B, self.SELF_CENTER)
+        assert p_full == pytest.approx(1 / 201)
+        assert p_strat < 0.05
+
+
+@pytest.mark.slow
+class TestStratumSweepIntegration:
+    def test_sweep_accepts_stratum_and_records_diagnostics(self):
+        tr = _three_animal_tracking(n=12000)
+        spikes = _poisson_spikes_from_field(
+            tr["A"], center=(40.0, 40.0), sigma=8.0, peak_hz=30.0,
+            base_hz=0.5, seed=520)
+        res = _sweep(_make_ks([spikes]), tr, focal="A", n_shuffles=50,
+                     null_method="position_shuffle", min_n_spikes=10,
+                     self_stratum_radius_cm=12.0,
+                     self_stratum_center=(40.0, 40.0))
+        diags = res.parameters["self_stratum_diagnostics"]
+        assert set(diags) == {"A", "B", "C"}
+        assert all(d["n_retained"] > 0 for d in diags.values())
+        assert res.parameters["self_stratum_center"] == (40.0, 40.0)
+        # Every target's map is restricted to the same focal-position samples.
+        assert res.rate_maps["B"][0].parameters["self_stratum_applied"] is True
+
+    def test_compare_control_tabulates_both_runs(self):
+        tr = _three_animal_tracking(n=12000)
+        spikes = _poisson_spikes_from_field(
+            tr["A"], center=(40.0, 40.0), sigma=8.0, peak_hz=30.0,
+            base_hz=0.5, seed=521)
+        cmp_ = compare_self_stratum_control(
+            _make_ks([spikes]), _video_tracking(tr), _StubSync(), "A",
+            list(tr.keys()), self_stratum_radius_cm=12.0,
+            self_stratum_center=(40.0, 40.0),
+            pixels_per_cm=None, bin_size_cm=BIN, smoothing_sigma_cm=5.0,
+            speed_filter_subject="none", n_shuffles=50, min_n_spikes=10,
+            use_quality_cells=False, arena_bounds=ARENA, seed=0,
+        )
+        t = cmp_.table
+        assert set(t.columns) >= {"p_full", "p_stratum", "n_spikes_stratum",
+                                  "survives_stratum", "lost_to_stratum", "is_self"}
+        assert len(t) == 3                      # 1 cell x 3 targets
+        assert t["is_self"].sum() == 1
+        # The restricted run really is restricted.
+        assert (t["n_spikes_stratum"] < t["n_spikes_full"]).all()
+        assert cmp_.parameters["self_stratum_center"] == (40.0, 40.0)
+        assert cmp_.unrestricted.parameters["self_stratum_radius_cm"] is None
+        assert cmp_.stratified.parameters["self_stratum_radius_cm"] == 12.0
+
+    def test_stratum_requires_focal_tracking(self):
+        # Focal "A" is implanted but absent from the tracking file: there is no
+        # self position to condition on, so the control cannot be applied.
+        tr = {"B": _make_xy(n=2000, seed=200), "C": _make_xy(n=2000, seed=300)}
+        spikes = np.array([1.0, 2.0, 3.0])
+        with pytest.raises(ValueError, match="requires tracking for the focal"):
+            _sweep(_make_ks([spikes]), tr, focal="A", n_shuffles=5,
+                   target_animals=["B", "C"], self_stratum_radius_cm=10.0)

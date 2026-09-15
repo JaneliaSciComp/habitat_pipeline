@@ -124,3 +124,83 @@ def test_summary_dashboard(results):
     fig = sp.plot_social_place_summary(results)
     assert fig is not None
     plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Focal-position overlay
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def stratified_results():
+    """Same session, but every map restricted to one focal-position disc."""
+    tr = {"A": _xy(9000, 1), "B": _xy(9000, 2), "C": _xy(9000, 3)}
+    ks = SimpleNamespace(
+        ks_ids=[0, 1],
+        spike_times_by_cell=[_spikes(tr["A"], (40, 40), 10),
+                             _spikes(tr["B"], (40, 40), 11)],
+    )
+    return compute_social_place_fields(
+        ks, _video_tracking(tr), _StubSync(), focal_animal="A",
+        target_animals=["A", "B", "C"], pixels_per_cm=None,
+        bin_size_cm=5.0, smoothing_sigma_cm=5.0,
+        speed_filter_subject="none", n_shuffles=10, min_n_spikes=10,
+        use_quality_cells=False, arena_bounds=ARENA, seed=0,
+        null_method="position_shuffle",
+        self_stratum_radius_cm=15.0, self_stratum_center=(40.0, 40.0),
+    )
+
+
+def test_overlay_draws_stratum_disc(stratified_results):
+    fig, ax = plt.subplots()
+    assert sp.overlay_focal_position(ax, stratified_results) is True
+    # A circle patch at the stratum centre, with the stratum radius.
+    circles = [p for p in ax.patches if isinstance(p, plt.Circle)]
+    assert len(circles) == 1
+    assert circles[0].get_radius() == 15.0
+    assert circles[0].get_center() == (40.0, 40.0)
+    plt.close(fig)
+
+
+def test_overlay_falls_back_to_occupancy_contours(results):
+    """Without a stratum there is no single focal location, so draw contours."""
+    fig, ax = plt.subplots()
+    assert sp.overlay_focal_position(ax, results) is True
+    assert not [p for p in ax.patches if isinstance(p, plt.Circle)]
+    assert ax.collections or ax.lines      # contours and/or the modal marker
+    plt.close(fig)
+
+
+def test_overlay_returns_false_without_focal_tracking(results):
+    """Focal absent from the rate maps ⇒ nothing to draw, and no exception."""
+    stripped = SimpleNamespace(
+        rate_maps={k: v for k, v in results.rate_maps.items() if k != "A"},
+        parameters={**results.parameters, "self_stratum_radius_cm": None,
+                    "self_stratum_center": None},
+    )
+    fig, ax = plt.subplots()
+    assert sp.overlay_focal_position(ax, stripped) is False
+    plt.close(fig)
+
+
+def test_overlay_does_not_rescale_the_map_axes(stratified_results):
+    """A disc near the arena edge must not stretch the panel past the arena."""
+    fig = sp.plot_rate_maps_grid(stratified_results, cluster_id=0)
+    for ax in fig.axes:
+        if ax.get_xlabel() == "x (cm)":
+            assert ax.get_xlim() == pytest.approx(ARENA[0], abs=5.0)
+    plt.close(fig)
+
+
+def test_grid_and_summary_accept_show_focal_false(stratified_results):
+    fig = sp.plot_rate_maps_grid(stratified_results, cluster_id=0, show_focal=False)
+    assert not [p for p in fig.axes[0].patches if isinstance(p, plt.Circle)]
+    plt.close(fig)
+    fig = sp.plot_social_place_summary(stratified_results, show_focal=False)
+    assert fig is not None
+    plt.close(fig)
+
+
+def test_overlay_note_describes_the_condition(results, stratified_results):
+    assert "unconditioned" in sp._focal_overlay_note(results)
+    note = sp._focal_overlay_note(stratified_results)
+    assert "within 15 cm" in note and "(40, 40)" in note

@@ -6,6 +6,15 @@ Driven by ``SocialFieldResults.parameters['analysis_title']`` and
 the figures read cosmetic strings off the result dataclass rather than branching
 on the analysis type. NaN rate-map bins (occupancy below threshold) are masked
 light gray throughout.
+
+Every rate map is over a **target** animal's position, so the panels answer
+"where was the *other* animal when this cell fired". :func:`overlay_focal_position`
+adds the missing half of that picture — where the *focal* animal was while the
+map accumulated — in the same arena coordinates. Under a self-position stratum
+that is a single disc; without one it is the focal's dwell-time contours, a
+visual reminder that the map is not conditioned on the focal's position at all
+and may therefore be self-position leakage. See the "Self-position confound"
+section of ``ephys/social_spatial_fields.py``.
 """
 
 from __future__ import annotations
@@ -53,11 +62,16 @@ def _masked_cmap():
 
 
 def _draw_rate_map(ax, rm, title: Optional[str] = None, vmax: Optional[float] = None,
-                   vmin: float = 0.0):
-    """Draw one RateMap on ``ax`` with NaN bins masked. Returns the image."""
+                   vmin: float = 0.0, aspect: str = "equal"):
+    """Draw one RateMap on ``ax`` with NaN bins masked. Returns the image.
+
+    ``aspect='equal'`` because these are allocentric arena maps: a centimetre of
+    x and a centimetre of y must render at the same size, or distances and field
+    shapes are read wrong and a circular region drawn on top looks elliptical.
+    """
     masked = np.ma.masked_invalid(rm.rates)
     extent = [rm.x_edges[0], rm.x_edges[-1], rm.y_edges[0], rm.y_edges[-1]]
-    im = ax.imshow(masked, origin="lower", extent=extent, aspect="auto",
+    im = ax.imshow(masked, origin="lower", extent=extent, aspect=aspect,
                    cmap=_masked_cmap(), vmin=vmin, vmax=vmax)
     ax.set_xlabel("x (cm)")
     ax.set_ylabel("y (cm)")
@@ -73,16 +87,103 @@ def _maybe_save(fig, save_path):
 
 
 # ---------------------------------------------------------------------------
+# Focal-animal overlay
+# ---------------------------------------------------------------------------
+
+def _focal_occupancy_map(results: SocialFieldResults):
+    """The focal animal's own dwell-time map, read off its self rate map.
+
+    Occupancy depends only on tracking, the speed gate and the stratum mask —
+    never on spikes — so any cluster's map carries the same one.
+    """
+    maps = results.rate_maps.get(_focal(results))
+    if not maps:
+        return None
+    return next(iter(maps.values()))
+
+
+def _bin_centers(edges: np.ndarray) -> np.ndarray:
+    return 0.5 * (edges[:-1] + edges[1:])
+
+
+def overlay_focal_position(ax, results: SocialFieldResults, *,
+                           color: str = "white", linewidth: float = 1.6,
+                           occupancy_percentiles: Tuple[float, float] = (75.0, 95.0),
+                           label: bool = False) -> bool:
+    """Draw where the FOCAL animal was onto a map of a TARGET animal's position.
+
+    Both animals are tracked in the same arena coordinates, so this puts two
+    different animals in one frame on purpose: the heatmap is the target's
+    position, the overlay is the focal's.
+
+    With a self-position stratum active, the overlay is the stratum disc — the
+    focal animal was inside it for *every* sample that built the map. Without
+    one, the focal ranged freely, so the overlay is its dwell-time contours plus
+    a ``+`` at its modal bin; that case is a reminder that nothing conditions the
+    map on the focal's position, which is how a self place cell comes to look
+    partner-tuned.
+
+    Returns True if anything was drawn (False when the focal has no tracking).
+    """
+    focal = _focal(results)
+    radius = results.parameters.get("self_stratum_radius_cm")
+    center = results.parameters.get("self_stratum_center")
+
+    if radius is not None and center is not None:
+        ax.add_patch(plt.Circle(center, radius, fill=False, ec=color,
+                                lw=linewidth, zorder=5))
+        ax.plot(center[0], center[1], marker="+", color=color, ms=9,
+                mew=linewidth, zorder=6,
+                label=f"focal {focal} ≤{radius:g} cm" if label else None)
+        return True
+
+    rm = _focal_occupancy_map(results)
+    if rm is None or not np.isfinite(rm.occupancy).any() or rm.occupancy.sum() <= 0:
+        return False
+
+    from scipy.ndimage import gaussian_filter
+    occ = gaussian_filter(rm.occupancy, sigma=1.0, mode="constant")
+    positive = occ[occ > 0]
+    if positive.size < 3:
+        return False
+    levels = np.unique(np.percentile(positive, list(occupancy_percentiles)))
+    xc, yc = _bin_centers(rm.x_edges), _bin_centers(rm.y_edges)
+    if levels.size:
+        ax.contour(xc, yc, occ, levels=levels, colors=color,
+                   linewidths=linewidth * 0.7, alpha=0.9, zorder=5)
+    py, px = np.unravel_index(int(np.argmax(occ)), occ.shape)
+    ax.plot(xc[px], yc[py], marker="+", color=color, ms=9, mew=linewidth,
+            zorder=6, label=f"focal {focal} occupancy" if label else None)
+    return True
+
+
+def _focal_overlay_note(results: SocialFieldResults) -> str:
+    """One-line description of what the focal overlay is showing."""
+    focal = _focal(results)
+    radius = results.parameters.get("self_stratum_radius_cm")
+    center = results.parameters.get("self_stratum_center")
+    if radius is not None and center is not None:
+        return (f"overlay: focal {focal} held within {radius:g} cm of "
+                f"({center[0]:.0f}, {center[1]:.0f})")
+    return f"overlay: focal {focal} dwell-time contours (position unconditioned)"
+
+
+# ---------------------------------------------------------------------------
 # Per-cluster grid
 # ---------------------------------------------------------------------------
 
 def plot_rate_maps_grid(results: SocialFieldResults, cluster_id: int,
-                        save_path=None, figsize: Optional[Tuple[int, int]] = None):
+                        save_path=None, figsize: Optional[Tuple[int, int]] = None,
+                        show_focal: bool = True):
     """One rate-map panel per target animal for a single cluster.
 
     Each panel is colour-scaled independently to its own min/max rate, so the
     spatial structure of every map is visible regardless of overall firing-rate
     differences across targets. Each panel therefore gets its own colorbar.
+
+    ``show_focal`` overlays the focal animal's location on every panel (see
+    :func:`overlay_focal_position`), so each map can be read as "target here,
+    focal there" rather than as a bare heatmap.
     """
     targets = _targets(results)
     maps = [results.rate_maps[t][cluster_id] for t in targets if cluster_id in results.rate_maps[t]]
@@ -111,11 +212,22 @@ def plot_rate_maps_grid(results: SocialFieldResults, cluster_id: int,
             vmin, vmax = 0.0, None
         im = _draw_rate_map(ax, m, title=title, vmin=vmin, vmax=vmax)
         fig.colorbar(im, ax=ax, shrink=0.85, label="Hz")
+        if show_focal:
+            # Keep the axes pinned to the arena; the overlay must not rescale it.
+            xlim, ylim = ax.get_xlim(), ax.get_ylim()
+            drawn = overlay_focal_position(ax, results, label=(ax is axes[0]))
+            ax.set_xlim(xlim)
+            ax.set_ylim(ylim)
+            if drawn and ax is axes[0]:
+                ax.legend(fontsize=7, loc="upper right", framealpha=0.6)
 
-    fig.suptitle(f"{_analysis_title(results)} — focal {_focal(results)}, cluster {cluster_id}",
-                 fontsize=11)
+    suptitle = (f"{_analysis_title(results)} — focal {_focal(results)}, "
+                f"cluster {cluster_id}")
+    if show_focal:
+        suptitle += f"\n{_focal_overlay_note(results)}"
+    fig.suptitle(suptitle, fontsize=11)
     # Reserve headroom so the suptitle clears the two-line subplot titles.
-    fig.tight_layout(rect=[0, 0, 1, 0.90])
+    fig.tight_layout(rect=[0, 0, 1, 0.88])
     plt.show()
     return _maybe_save(fig, save_path)
 
@@ -284,7 +396,8 @@ def plot_field_stability(results: SocialFieldResults, save_path=None, figsize=(9
 # ---------------------------------------------------------------------------
 
 def plot_social_place_summary(results: SocialFieldResults, cluster_id: Optional[int] = None,
-                              save_path=None, figsize=(15, 9)):
+                              save_path=None, figsize=(15, 9),
+                              show_focal: bool = True):
     """Six-panel dashboard: example grid, classification, stability, Skaggs-vs-shuffle.
 
     Analog of ``ephys.decoding_plots.plot_decoding_summary``. When ``cluster_id``
@@ -317,6 +430,11 @@ def plot_social_place_summary(results: SocialFieldResults, cluster_id: Optional[
             self_tag = " (self)" if t == focal else ""
             _draw_rate_map(ax, results.rate_maps[t][cluster_id],
                            title=f"{t}{self_tag}  {fs.skaggs_bits_per_spike:.2f} b/s", vmax=vmax)
+            if show_focal:
+                xlim, ylim = ax.get_xlim(), ax.get_ylim()
+                overlay_focal_position(ax, results)
+                ax.set_xlim(xlim)
+                ax.set_ylim(ylim)
         else:
             ax.axis("off")
 
@@ -360,7 +478,10 @@ def plot_social_place_summary(results: SocialFieldResults, cluster_id: Optional[
         ax_stab.axhline(y, ls="--", color="0.5", lw=0.8)
     ax_stab.set_title("split-half stability")
 
-    fig.suptitle(f"{_analysis_title(results)} — focal {focal} "
-                 f"(example cluster {cluster_id})", fontsize=12)
+    suptitle = (f"{_analysis_title(results)} — focal {focal} "
+                f"(example cluster {cluster_id})")
+    if show_focal:
+        suptitle += f"   |   {_focal_overlay_note(results)}"
+    fig.suptitle(suptitle, fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     return _maybe_save(fig, save_path)

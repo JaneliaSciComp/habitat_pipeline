@@ -91,10 +91,27 @@ DEFAULT_COHORTS = {
     'cohort5': 'config/cohort5_paths.json',
 }
 
-#: A tracked object counts as a rat only if its (normalized) name is exactly
+#: A tracked object counts as a rat only if its canonicalized name is exactly
 #: 'rat<digits>' — matches discovery.manifest_build's own identity check, so
 #: an unresolved tracklet id never shows up as a phantom "animal" row.
 _RAT_ID_RE = re.compile(r'^rat\d+$', re.IGNORECASE)
+
+
+def _canonical_rat_id(raw_name: Any) -> str:
+    """Object name -> ``'rat<id>'``, or unchanged if it isn't a rat at all.
+
+    Two on-disk quirks land on the same animal id: APT's ``'rat4635'``
+    (handled by :func:`normalize_object_name`) and this cohort's older
+    mask-metrics export, which names objects with the bare number
+    (``'613'``, not ``'rat613'`` — confirmed on session 20251210, where every
+    object name is a bare digit string). A bare-digit name gets the same
+    ``'rat'`` prefix used everywhere else in this pipeline
+    (``video/behavioral_visualization.py``'s ``rat_id`` helper does the same
+    thing); anything else (an unresolved tracklet id, an arena landmark) is
+    left alone so it still fails :data:`_RAT_ID_RE` and is excluded.
+    """
+    name = normalize_object_name(raw_name)
+    return f"rat{name}" if name.isdigit() else name
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +263,7 @@ def tracking_grid(dsm, sync, edges: np.ndarray, required_animals: Sequence[str] 
         overlap = np.clip(np.minimum(edges[1:], hi) - np.maximum(edges[:-1], lo), 0, None)
         expected += overlap * fps
 
-        names = centers['object_name'].map(normalize_object_name).to_numpy()
+        names = centers['object_name'].map(_canonical_rat_id).to_numpy()
         frame_idx = np.clip(centers['frame'].to_numpy(), 0, len(day_seconds) - 1)
         centers_seconds = day_seconds[frame_idx]
         for name in np.unique(names):

@@ -208,10 +208,39 @@ def read_stratum_mask(xy: pd.DataFrame) -> Optional[np.ndarray]:
     return np.nan_to_num(col, nan=0.0) > 0.5
 
 
+def _disc_kernel(radius_cm: float, bin_size_cm: float) -> np.ndarray:
+    """Uniform disc of ``radius_cm``, on a ``bin_size_cm`` grid.
+
+    A radius below one bin yields a 1x1 kernel, i.e. the identity.
+    """
+    r_bins = float(radius_cm) / float(bin_size_cm)
+    half = int(np.floor(r_bins))
+    offs = np.arange(-half, half + 1)
+    yy, xx = np.meshgrid(offs, offs, indexing="ij")
+    return (np.hypot(xx, yy) <= r_bins).astype(np.float64)
+
+
 def modal_occupancy_center(focal_xy: pd.DataFrame, bin_size_cm: float = 5.0,
-                           arena_bounds: Optional[ArenaBounds] = None
+                           arena_bounds: Optional[ArenaBounds] = None,
+                           smoothing_radius_cm: Optional[float] = None,
                            ) -> Tuple[float, float]:
-    """Centre of the focal animal's single highest dwell-time spatial bin."""
+    """Centre of the focal animal's highest dwell-time region.
+
+    With ``smoothing_radius_cm`` set, occupancy is first convolved with a
+    **uniform disc of that radius**, so the returned bin centre is the point
+    whose radius-``smoothing_radius_cm`` disc holds the most dwell time. Pass the
+    stratum radius you intend to use and the centre then maximises exactly the
+    quantity the control is short of — retained seconds — instead of chasing a
+    single tall bin, which a raw argmax will happily do on one tracking glitch.
+    ``compute_social_place_fields`` passes ``self_stratum_radius_cm`` here.
+
+    Left at ``None`` the occupancy is unsmoothed and this is a plain argmax over
+    single bins; that is mostly useful for inspecting the raw dwell peak.
+
+    Note the result is quantised to the bin grid either way, and that occupancy
+    is **not** speed-gated, so the winner is wherever the animal spent the most
+    wall-clock time — typically wherever it rests.
+    """
     t = focal_xy["t"].to_numpy(dtype=np.float64)
     x = focal_xy["x"].to_numpy(dtype=np.float64)
     y = focal_xy["y"].to_numpy(dtype=np.float64)
@@ -233,6 +262,14 @@ def modal_occupancy_center(focal_xy: pd.DataFrame, bin_size_cm: float = 5.0,
     ix = np.clip(np.digitize(x, x_edges) - 1, 0, n_x - 1)
     iy = np.clip(np.digitize(y, y_edges) - 1, 0, n_y - 1)
     np.add.at(occ, (iy, ix), dt)
+
+    if smoothing_radius_cm is not None and smoothing_radius_cm > 0:
+        from scipy.ndimage import convolve
+        # Total dwell time inside the candidate disc centred on each bin. Zero
+        # padding is correct rather than merely convenient: there is no
+        # occupancy outside the arena, so edge discs really do hold less.
+        occ = convolve(occ, _disc_kernel(smoothing_radius_cm, bin_size_cm),
+                       mode="constant", cval=0.0)
 
     py, px = np.unravel_index(int(np.argmax(occ)), occ.shape)
     return (float(0.5 * (x_edges[px] + x_edges[px + 1])),
@@ -1010,8 +1047,9 @@ def compute_social_place_fields(
     targets on Skaggs bits/spike).
 
     Setting ``self_stratum_radius_cm`` restricts every map to samples where the
-    focal animal sat within that radius of ``self_stratum_center`` (default: its
-    modal dwell-time bin), which is the self-position confound control described
+    focal animal sat within that radius of ``self_stratum_center`` (default: the
+    bin whose disc of that same radius holds the most focal dwell time, via
+    :func:`modal_occupancy_center`), which is the confound control described
     in the module docstring — see :func:`self_position_stratum`. Two notes on
     reading the output under a stratum: the **self** target is then a positive
     control that is *expected* to collapse, since the focal is confined by
@@ -1066,7 +1104,12 @@ def compute_social_place_fields(
                 f"{focal_animal!r}, which has none in session {session_id}."
             )
         if stratum_center is None:
-            stratum_center = modal_occupancy_center(focal_df, bin_size_cm, arena_bounds)
+            # Disc kernel matched to the stratum radius, so the centre maximises
+            # the dwell time the stratum will actually retain.
+            stratum_center = modal_occupancy_center(
+                focal_df, bin_size_cm, arena_bounds,
+                smoothing_radius_cm=self_stratum_radius_cm,
+            )
         if null_method == "circular_shift":
             logger.warning(
                 "null_method='circular_shift' under a self-position stratum gives "

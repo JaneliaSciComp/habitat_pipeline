@@ -598,6 +598,70 @@ class TestSelfPositionStratum:
         assert abs(cx - 12.5) <= BIN
         assert abs(cy - 67.5) <= BIN
 
+    def test_smoothed_center_ignores_an_isolated_spike_bin(self):
+        """A raw argmax chases one tall bin; the disc kernel wants a real region.
+
+        The glitch bin holds more dwell than any single bin of the broad patch,
+        but its neighbourhood is empty, so a radius-matched disc prefers the
+        patch — which is what the stratum will actually retain.
+        """
+        n_patch, n_glitch = 4000, 700
+        rng = np.random.default_rng(700)
+        # Broad patch of moderate dwell around (60, 60).
+        px = 60.0 + rng.uniform(-8, 8, n_patch)
+        py = 60.0 + rng.uniform(-8, 8, n_patch)
+        # Single-bin glitch at (17.5, 17.5): more dwell than any one patch bin.
+        gx = np.full(n_glitch, 17.5)
+        gy = np.full(n_glitch, 17.5)
+        x = np.concatenate([px, gx])
+        y = np.concatenate([py, gy])
+        t = np.arange(x.size) * DT
+        xy = pd.DataFrame({"t": t, "x": x, "y": y, "speed": np.zeros(x.size)})
+
+        raw = modal_occupancy_center(xy, BIN, ARENA)
+        smoothed = modal_occupancy_center(xy, BIN, ARENA, smoothing_radius_cm=10.0)
+        assert raw == (17.5, 17.5)
+        assert np.hypot(smoothed[0] - 60.0, smoothed[1] - 60.0) <= 2 * BIN
+
+    def test_smoothed_center_retains_at_least_as_much_dwell(self):
+        """The disc kernel maximises retained seconds, which is the binding cost."""
+        xy = _make_xy(n=20000, seed=701)
+        radius = 10.0
+        raw = modal_occupancy_center(xy, BIN, ARENA)
+        smoothed = modal_occupancy_center(xy, BIN, ARENA,
+                                          smoothing_radius_cm=radius)
+        _, d_raw = self_position_stratum(xy, xy["t"].to_numpy(), radius_cm=radius,
+                                         center=raw, bin_size_cm=BIN,
+                                         arena_bounds=ARENA)
+        _, d_smooth = self_position_stratum(xy, xy["t"].to_numpy(), radius_cm=radius,
+                                            center=smoothed, bin_size_cm=BIN,
+                                            arena_bounds=ARENA)
+        assert d_smooth["retained_seconds"] >= d_raw["retained_seconds"]
+
+    def test_disc_kernel_shape_tracks_the_radius(self):
+        from ephys.social_spatial_fields import _disc_kernel
+        k = _disc_kernel(10.0, 5.0)          # radius = 2 bins
+        assert k.shape == (5, 5)
+        assert k[2, 2] == 1.0                 # centre
+        assert k[0, 0] == 0.0                 # corner is sqrt(8) > 2 bins away
+        assert k[0, 2] == 1.0                 # 2 bins straight up is inside
+        # Sub-bin radius degenerates to the identity, i.e. a raw argmax.
+        assert _disc_kernel(1.0, 5.0).shape == (1, 1)
+
+    def test_sweep_center_uses_the_stratum_radius(self):
+        """The sweep must resolve its centre with the radius it will restrict by."""
+        tr = _three_animal_tracking(n=6000)
+        spikes = _poisson_spikes_from_field(
+            tr["A"], center=(40.0, 40.0), sigma=8.0, peak_hz=25.0,
+            base_hz=0.5, seed=702)
+        radius = 14.0
+        res = _sweep(_make_ks([spikes]), tr, focal="A", n_shuffles=5,
+                     null_method="position_shuffle", min_n_spikes=10,
+                     self_stratum_radius_cm=radius)
+        expected = modal_occupancy_center(
+            _make_xy(n=6000, seed=100), BIN, ARENA, smoothing_radius_cm=radius)
+        assert res.parameters["self_stratum_center"] == expected
+
     def test_samples_in_a_tracking_gap_are_excluded(self):
         # Focal sits at the centre, but its tracking has a 10 s hole.
         t = np.concatenate([np.arange(0, 5, DT), np.arange(15, 20, DT)])

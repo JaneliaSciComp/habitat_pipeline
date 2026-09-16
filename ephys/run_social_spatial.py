@@ -198,7 +198,7 @@ def main(argv: Optional[list] = None) -> int:
             speed_filter_subject=args.speed_filter_subject,
             n_shuffles=args.n_shuffles, null_method=args.null_method,
             min_n_spikes=args.min_n_spikes, use_quality_cells=args.use_quality_cells,
-            t_window_ephys=t_window, seed=args.seed,
+            t_window_ephys=t_window, seed=args.seed, progress=True,
         )
     except Exception as e:
         logger.error("Analysis failed: %s", e)

@@ -72,7 +72,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Literal, Optional, Tuple, TYPE_CHECKING
+from typing import Callable, Dict, List, Literal, Optional, Tuple, Union, TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -168,6 +168,67 @@ class StratumComparison:
     unrestricted: SocialFieldResults
     stratified: SocialFieldResults
     parameters: dict
+
+
+# ---------------------------------------------------------------------------
+# Progress reporting
+# ---------------------------------------------------------------------------
+
+#: ``False``/``None`` for silence, ``True`` for a bar, or ``fn(done, total, label)``.
+ProgressArg = Union[bool, Callable[[int, int, str], None], None]
+
+
+class _Progress:
+    """Counts completed cell-target fits for the long sweeps.
+
+    ``True`` gives a tqdm bar, falling back to periodic logging because tqdm is
+    not a declared dependency of this project. A callable is invoked as
+    ``fn(done, total, label)`` so a host such as the Streamlit tab can drive its
+    own widget instead. The default is silence, so nothing changes for callers
+    that do not ask.
+    """
+
+    def __init__(self, total: int, label: str, mode: ProgressArg = False):
+        self.total = max(int(total), 0)
+        self.label = label
+        self.done = 0
+        self._bar = None
+        self._callback = mode if callable(mode) else None
+        self._log = False
+        # Starts at 0, not -1: the "N fits to run" line already marks the start,
+        # so the first logged tick should be 10%, not 0% after one fit.
+        self._last_decile = 0
+        if self._callback is None and mode:
+            try:
+                from tqdm.auto import tqdm
+                self._bar = tqdm(total=self.total, desc=label, unit="fit")
+            except ImportError:
+                self._log = True
+                logger.info("%s: %d cell-target fits to run.", label, self.total)
+
+    def set_label(self, label: str) -> None:
+        self.label = label
+        if self._bar is not None:
+            self._bar.set_description(label)
+
+    def update(self, n: int = 1) -> None:
+        self.done += n
+        if self._bar is not None:
+            self._bar.update(n)
+        elif self._callback is not None:
+            self._callback(self.done, self.total, self.label)
+        elif self._log and self.total:
+            decile = int(10 * self.done / self.total)
+            if decile > self._last_decile:
+                self._last_decile = decile
+                logger.info("%s: %d%% (%d/%d)", self.label,
+                            int(100 * self.done / self.total),
+                            self.done, self.total)
+
+    def close(self) -> None:
+        if self._bar is not None:
+            self._bar.close()
+            self._bar = None
 
 
 # ---------------------------------------------------------------------------
@@ -1030,6 +1091,7 @@ def compute_social_place_fields(
     self_stratum_radius_cm: Optional[float] = None,
     self_stratum_center: Optional[Tuple[float, float]] = None,
     self_stratum_max_gap_sec: float = 1.0,
+    progress: ProgressArg = False,
 ) -> SocialFieldResults:
     """Compute social place fields for every focal cell over every target animal.
 
@@ -1061,6 +1123,9 @@ def compute_social_place_fields(
     The FDR family here is targets within a cell, not cells. It does not control
     the false-discovery rate over the cell population; take the denominator for
     any population claim from ``LabNotebook.family_denominator``.
+
+    ``progress`` reports completed cell-target fits: ``True`` for a bar, or a
+    ``fn(done, total, label)`` callable to drive your own widget. Off by default.
     """
     from ingestion.kilosort_data_import import _DEFAULT_QUALITY_THRESHOLDS
     from video.tracking_import import resolve_tracking_on_ephys_clock
@@ -1123,11 +1188,25 @@ def compute_social_place_fields(
     signif: Dict[str, Dict[int, FieldSignificance]] = {}
     stratum_diagnostics: Dict[str, dict] = {}
 
+    # Resolve which targets are actually runnable first, so the progress total
+    # is the real number of cell-target fits rather than an optimistic one.
+    usable_targets = []
     for target in target_animals:
-        target_xy = tracking_by_animal.get(target)
-        if target_xy is None or target_xy.shape[0] < 2:
+        tdf = tracking_by_animal.get(target)
+        if tdf is None or tdf.shape[0] < 2:
             logger.warning("No usable tracking for target %s; skipping.", target)
-            continue
+        else:
+            usable_targets.append(target)
+
+    base_label = f"social fields: focal {focal_animal}"
+    if self_stratum_radius_cm is not None:
+        base_label += " [stratum]"
+    reporter = _Progress(len(usable_targets) * len(cluster_ids),
+                         base_label, progress)
+
+    for target in usable_targets:
+        target_xy = tracking_by_animal[target]
+        reporter.set_label(f"{base_label} -> {target}")
 
         if self_stratum_radius_cm is not None:
             mask, diag = self_position_stratum(
@@ -1202,6 +1281,7 @@ def compute_social_place_fields(
                     shuffle_split_half=shuffle_split_half, _prep=prep,
                     **bin_kwargs,
                 )
+            reporter.update()
 
         # Informative warning when speed gating leaves no occupancy.
         if rate_maps[target]:
@@ -1212,6 +1292,8 @@ def compute_social_place_fields(
                     "(subject=%s, threshold=%s); all rate maps are empty.",
                     target, speed_filter_subject, thr,
                 )
+
+    reporter.close()
 
     used_targets = list(rate_maps.keys())
     cell_classification = _classify_cells(
@@ -1344,6 +1426,7 @@ def compare_self_stratum_control(
     self_stratum_radius_cm: float = DEFAULT_STRATUM_RADIUS_CM,
     self_stratum_center: Optional[Tuple[float, float]] = None,
     null_method: Literal["circular_shift", "position_shuffle"] = "position_shuffle",
+    progress: ProgressArg = False,
     **kwargs,
 ) -> StratumComparison:
     """Run the sweep with and without the self-position restriction, and diff them.
@@ -1372,16 +1455,17 @@ def compare_self_stratum_control(
     common = dict(kwargs)
     common.pop("self_stratum_radius_cm", None)
 
+    # Two sequential sweeps, so two bars; the second labels itself [stratum].
     res_full = compute_social_place_fields(
         ks, tracking, sync, focal_animal, target_animals,
-        null_method=null_method, **common,
+        null_method=null_method, progress=progress, **common,
     )
     res_strat = compute_social_place_fields(
         ks, tracking, sync, focal_animal, target_animals,
         null_method=null_method,
         self_stratum_radius_cm=self_stratum_radius_cm,
         self_stratum_center=self_stratum_center,
-        **common,
+        progress=progress, **common,
     )
 
     alpha = res_full.parameters["sig_alpha"]

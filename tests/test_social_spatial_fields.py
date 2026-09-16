@@ -416,6 +416,73 @@ def _correlated_pair(n, alpha, seed_a=1, seed_g=2):
     return A, B
 
 
+class TestProgressReporting:
+    def test_callback_receives_every_cell_target_fit(self):
+        tr = _three_animal_tracking(n=3000)
+        ks = _make_ks([
+            _poisson_spikes_from_field(tr["A"], center=(40.0, 40.0), sigma=8.0,
+                                       peak_hz=25.0, base_hz=0.5, seed=800),
+            _poisson_spikes_from_field(tr["B"], center=(40.0, 40.0), sigma=8.0,
+                                       peak_hz=25.0, base_hz=0.5, seed=801),
+        ])
+        calls = []
+        _sweep(ks, tr, focal="A", n_shuffles=3, min_n_spikes=10,
+               progress=lambda done, total, label: calls.append((done, total, label)))
+
+        # 2 cells x 3 targets, reported once each, counting up to the total.
+        assert len(calls) == 6
+        assert [c[0] for c in calls] == [1, 2, 3, 4, 5, 6]
+        assert {c[1] for c in calls} == {6}
+        assert all("focal A" in c[2] for c in calls)
+
+    def test_total_excludes_targets_without_tracking(self):
+        """The total must be real fits, not an optimistic target count."""
+        tr = _three_animal_tracking(n=3000)
+        spikes = _poisson_spikes_from_field(
+            tr["A"], center=(40.0, 40.0), sigma=8.0, peak_hz=25.0,
+            base_hz=0.5, seed=802)
+        calls = []
+        # 'D' has no tracking at all, so it cannot contribute a fit.
+        _sweep(_make_ks([spikes]), tr, focal="A", n_shuffles=3, min_n_spikes=10,
+               target_animals=["A", "B", "C", "D"],
+               progress=lambda d, t, l: calls.append((d, t)))
+        assert {c[1] for c in calls} == {3}
+        assert len(calls) == 3
+
+    def test_stratified_run_labels_itself(self):
+        tr = _three_animal_tracking(n=3000)
+        spikes = _poisson_spikes_from_field(
+            tr["A"], center=(40.0, 40.0), sigma=8.0, peak_hz=25.0,
+            base_hz=0.5, seed=803)
+        labels = []
+        _sweep(_make_ks([spikes]), tr, focal="A", n_shuffles=3, min_n_spikes=10,
+               null_method="position_shuffle", self_stratum_radius_cm=15.0,
+               self_stratum_center=(40.0, 40.0),
+               progress=lambda d, t, l: labels.append(l))
+        assert all("[stratum]" in l for l in labels)
+
+    def test_progress_is_silent_by_default(self, capsys):
+        tr = _three_animal_tracking(n=2000)
+        spikes = _poisson_spikes_from_field(
+            tr["A"], center=(40.0, 40.0), sigma=8.0, peak_hz=25.0,
+            base_hz=0.5, seed=804)
+        _sweep(_make_ks([spikes]), tr, focal="A", n_shuffles=3, min_n_spikes=10)
+        out = capsys.readouterr()
+        assert out.out == "" and out.err == ""
+
+    def test_bar_mode_runs_and_results_are_unchanged(self):
+        tr = _three_animal_tracking(n=3000)
+        spikes = _poisson_spikes_from_field(
+            tr["A"], center=(40.0, 40.0), sigma=8.0, peak_hz=25.0,
+            base_hz=0.5, seed=805)
+        quiet = _sweep(_make_ks([spikes]), tr, focal="A", n_shuffles=5,
+                       min_n_spikes=10)
+        loud = _sweep(_make_ks([spikes]), tr, focal="A", n_shuffles=5,
+                      min_n_spikes=10, progress=True)
+        for t in ["A", "B", "C"]:
+            assert quiet.signif[t][0].p_skaggs == loud.signif[t][0].p_skaggs
+
+
 class TestFastNullPath:
     """The null loop hoists spike-independent work out; results must not move.
 

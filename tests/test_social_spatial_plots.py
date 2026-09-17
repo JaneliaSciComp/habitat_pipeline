@@ -127,6 +127,108 @@ def test_summary_dashboard(results):
 
 
 # ---------------------------------------------------------------------------
+# bits/spike vs firing rate (effect-size bias panel)
+# ---------------------------------------------------------------------------
+
+def _stub_results(stats, focal="A", targets=("A", "B")):
+    # rate_maps is needed even though target_animals is set: _targets passes
+    # `list(results.rate_maps.keys())` as dict.get's default, which Python
+    # evaluates eagerly.
+    return SimpleNamespace(
+        parameters={"focal_animal": focal, "target_animals": list(targets)},
+        stats=stats,
+        rate_maps={},
+    )
+
+
+def _fs(rate, bits):
+    return SimpleNamespace(mean_rate_hz=rate, skaggs_bits_per_spike=bits)
+
+
+def test_bits_vs_rate_draws_one_series_per_target(results):
+    fig, ax = plt.subplots()
+    sp._draw_bits_vs_rate(ax, results)
+    assert len(ax.collections) == 3           # A, B, C
+    assert ax.get_xlabel() == "mean rate (Hz)"
+    assert ax.get_ylabel() == "Skaggs bits/spike"
+    # Colour-matched per-target rho annotations double as the legend.
+    texts = [t.get_text() for t in ax.texts]
+    assert len(texts) == 3
+    assert any("(self)" in t for t in texts)
+    assert all(("rho" in t) or ("n/a" in t) for t in texts)
+    plt.close(fig)
+
+
+def test_bits_vs_rate_reports_rho_per_target_not_pooled():
+    """Pooling across targets would average a real effect with null ones."""
+    stats = {
+        # Rising with rate.
+        "A": {i: _fs(float(i + 1), 0.1 * (i + 1)) for i in range(6)},
+        # Falling with rate: the low-spike inflation signature.
+        "B": {i: _fs(float(i + 1), 1.0 / (i + 1)) for i in range(6)},
+    }
+    fig, ax = plt.subplots()
+    sp._draw_bits_vs_rate(ax, _stub_results(stats))
+    texts = [t.get_text() for t in ax.texts]
+    assert len(texts) == 2
+    assert "+1.00" in texts[0]        # A perfectly increasing
+    assert "-1.00" in texts[1]        # B perfectly decreasing
+    plt.close(fig)
+
+
+def test_bits_vs_rate_skips_targets_without_a_positive_rate():
+    """A target whose maps are empty (zero occupancy) contributes no points."""
+    stats = {"A": {0: _fs(1.0, 0.5), 1: _fs(2.0, 0.3)},
+             "B": {0: _fs(0.0, 0.0), 1: _fs(np.nan, np.nan)}}
+    fig, ax = plt.subplots()
+    sp._draw_bits_vs_rate(ax, _stub_results(stats))
+    assert len(ax.collections) == 1
+    plt.close(fig)
+
+
+def test_bits_vs_rate_survives_having_no_data():
+    fig, ax = plt.subplots()
+    sp._draw_bits_vs_rate(ax, _stub_results({"A": {}, "B": {}}))
+    assert not ax.collections
+    assert ax.get_xscale() == "linear"
+    plt.close(fig)
+
+
+def test_bits_vs_rate_uses_log_x_only_for_a_wide_range():
+    wide = {"A": {i: _fs(10.0 ** i, 0.5) for i in range(4)}}
+    narrow = {"A": {i: _fs(1.0 + 0.1 * i, 0.5) for i in range(4)}}
+    for stats, expected in ((wide, "log"), (narrow, "linear")):
+        fig, ax = plt.subplots()
+        sp._draw_bits_vs_rate(ax, _stub_results(stats, targets=("A",)))
+        assert ax.get_xscale() == expected
+        plt.close(fig)
+
+
+def test_summary_dashboard_includes_the_rate_panel(results):
+    fig = sp.plot_social_place_summary(results)
+    # 3 target maps on top + 4 population panels below.
+    assert len(fig.axes) == 7
+    assert "bits/spike vs rate" in [a.get_title() for a in fig.axes]
+    plt.close(fig)
+
+
+def test_summary_dashboard_rows_are_sized_independently():
+    """4 targets must not squeeze or gap the 4 fixed bottom panels."""
+    tr = {k: _xy(4000, s) for k, s in zip("ABCD", (1, 2, 3, 4))}
+    ks = SimpleNamespace(ks_ids=[0], spike_times_by_cell=[_spikes(tr["B"], (40, 40), 9)])
+    res = compute_social_place_fields(
+        ks, _video_tracking(tr), _StubSync(), focal_animal="A",
+        target_animals=list("ABCD"), pixels_per_cm=None, bin_size_cm=5.0,
+        smoothing_sigma_cm=5.0, speed_filter_subject="none", n_shuffles=5,
+        min_n_spikes=10, use_quality_cells=False, arena_bounds=ARENA, seed=0,
+    )
+    fig = sp.plot_social_place_summary(res)
+    assert len(fig.axes) == 8                 # 4 maps + 4 panels
+    assert "bits/spike vs rate" in [a.get_title() for a in fig.axes]
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
 # Focal-position overlay
 # ---------------------------------------------------------------------------
 

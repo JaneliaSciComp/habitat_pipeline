@@ -19,6 +19,7 @@ section of ``ephys/social_spatial_fields.py``.
 
 from __future__ import annotations
 
+from math import gcd
 from typing import Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
@@ -155,6 +156,65 @@ def overlay_focal_position(ax, results: SocialFieldResults, *,
     ax.plot(xc[px], yc[py], marker="+", color=color, ms=9, mew=linewidth,
             zorder=6, label=f"focal {focal} occupancy" if label else None)
     return True
+
+
+def _draw_bits_vs_rate(ax, results: SocialFieldResults) -> None:
+    """Skaggs bits/spike against mean firing rate, one point per cell and target.
+
+    This is the bias check on the effect size. Skaggs information is inflated
+    when a rate map rests on few spikes — noise in a sparsely sampled map reads
+    as structure — so a cloud that slopes *downward* with firing rate is partly
+    measuring that bias rather than tuning. A strongly negative rho means the
+    high-bits cells are largely the quiet ones, and the p-values (each built
+    against its own spike count) are what to trust instead of the magnitudes.
+
+    Points are per ``(cell, target)`` rather than per cell, because the bias
+    follows the spike count actually used in that map, and the speed gate keeps
+    a different subset of time for each target. Spearman rho is reported **per
+    target**, colour-matched, and doubles as the legend: pooling it across
+    targets would average a signal-bearing target together with null ones and
+    report something close to zero either way.
+    """
+    focal = _focal(results)
+    cmap = plt.get_cmap("tab10")
+    from scipy.stats import spearmanr
+    annotations = []
+    any_points = False
+    lo, hi = np.inf, 0.0
+
+    for j, t in enumerate(_targets(results)):
+        per_cell = results.stats.get(t, {})
+        rate = np.array([fs.mean_rate_hz for fs in per_cell.values()], dtype=float)
+        bits = np.array([fs.skaggs_bits_per_spike for fs in per_cell.values()],
+                        dtype=float)
+        ok = np.isfinite(rate) & np.isfinite(bits) & (rate > 0)
+        if not ok.any():
+            continue
+        any_points = True
+        colour = cmap(j % 10)
+        ax.scatter(rate[ok], bits[ok], s=18, alpha=0.75, color=colour)
+        lo, hi = min(lo, rate[ok].min()), max(hi, rate[ok].max())
+
+        label = f"{t} (self)" if t == focal else str(t)
+        # rho is undefined on a constant input (e.g. a target whose maps are all
+        # flat, so every bits/spike is 0); guard rather than let scipy warn.
+        defined = (ok.sum() >= 3 and np.ptp(rate[ok]) > 0 and np.ptp(bits[ok]) > 0)
+        # [0] rather than .statistic: scipy floor here is 1.7.
+        rho = spearmanr(rate[ok], bits[ok])[0] if defined else np.nan
+        txt = f"{label}  $\\rho$={rho:+.2f}" if np.isfinite(rho) else f"{label}  n/a"
+        annotations.append((txt, colour))
+
+    ax.set_xlabel("mean rate (Hz)")
+    ax.set_ylabel("Skaggs bits/spike")
+    ax.set_title("bits/spike vs rate")
+    if not any_points:
+        return
+
+    if lo > 0 and hi / lo > 10:
+        ax.set_xscale("log")      # firing rates span orders of magnitude
+    for k, (txt, colour) in enumerate(annotations):
+        ax.annotate(txt, xy=(0.04, 0.94 - 0.08 * k), xycoords="axes fraction",
+                    fontsize=7, color=colour)
 
 
 def _focal_overlay_note(results: SocialFieldResults) -> str:
@@ -398,11 +458,17 @@ def plot_field_stability(results: SocialFieldResults, save_path=None, figsize=(9
 def plot_social_place_summary(results: SocialFieldResults, cluster_id: Optional[int] = None,
                               save_path=None, figsize=(15, 9),
                               show_focal: bool = True):
-    """Six-panel dashboard: example grid, classification, stability, Skaggs-vs-shuffle.
+    """Dashboard: one example rate map per target, over four population panels.
 
     Analog of ``ephys.decoding_plots.plot_decoding_summary``. When ``cluster_id``
     is None, the top cell by max Skaggs across targets is used for the example
-    rate-map row.
+    rate-map row. The bottom row is classification counts, self-vs-partner
+    tuning, split-half stability, and bits/spike against firing rate (the
+    effect-size bias check — see :func:`_draw_bits_vs_rate`).
+
+    The two rows divide the same grid by different colspans, so the top sizes
+    itself to the number of targets without constraining the four fixed panels
+    below and without either row leaving a gap.
     """
     targets = _targets(results)
     focal = _focal(results)
@@ -414,8 +480,20 @@ def plot_social_place_summary(results: SocialFieldResults, cluster_id: Optional[
             idx = df[bits_cols].max(axis=1).idxmax()
             cluster_id = int(df.loc[idx, "cluster_id"])
 
+    # One flat gridspec whose column count is the LCM of the two row widths, so
+    # each row divides evenly by colspan and neither leaves a gap. Nested
+    # gridspecs would be the obvious alternative, but tight_layout cannot handle
+    # those and warns that its result may be wrong.
     fig = plt.figure(figsize=figsize)
-    gs = fig.add_gridspec(2, max(len(targets), 3), height_ratios=[1.1, 1.0])
+    n_top = max(len(targets), 1)
+    n_bottom = 4
+    n_cols = n_top * n_bottom // gcd(n_top, n_bottom)
+    top_span = n_cols // n_top
+    bot_span = n_cols // n_bottom
+    gs = fig.add_gridspec(2, n_cols, height_ratios=[1.1, 1.0])
+
+    def _bottom_ax(slot):
+        return fig.add_subplot(gs[1, slot * bot_span:(slot + 1) * bot_span])
 
     # Top row: example cluster's rate maps per target.
     vmax = None
@@ -424,7 +502,7 @@ def plot_social_place_summary(results: SocialFieldResults, cluster_id: Optional[
         finite = [np.nanmax(m.rates) for m in ms if np.isfinite(m.rates).any()]
         vmax = float(np.nanmax(finite)) if finite else None
     for j, t in enumerate(targets):
-        ax = fig.add_subplot(gs[0, j])
+        ax = fig.add_subplot(gs[0, j * top_span:(j + 1) * top_span])
         if cluster_id is not None and cluster_id in results.rate_maps[t]:
             fs = results.stats[t][cluster_id]
             self_tag = " (self)" if t == focal else ""
@@ -438,8 +516,8 @@ def plot_social_place_summary(results: SocialFieldResults, cluster_id: Optional[
         else:
             ax.axis("off")
 
-    # Bottom row: classification bar, self/partner scatter, stability.
-    ax_bar = fig.add_subplot(gs[1, 0])
+    # Bottom row: classification, self/partner, stability, bits-vs-rate.
+    ax_bar = _bottom_ax(0)
     counts = df["category"].value_counts() if not df.empty else {}
     cats = [c for c in _CATEGORY_ORDER if c in getattr(counts, "index", [])]
     ax_bar.bar(cats, [counts[c] for c in cats],
@@ -447,7 +525,7 @@ def plot_social_place_summary(results: SocialFieldResults, cluster_id: Optional[
     ax_bar.set_title("classification")
     ax_bar.tick_params(axis="x", rotation=45)
 
-    ax_sc = fig.add_subplot(gs[1, 1])
+    ax_sc = _bottom_ax(1)
     self_col = f"bits_per_spike_{focal}"
     partners = [t for t in targets if t != focal]
     partner_cols = [f"bits_per_spike_{p}" for p in partners if f"bits_per_spike_{p}" in df.columns]
@@ -462,7 +540,7 @@ def plot_social_place_summary(results: SocialFieldResults, cluster_id: Optional[
         ax_sc.axis("off")
     ax_sc.set_title("self vs partner")
 
-    ax_stab = fig.add_subplot(gs[1, 2]) if len(targets) >= 3 else fig.add_subplot(gs[1, -1])
+    ax_stab = _bottom_ax(2)
     data, labels = [], []
     for t in targets:
         vals = [fs.split_half_corr for fs in results.stats[t].values()
@@ -477,6 +555,8 @@ def plot_social_place_summary(results: SocialFieldResults, cluster_id: Optional[
     for y in (0.3, 0.5):
         ax_stab.axhline(y, ls="--", color="0.5", lw=0.8)
     ax_stab.set_title("split-half stability")
+
+    _draw_bits_vs_rate(_bottom_ax(3), results)
 
     suptitle = (f"{_analysis_title(results)} — focal {focal} "
                 f"(example cluster {cluster_id})")

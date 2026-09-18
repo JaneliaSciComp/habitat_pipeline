@@ -873,6 +873,16 @@ def field_significance(
     st = np.asarray(spike_times, dtype=np.float64)
     true_skaggs, true_sparsity, true_split = _stats(st, target_xy)
 
+    # Only spikes inside the analysis window may enter a surrogate. The
+    # circular shift is a modular wrap onto [w0, w1], so handing it the whole
+    # train folds every spike from the rest of the recording into the tracked
+    # window: on 20251210 the recording spans 17305 s against a 1797 s tracking
+    # window, which put 5-13x more spikes in each surrogate map than in the
+    # observed one. Denser maps are smoother, so their Skaggs is lower and the
+    # observed value beat every shuffle -- all 377 cells came out
+    # "conjunctive". See HZ-STAT-016.
+    st_window = st[(st >= w0) & (st <= w1)]
+
     sh_skaggs = np.full(n_shuffles, np.nan)
     sh_sparsity = np.full(n_shuffles, np.nan)
     sh_split = np.full(n_shuffles, np.nan)
@@ -900,7 +910,7 @@ def field_significance(
         if null_method == "circular_shift":
             # Positions are untouched, so occupancy and its smoothing are the
             # observed ones and need no recomputing.
-            sp_i = w0 + np.mod(st - w0 + tau, span)
+            sp_i = w0 + np.mod(st_window - w0 + tau, span)
             idx = _spike_sample_indices(prep, sp_i)
             occ_i, occ_s_i = prep.occupancy, prep.occ_smoothed
             iy_i, ix_i = prep.iy, prep.ix
@@ -1149,7 +1159,9 @@ def compute_social_place_fields(
         logger.warning(
             "null_method='position_shuffle' without a self-position stratum is "
             "more exposed to slow firing-rate drift than 'circular_shift' "
-            "(HZ-STAT-015: 41.7%% vs 12.5%% of rate-drifting but spatially "
+            # Single '%' on purpose: logging only collapses '%%' when args are
+            # supplied, and this call passes none.
+            "(HZ-STAT-015: 41.7% vs 12.5% of rate-drifting but spatially "
             "untuned cells reached p<=0.05 on a 1797 s window). "
             "null_method='auto' picks per run."
         )

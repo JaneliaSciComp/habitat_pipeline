@@ -456,6 +456,16 @@ def _flat_poisson(xy, rate_hz, seed):
     return np.sort(np.concatenate(out)) if out else np.array([])
 
 
+def _flat_poisson_over(t0, t1, rate_hz, seed):
+    """Constant-rate spikes over an arbitrary span, not tied to a tracking frame.
+
+    Needed to exercise the realistic case where ephys outlasts tracking.
+    """
+    rng = np.random.default_rng(seed)
+    n = rng.poisson(rate_hz * (t1 - t0))
+    return np.sort(rng.uniform(t0, t1, size=n))
+
+
 class TestNullCalibration:
     """A null that flags untuned cells is worse than no test at all.
 
@@ -516,6 +526,55 @@ class TestNullCalibration:
         ps = self._p_values("position_shuffle", gated=True, stratum_radius=15.0)
         assert ps.size >= 1
         assert (ps > 1.0 / (self.N_SHUF + 1)).all(), np.round(ps, 4).tolist()
+
+    @pytest.mark.parametrize("null_method", ["circular_shift", "position_shuffle"])
+    def test_calibrated_when_the_recording_outlasts_the_tracking(self, null_method):
+        """HZ-STAT-016: tracking often covers a fraction of the recording.
+
+        On 20251210 the spike train spans 17305 s against a 1797 s tracking
+        window. ``circular_shift`` is a modular wrap onto that window, so unless
+        the train is pre-filtered every spike from the rest of the session folds
+        into it — 5-13x more spikes per surrogate than the observed map, hence
+        smoother surrogates, lower null Skaggs, and every cell significant. The
+        other calibration tests here cannot see this: they generate spikes on the
+        tracking frame's own time base, so nothing lies outside the window.
+        """
+        xy = _stop_go_walk(12000, seed=940)
+        t0, t1 = float(xy["t"].min()), float(xy["t"].max())
+        span = t1 - t0
+        # Recording ~10x the tracked window, tracking sitting in the middle.
+        spikes = _flat_poisson_over(t0 - 4.5 * span, t1 + 4.5 * span, 5.0, 941)
+        assert np.mean((spikes >= t0) & (spikes <= t1)) < 0.2, "premise broken"
+
+        sig = field_significance(
+            spikes, xy, n_shuffles=self.N_SHUF, null_method=null_method, seed=0,
+            bin_size_cm=BIN, arena_bounds=ARENA, smoothing_sigma_cm=5.0,
+            speed_xy=xy[["t", "speed"]], speed_threshold_cms=5.0)
+        assert sig.p_skaggs > 1.0 / (self.N_SHUF + 1), (
+            f"{null_method}: untuned cell at the permutation floor, "
+            f"p={sig.p_skaggs}")
+
+    def test_surrogates_do_not_gain_spikes_from_outside_the_window(self):
+        """The mechanical invariant, and the size of the bug it guards."""
+        xy = _stop_go_walk(12000, seed=942)
+        t0, t1 = float(xy["t"].min()), float(xy["t"].max())
+        span = t1 - t0
+        spikes = _flat_poisson_over(t0 - 4.5 * span, t1 + 4.5 * span, 5.0, 943)
+        kw = dict(bin_size_cm=BIN, arena_bounds=ARENA, smoothing_sigma_cm=5.0,
+                  speed_xy=xy[["t", "speed"]], speed_threshold_cms=5.0)
+        prep = _prep_from_kwargs(xy, kw)
+
+        observed = _spike_sample_indices(prep, spikes).size
+        in_window = spikes[(spikes >= t0) & (spikes <= t1)]
+        shifted = t0 + np.mod(in_window - t0 + 0.4 * span, span)
+        surrogate = _spike_sample_indices(prep, shifted).size
+        assert 0.5 < surrogate / observed < 2.0, (
+            f"surrogate keeps {surrogate} spikes vs {observed} observed")
+
+        # The unfiltered form -- what the bug did -- really does fold the whole
+        # recording in, so this guard is not hypothetical.
+        folded = t0 + np.mod(spikes - t0 + 0.4 * span, span)
+        assert _spike_sample_indices(prep, folded).size > 4 * observed
 
 
 class TestAutoNullSelection:
@@ -743,6 +802,9 @@ class TestFastNullPath:
             return spatial_information(rm)[0], spatial_sparsity(rm)
 
         st = np.asarray(spike_times, dtype=np.float64)
+        # Only in-window spikes may enter a surrogate, or the modular wrap folds
+        # the rest of the recording into the analysis window (HZ-STAT-016).
+        st_w = st[(st >= w0) & (st <= w1)]
         true_sk, true_sp = _stats(st, target_xy)
         sk = np.full(n_shuffles, np.nan)
         spar = np.full(n_shuffles, np.nan)
@@ -754,7 +816,7 @@ class TestFastNullPath:
         for i in range(n_shuffles):
             tau = rng.uniform(0.1 * span, 0.9 * span)
             if null_method == "circular_shift":
-                sp_i, xy_i = w0 + np.mod(st - w0 + tau, span), target_xy
+                sp_i, xy_i = w0 + np.mod(st_w - w0 + tau, span), target_xy
             else:
                 perm = np.roll(np.arange(orig_rows.size),
                                int(round((tau / span) * orig_rows.size)))

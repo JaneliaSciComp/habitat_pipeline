@@ -1686,7 +1686,7 @@
       },
       "symptom": "A social place field is significant, stable across halves, and has no obvious artefact - but the cell's firing rate also drifts slowly across the session.",
       "mechanism": "Both nulls break the spike-position pairing by a single rigid offset, which re-pairs a slow rate drift with a different stretch of trajectory. Because the animal does not sample the arena uniformly over time, a rate that is high during one epoch concentrates spikes wherever the target happened to be then, producing real spatial structure that is temporal in origin. The observed map keeps that alignment; the surrogates do not, so the observed value wins.",
-      "consequence": "Measured on real 20251210 tracking (1797 s window) with spatially untuned Poisson trains carrying a sinusoidal rate drift: at a 600 s period, 41.7% of tests reach p <= 0.05 under position_shuffle and 12.5% under circular_shift, against a nominal 5%. At 300 s and 1200 s periods both nulls are near nominal, so the inflation depends on how the drift timescale sits against the session length.",
+      "consequence": "Measured on real 20251210 tracking (1797 s window) with spatially untuned Poisson trains carrying a sinusoidal rate drift: at a 600 s period, 41.7% of tests reach p <= 0.05 under position_shuffle and 12.5% under circular_shift, against a nominal 5%. At 300 s and 1200 s periods both nulls are near nominal, so the inflation depends on how the drift timescale sits against the session length. These figures are configuration-specific: they assume in-window spike counts comparable to the real cells and ~3 drift cycles across the window. A separate run with ~9x fewer in-window spikes showed only 2.1%, so spike count matters as much as the drift timescale.",
       "detector": {
         "type": "none",
         "note": "No automated detector. Check the cell's firing rate against session time before trusting a field; a monotonic or slowly oscillating rate is the warning sign. The self-position stratum suppresses the inflation to 2.9-6.9%, so a field that survives the stratum is far less exposed."
@@ -1703,12 +1703,73 @@
         "occurred": true,
         "date": "2026-09-17",
         "where": [
-          "found while validating the HZ-STAT-014 fix: with the speed-gate bug repaired, flat-Poisson nulls came back to 5.0% but 600 s-drift nulls remained at 31.7% unrestricted"
+          "found while validating the HZ-STAT-014 fix: with the speed-gate bug repaired, flat-Poisson nulls came back to 5.0% but 600 s-drift nulls remained at 31.7% unrestricted",
+          "re-measured 2026-09-18 after the HZ-STAT-016 fix and unchanged (41.7% / 12.5% at the 600 s period), confirming the folding bug did not contribute: that measurement generated spikes inside the tracking window only, so the modular wrap had nothing to fold in"
         ]
       },
       "references": [
         "ephys/social_spatial_fields.py::field_significance",
         "HZ-STAT-014"
+      ]
+    },
+    {
+      "id": "HZ-STAT-016",
+      "slug": "circular-shift-folds-the-whole-recording-into-the-tracking-window",
+      "title": "circular_shift wrapped out-of-window spikes into the analysis window",
+      "severity": "critical",
+      "kind": "statistical",
+      "status": "resolved",
+      "added": "2026-09-18",
+      "applies_to": {
+        "stages": [
+          "propose",
+          "run",
+          "interpret"
+        ],
+        "modules": [
+          "ephys.social_spatial_fields"
+        ],
+        "analyses": [
+          "ephys.social_spatial_fields"
+        ]
+      },
+      "symptom": "Essentially every cell comes out significant for essentially every target. The classification collapses to a single category - on 20251210 all 377 cells were 'conjunctive' and all 1131 partner tests were significant.",
+      "mechanism": "field_significance's circular_shift null is a modular wrap onto the analysis window, sp_i = w0 + mod(st - w0 + tau, span), and it was applied to the FULL spike train. Tracking usually covers a fraction of the recording, so every spike from the untracked remainder was folded into the tracked window. Surrogate maps therefore rested on far more spikes than the observed map - measured 5-13x on 20251210, whose 17305 s recording carries a 1797 s tracking window. Denser maps are smoother, so surrogate Skaggs was systematically lower and the observed value beat every shuffle.",
+      "consequence": "The null was grossly anti-conservative in proportion to how much the recording outlasts the tracking. Severity here is worse than HZ-STAT-014 because it needs no speed gate to trigger and it scales with a ratio nobody inspects.",
+      "detector": {
+        "type": "test",
+        "test": [
+          "tests/test_social_spatial_fields.py::TestNullCalibration::test_calibrated_when_the_recording_outlasts_the_tracking",
+          "tests/test_social_spatial_fields.py::TestNullCalibration::test_surrogates_do_not_gain_spikes_from_outside_the_window"
+        ],
+        "pass_if": {
+          "field": "returncode",
+          "op": "==",
+          "value": 0
+        },
+        "on_fail": "Surrogate maps are gaining spikes from outside the tracked window. Every p-value from the run is invalid; do not interpret the classification."
+      },
+      "remedies": [
+        "fixed: the train is filtered to [w0, w1] before the modular shift, so a surrogate contains exactly the spikes the observed map used",
+        "position_shuffle was never affected - it leaves spike times untouched",
+        "when writing a null, assert the surrogate retains a comparable spike count to the observed map; a plausible-looking p-value distribution is not enough"
+      ],
+      "known_gaps": [
+        "The calibration tests added for HZ-STAT-014 could not see this: they generate synthetic spikes on the tracking frame's own time base, so no spike ever lay outside the window. Null-calibration fixtures must span more than the tracked interval to be meaningful.",
+        "Tracking coverage per animal is already known to be partial and is recorded in the capability manifest as tracking.coverage_by_animal; nothing in this module reads it or warns when it is small."
+      ],
+      "evidence": {
+        "occurred": true,
+        "date": "2026-09-18",
+        "where": [
+          "ephys/social_place_fields_demo.ipynb - a 20251210 run reported 'conjunctive 377' (every quality cell) and 1131 of 1131 partner tests significant unrestricted",
+          "introduced into that notebook's unrestricted arm by switching the default to null_method='auto', which selects circular_shift when no stratum is active; the previous position_shuffle default hid it behind HZ-STAT-014"
+        ]
+      },
+      "references": [
+        "ephys/social_spatial_fields.py::field_significance",
+        "HZ-STAT-014",
+        "HZ-STAT-015"
       ]
     }
   ]

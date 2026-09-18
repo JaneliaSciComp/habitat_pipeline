@@ -438,8 +438,6 @@ class _BinPrep:
     keep: np.ndarray              # speed gate AND self-position stratum
     ix: np.ndarray                # x bin per kept sample
     iy: np.ndarray                # y bin per kept sample
-    ix_raw: np.ndarray            # x bin per *original* row (for position rolls)
-    iy_raw: np.ndarray
     sel: np.ndarray               # original-row index of each kept sample
     x_edges: np.ndarray
     y_edges: np.ndarray
@@ -526,23 +524,16 @@ def _prepare_binning(
             sp_at_t = np.interp(t, sp_t, sp_v, left=np.nan, right=np.nan)
             keep &= np.isfinite(sp_at_t) & (sp_at_t >= speed_threshold_cms)
 
-        # Digitize over every original row so a position roll can be applied as
-        # a roll of bin indices (digitize is elementwise, so rolling before or
-        # after it is identical) instead of re-digitizing each shuffle.
-        ix_raw = np.clip(np.digitize(x_all, x_edges) - 1, 0, max(n_x - 1, 0))
-        iy_raw = np.clip(np.digitize(y_all, y_edges) - 1, 0, max(n_y - 1, 0))
-        ix = ix_raw[sel]
-        iy = iy_raw[sel]
+        ix = np.clip(np.digitize(x, x_edges) - 1, 0, max(n_x - 1, 0))
+        iy = np.clip(np.digitize(y, y_edges) - 1, 0, max(n_y - 1, 0))
     else:
         dt = np.zeros(t.size)
         keep = np.zeros(t.size, dtype=bool)
-        ix_raw = np.zeros(n_rows, dtype=np.int64)
-        iy_raw = np.zeros(n_rows, dtype=np.int64)
-        ix = ix_raw[sel]
-        iy = iy_raw[sel]
+        ix = np.zeros(t.size, dtype=np.int64)
+        iy = np.zeros(t.size, dtype=np.int64)
 
     prep = _BinPrep(
-        t=t, dt=dt, keep=keep, ix=ix, iy=iy, ix_raw=ix_raw, iy_raw=iy_raw,
+        t=t, dt=dt, keep=keep, ix=ix, iy=iy,
         sel=sel, x_edges=x_edges, y_edges=y_edges, n_x=n_x, n_y=n_y,
         w0=w0, w1=w1, arena_bounds=arena_bounds, sigma_bins=sigma_bins,
         min_occupancy_sec=min_occupancy_sec, has_stratum=stratum is not None,
@@ -825,6 +816,14 @@ def field_significance(
     rolls the target ``(x, y)`` relative to the spikes. In both cases the shift
     magnitude is drawn from ``[0.1 T, 0.9 T]`` of the window.
 
+    ``position_shuffle`` rolls positions **only within the retained samples** —
+    those passing the speed gate and any self-position stratum — so every
+    surrogate keeps the observed occupancy multiset and the observed retained
+    spike count, making the null a pure re-pairing. Rolling the whole
+    trajectory instead is badly anti-conservative whenever a gate is active
+    (``HZ-STAT-014``); it was measured putting 93% of *spatially untuned*
+    Poisson cells below p = 0.05.
+
     For each shuffle the Skaggs bits/spike and sparsity are recomputed.
     P-values are one-tailed in the meaningful direction: ``p_skaggs`` and
     ``p_split`` are ``fraction(shuffle >= true)``; ``p_sparsity`` is
@@ -861,7 +860,6 @@ def field_significance(
     else:
         w0, w1 = t_window
     span = max(w1 - w0, 1e-9)
-    median_dt = float(np.median(np.diff(t))) if t.size > 1 else 1.0
 
     if null_method not in ("circular_shift", "position_shuffle"):
         raise ValueError(f"Unknown null_method: {null_method!r}")
@@ -880,8 +878,18 @@ def field_significance(
     sh_split = np.full(n_shuffles, np.nan)
 
     prep = _prep if _prep is not None else _prep_from_kwargs(target_xy, rate_map_kwargs)
-    stratum0 = read_stratum_mask(target_xy)
-    roll_rows = np.flatnonzero(stratum0) if stratum0 is not None else None
+    # The roll acts ONLY on the retained samples — those surviving the speed
+    # gate and any self-position stratum. Rolling the full trajectory instead
+    # would pair retained times with positions the gate had excluded, so each
+    # surrogate's occupancy would be the target's distribution over *all* times
+    # (dominated by wherever it rests) while the observed map's is its
+    # distribution *while moving*. That mismatch lets one bin define r-bar in
+    # the surrogates only, suppressing their Skaggs, and the observed value then
+    # beats essentially every shuffle: measured at 93% of spatially untuned
+    # Poisson cells reaching p <= 0.05. Rolling within the retained set makes
+    # the null a pure re-pairing, preserving both the occupancy multiset and the
+    # retained spike count. See HZ-STAT-014.
+    roll_rows = np.flatnonzero(prep.keep)
     # Spike times are fixed under position_shuffle, so their nearest-sample
     # indices are too — resolve them once instead of per shuffle.
     idx_fixed = (_spike_sample_indices(prep, st)
@@ -896,25 +904,15 @@ def field_significance(
             idx = _spike_sample_indices(prep, sp_i)
             occ_i, occ_s_i = prep.occupancy, prep.occ_smoothed
             iy_i, ix_i = prep.iy, prep.ix
+            perm = None
         else:
-            k = int(round(tau / max(median_dt, 1e-9)))
-            if roll_rows is None:
-                ix_r, iy_r = np.roll(prep.ix_raw, k), np.roll(prep.iy_raw, k)
-            else:
-                # Roll only within the retained samples. Rolling the full array
-                # would pair in-stratum times with out-of-stratum positions, so
-                # the surrogate maps would no longer share the observed
-                # occupancy. Rolling within keeps occupancy and the retained
-                # spike count exactly fixed, making the null a pure re-pairing.
-                k_eff = int(round(k * roll_rows.size / max(prep.ix_raw.size, 1)))
-                if roll_rows.size > 1:
-                    k_eff = max(k_eff, 1)
-                ix_r, iy_r = prep.ix_raw.copy(), prep.iy_raw.copy()
-                ix_r[roll_rows] = np.roll(prep.ix_raw[roll_rows], k_eff)
-                iy_r[roll_rows] = np.roll(prep.iy_raw[roll_rows], k_eff)
-            # Rolling bin indices == rolling positions then digitizing, since
-            # digitize is elementwise.
-            ix_i, iy_i = ix_r[prep.sel], iy_r[prep.sel]
+            # Same fractional offset as circular_shift, applied to the retained
+            # subsequence rather than to wall-clock time.
+            perm = np.roll(np.arange(roll_rows.size),
+                           int(round((tau / span) * roll_rows.size)))
+            ix_i, iy_i = prep.ix.copy(), prep.iy.copy()
+            ix_i[roll_rows] = prep.ix[roll_rows][perm]
+            iy_i[roll_rows] = prep.iy[roll_rows][perm]
             occ_i = _accumulate(prep, iy_i[prep.keep], ix_i[prep.keep],
                                 prep.dt[prep.keep])
             occ_s_i = _smooth(prep, occ_i)
@@ -932,16 +930,15 @@ def field_significance(
             if null_method == "circular_shift":
                 sh_split[i] = split_half_stability(sp_i, target_xy, **rate_map_kwargs)
             else:
-                x0 = target_xy["x"].to_numpy()
-                y0 = target_xy["y"].to_numpy()
-                if roll_rows is None:
-                    xi, yi = np.roll(x0, k), np.roll(y0, k)
-                else:
-                    xi, yi = x0.copy(), y0.copy()
-                    xi[roll_rows] = np.roll(x0[roll_rows], k_eff)
-                    yi[roll_rows] = np.roll(y0[roll_rows], k_eff)
+                # Apply the *same* permutation to the positions, mapped back to
+                # their original rows, so the split-half null matches the roll
+                # the reported statistics used.
+                orig = prep.sel[roll_rows]
                 xy_i = target_xy.copy()
-                xy_i["x"], xy_i["y"] = xi, yi
+                for col in ("x", "y"):
+                    v = target_xy[col].to_numpy().copy()
+                    v[orig] = v[orig][perm]
+                    xy_i[col] = v
                 sh_split[i] = split_half_stability(st, xy_i, **rate_map_kwargs)
 
     # Add-one ("plus-one") estimator: (1 + #exceedances) / (1 + n_shuffles).
@@ -1084,7 +1081,7 @@ def compute_social_place_fields(
     quality_thresholds: Optional[dict] = None,
     t_window_ephys: Optional[Tuple[float, float]] = None,
     arena_bounds: Optional[ArenaBounds] = None,
-    null_method: Literal["circular_shift", "position_shuffle"] = "circular_shift",
+    null_method: Literal["auto", "circular_shift", "position_shuffle"] = "auto",
     sig_alpha: float = 0.01,
     seed: int = 0,
     shuffle_split_half: bool = False,
@@ -1124,6 +1121,16 @@ def compute_social_place_fields(
     the false-discovery rate over the cell population; take the denominator for
     any population claim from ``LabNotebook.family_denominator``.
 
+    ``null_method='auto'`` (the default) picks the null that suits the run:
+    ``position_shuffle`` when a stratum is active, because rolling within the
+    retained samples is then a pure re-pairing that fixes both occupancy and the
+    retained spike count; ``circular_shift`` otherwise, because without a
+    stratum ``position_shuffle`` is the more drift-exposed of the two
+    (``HZ-STAT-015``). An explicit value is always honoured, with a warning when
+    it is the worse choice for that configuration. The resolved method is
+    recorded in ``parameters['null_method']`` and the request in
+    ``parameters['null_method_requested']``.
+
     ``progress`` reports completed cell-target fits: ``True`` for a bar, or a
     ``fn(done, total, label)`` callable to drive your own widget. Off by default.
     """
@@ -1131,6 +1138,21 @@ def compute_social_place_fields(
     from video.tracking_import import resolve_tracking_on_ephys_clock
 
     session_id = tracking.session_id
+
+    # Which null is right depends on whether a stratum is active, so 'auto'
+    # resolves it here and everything downstream sees a concrete method.
+    requested_null = null_method
+    stratified = self_stratum_radius_cm is not None
+    if null_method == "auto":
+        null_method = "position_shuffle" if stratified else "circular_shift"
+    elif null_method == "position_shuffle" and not stratified:
+        logger.warning(
+            "null_method='position_shuffle' without a self-position stratum is "
+            "more exposed to slow firing-rate drift than 'circular_shift' "
+            "(HZ-STAT-015: 41.7%% vs 12.5%% of rate-drifting but spatially "
+            "untuned cells reached p<=0.05 on a 1797 s window). "
+            "null_method='auto' picks per run."
+        )
 
     if target_animals is None:
         target_animals = list(tracking.parsed_data.keys())
@@ -1175,12 +1197,12 @@ def compute_social_place_fields(
                 focal_df, bin_size_cm, arena_bounds,
                 smoothing_radius_cm=self_stratum_radius_cm,
             )
-        if null_method == "circular_shift":
+        if requested_null == "circular_shift":
             logger.warning(
                 "null_method='circular_shift' under a self-position stratum gives "
                 "a conservative test: shifted spike trains land on a different "
-                "number of retained samples than the observed train. Prefer "
-                "null_method='position_shuffle'."
+                "number of retained samples than the observed train. "
+                "null_method='auto' would pick 'position_shuffle' here."
             )
 
     rate_maps: Dict[str, Dict[int, RateMap]] = {}
@@ -1319,6 +1341,7 @@ def compute_social_place_fields(
         "t_window_ephys": t_window_ephys,
         "arena_bounds": arena_bounds,
         "null_method": null_method,
+        "null_method_requested": requested_null,
         "sig_alpha": sig_alpha,
         "shuffle_split_half": shuffle_split_half,
         "self_stratum_radius_cm": self_stratum_radius_cm,
@@ -1425,7 +1448,7 @@ def compare_self_stratum_control(
     *,
     self_stratum_radius_cm: float = DEFAULT_STRATUM_RADIUS_CM,
     self_stratum_center: Optional[Tuple[float, float]] = None,
-    null_method: Literal["circular_shift", "position_shuffle"] = "position_shuffle",
+    null_method: Literal["auto", "circular_shift", "position_shuffle"] = "auto",
     progress: ProgressArg = False,
     **kwargs,
 ) -> StratumComparison:
@@ -1451,6 +1474,17 @@ def compare_self_stratum_control(
     Note this doubles the test count for the multiple-comparisons ledger. Declare
     both runs up front via ``LabNotebook.declare_family_tests`` rather than
     reporting whichever one is cleaner.
+
+    With ``null_method='auto'`` the two arms deliberately use **different**
+    nulls — ``circular_shift`` unrestricted, ``position_shuffle`` stratified —
+    each being the safer choice for its own configuration. That makes
+    ``lost_to_stratum`` more honest than forcing one null on both: under
+    ``position_shuffle`` the unrestricted arm would over-report ``sig_full``
+    through drift (``HZ-STAT-015``), and under ``circular_shift`` the stratified
+    arm would under-report ``survives_stratum`` through its varying retained
+    spike count — both inflate apparent loss. Read the resolved pair from
+    ``parameters['null_method_unrestricted']`` and ``['null_method_stratified']``.
+    Pass an explicit method to use one null for both arms.
     """
     common = dict(kwargs)
     common.pop("self_stratum_radius_cm", None)
@@ -1501,6 +1535,8 @@ def compare_self_stratum_control(
         "self_stratum_center": res_strat.parameters["self_stratum_center"],
         "self_stratum_diagnostics": res_strat.parameters["self_stratum_diagnostics"],
         "null_method": null_method,
+        "null_method_unrestricted": res_full.parameters["null_method"],
+        "null_method_stratified": res_strat.parameters["null_method"],
         "sig_alpha": alpha,
         "class_label": CLASS_LABEL,
         "analysis_title": f"{ANALYSIS_TITLE} — self-position stratum control",

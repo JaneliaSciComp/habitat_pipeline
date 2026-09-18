@@ -31,6 +31,7 @@ from ephys.social_spatial_fields import (
     _BINNING_DEFAULTS,
     _benjamini_hochberg,
     _prep_from_kwargs,
+    _spike_sample_indices,
 )
 from video.tracking_import import VideoTrackingData
 
@@ -416,6 +417,241 @@ def _correlated_pair(n, alpha, seed_a=1, seed_g=2):
     return A, B
 
 
+def _stop_go_walk(n, seed, bounds=ARENA, step_sd=3.0, stop_frac=0.8):
+    """Walk that rests in one spot most of the time, then moves.
+
+    This is what makes a speed gate consequential: the resting spot dominates
+    the ungated occupancy, so the gated and ungated position distributions are
+    very different. On session 20251210 only 15-21% of samples exceed 5 cm/s.
+    """
+    rng = np.random.default_rng(seed)
+    (xmin, xmax), (ymin, ymax) = bounds
+    nest = (0.2 * (xmin + xmax), 0.8 * (ymin + ymax))
+    x = np.empty(n)
+    y = np.empty(n)
+    x[0], y[0] = 0.5 * (xmin + xmax), 0.5 * (ymin + ymax)
+    resting = True
+    for i in range(1, n):
+        if rng.random() < (0.0015 if resting else 0.0015 * stop_frac / (1 - stop_frac)):
+            resting = not resting
+        if resting:
+            # Jitter must be small relative to DT or the "resting" samples come
+            # out above the speed threshold and the gate stops discriminating.
+            x[i] = np.clip(nest[0] + rng.normal(0, 0.05), xmin, xmax)
+            y[i] = np.clip(nest[1] + rng.normal(0, 0.05), ymin, ymax)
+        else:
+            x[i] = np.clip(x[i - 1] + rng.normal(0, step_sd), xmin, xmax)
+            y[i] = np.clip(y[i - 1] + rng.normal(0, step_sd), ymin, ymax)
+    t = np.arange(n) * DT
+    speed = np.sqrt(np.gradient(x, t) ** 2 + np.gradient(y, t) ** 2)
+    return pd.DataFrame({"t": t, "x": x, "y": y, "speed": speed})
+
+
+def _flat_poisson(xy, rate_hz, seed):
+    """Constant-rate spikes: no spatial tuning to any animal, by construction."""
+    rng = np.random.default_rng(seed)
+    t = xy["t"].to_numpy()
+    counts = rng.poisson(rate_hz * DT, size=t.size)
+    out = [ti + rng.uniform(0, DT, n) for ti, n in zip(t, counts) if n]
+    return np.sort(np.concatenate(out)) if out else np.array([])
+
+
+class TestNullCalibration:
+    """A null that flags untuned cells is worse than no test at all.
+
+    HZ-STAT-014: ``position_shuffle`` used to roll the *whole* trajectory while
+    the speed gate stayed put, so each surrogate's occupancy was the target's
+    distribution over all times (dominated by its resting spot) while the
+    observed map's was its distribution while moving. On real session 20251210
+    that put 93% of spatially untuned Poisson cells at p <= 0.05, and 47% at the
+    permutation floor.
+    """
+
+    N = 30000
+    N_SHUF = 200
+
+    def _p_values(self, null_method, gated, stratum_radius=None):
+        xy = _stop_go_walk(self.N, seed=900)
+        kw = dict(bin_size_cm=BIN, arena_bounds=ARENA, smoothing_sigma_cm=5.0)
+        if gated:
+            kw.update(speed_xy=xy[["t", "speed"]], speed_threshold_cms=5.0)
+        else:
+            kw.update(speed_threshold_cms=None)
+        frame = xy
+        if stratum_radius is not None:
+            mask, _ = self_position_stratum(
+                xy, xy["t"].to_numpy(), radius_cm=stratum_radius,
+                center=modal_occupancy_center(xy, BIN, ARENA), bin_size_cm=BIN,
+                arena_bounds=ARENA)
+            frame = xy.assign(**{STRATUM_COLUMN: mask})
+
+        ps = []
+        for i, rate in enumerate((0.5, 2.0, 8.0, 20.0)):
+            spikes = _flat_poisson(xy, rate, seed=910 + i)
+            sig = field_significance(spikes, frame, n_shuffles=self.N_SHUF,
+                                     null_method=null_method, seed=i, **kw)
+            if np.isfinite(sig.p_skaggs):
+                ps.append(sig.p_skaggs)
+        return np.array(ps)
+
+    def test_speed_gate_keeps_only_a_minority_of_samples(self):
+        """Guard the premise: without this, the test below proves nothing."""
+        xy = _stop_go_walk(self.N, seed=900)
+        moving = np.mean(xy["speed"].to_numpy() >= 5.0)
+        assert 0.05 < moving < 0.6, f"speed gate keeps {moving:.0%}; too uninformative"
+
+    @pytest.mark.parametrize("null_method", ["position_shuffle", "circular_shift"])
+    @pytest.mark.parametrize("gated", [False, True], ids=["ungated", "speed_gated"])
+    def test_untuned_cells_are_not_significant(self, null_method, gated):
+        ps = self._p_values(null_method, gated)
+        assert ps.size >= 3
+        # Untuned cells must not sit at the permutation floor.
+        assert (ps > 1.0 / (self.N_SHUF + 1)).all(), (
+            f"{null_method}/gated={gated}: p at floor for untuned cells; "
+            f"p={np.round(ps, 4).tolist()}")
+        assert np.median(ps) > 0.1, f"p distribution skewed low: {np.round(ps, 4)}"
+
+    @pytest.mark.slow
+    def test_untuned_cells_not_significant_under_a_stratum(self):
+        ps = self._p_values("position_shuffle", gated=True, stratum_radius=15.0)
+        assert ps.size >= 1
+        assert (ps > 1.0 / (self.N_SHUF + 1)).all(), np.round(ps, 4).tolist()
+
+
+class TestAutoNullSelection:
+    """Which null is safe depends on whether a stratum is active.
+
+    Stratified: position_shuffle is a pure re-pairing (HZ-STAT-014).
+    Unrestricted: circular_shift is the less drift-exposed of the two
+    (HZ-STAT-015, 12.5% vs 41.7% inflation at the worst drift period).
+    """
+
+    def _run(self, **kw):
+        tr = _three_animal_tracking(n=2500)
+        spikes = _poisson_spikes_from_field(
+            tr["A"], center=(40.0, 40.0), sigma=8.0, peak_hz=25.0,
+            base_hz=0.5, seed=930)
+        return _sweep(_make_ks([spikes]), tr, focal="A", n_shuffles=4,
+                      min_n_spikes=10, **kw)
+
+    def test_auto_picks_circular_shift_without_a_stratum(self):
+        res = self._run()
+        assert res.parameters["null_method"] == "circular_shift"
+        assert res.parameters["null_method_requested"] == "auto"
+
+    def test_auto_picks_position_shuffle_under_a_stratum(self):
+        res = self._run(self_stratum_radius_cm=15.0,
+                        self_stratum_center=(40.0, 40.0))
+        assert res.parameters["null_method"] == "position_shuffle"
+        assert res.parameters["null_method_requested"] == "auto"
+
+    @pytest.mark.parametrize("explicit", ["circular_shift", "position_shuffle"])
+    @pytest.mark.parametrize("stratum", [None, 15.0])
+    def test_explicit_choice_is_always_honoured(self, explicit, stratum):
+        kw = {"null_method": explicit}
+        if stratum is not None:
+            kw.update(self_stratum_radius_cm=stratum,
+                      self_stratum_center=(40.0, 40.0))
+        res = self._run(**kw)
+        assert res.parameters["null_method"] == explicit
+        assert res.parameters["null_method_requested"] == explicit
+        # The per-cell records agree with the resolved method.
+        assert res.signif["A"][0].null_method == explicit
+
+    def test_warns_when_the_explicit_choice_is_the_worse_one(self, caplog):
+        with caplog.at_level("WARNING"):
+            self._run(null_method="position_shuffle")
+        assert any("HZ-STAT-015" in r.message for r in caplog.records)
+
+        caplog.clear()
+        with caplog.at_level("WARNING"):
+            self._run(null_method="circular_shift",
+                      self_stratum_radius_cm=15.0,
+                      self_stratum_center=(40.0, 40.0))
+        assert any("conservative test" in r.message for r in caplog.records)
+
+    def test_auto_is_quiet(self, caplog):
+        with caplog.at_level("WARNING"):
+            self._run()
+            self._run(self_stratum_radius_cm=15.0,
+                      self_stratum_center=(40.0, 40.0))
+        noisy = [r.message for r in caplog.records
+                 if "HZ-STAT-015" in r.message or "conservative test" in r.message]
+        assert not noisy, noisy
+
+    @pytest.mark.slow
+    def test_comparison_resolves_each_arm_separately(self):
+        tr = _three_animal_tracking(n=3000)
+        spikes = _poisson_spikes_from_field(
+            tr["A"], center=(40.0, 40.0), sigma=8.0, peak_hz=30.0,
+            base_hz=0.5, seed=931)
+        cmp_ = compare_self_stratum_control(
+            _make_ks([spikes]), _video_tracking(tr), _StubSync(), "A",
+            list(tr.keys()), self_stratum_radius_cm=15.0,
+            self_stratum_center=(40.0, 40.0), pixels_per_cm=None,
+            bin_size_cm=BIN, smoothing_sigma_cm=5.0,
+            speed_filter_subject="none", n_shuffles=6, min_n_spikes=10,
+            use_quality_cells=False, arena_bounds=ARENA, seed=0,
+        )
+        assert cmp_.parameters["null_method_unrestricted"] == "circular_shift"
+        assert cmp_.parameters["null_method_stratified"] == "position_shuffle"
+        assert cmp_.unrestricted.parameters["null_method"] == "circular_shift"
+        assert cmp_.stratified.parameters["null_method"] == "position_shuffle"
+
+
+class TestPositionShuffleInvariants:
+    """The roll must be a pure re-pairing: occupancy and spike count fixed."""
+
+    def _surrogate_maps(self, gated, stratum_radius=None, n=12000):
+        xy = _stop_go_walk(n, seed=920)
+        kw = dict(bin_size_cm=BIN, arena_bounds=ARENA, smoothing_sigma_cm=5.0)
+        kw.update(speed_xy=xy[["t", "speed"]] if gated else None,
+                  speed_threshold_cms=5.0 if gated else None)
+        frame = xy
+        if stratum_radius is not None:
+            mask, _ = self_position_stratum(
+                xy, xy["t"].to_numpy(), radius_cm=stratum_radius,
+                center=modal_occupancy_center(xy, BIN, ARENA), bin_size_cm=BIN,
+                arena_bounds=ARENA)
+            frame = xy.assign(**{STRATUM_COLUMN: mask})
+
+        spikes = _flat_poisson(xy, 5.0, seed=921)
+        prep = _prep_from_kwargs(frame, kw)
+        observed = compute_rate_map(spikes, frame, **kw)
+
+        # Reproduce one surrogate exactly as field_significance builds it.
+        rows = np.flatnonzero(prep.keep)
+        perm = np.roll(np.arange(rows.size), int(round(0.37 * rows.size)))
+        ix_i, iy_i = prep.ix.copy(), prep.iy.copy()
+        ix_i[rows] = prep.ix[rows][perm]
+        iy_i[rows] = prep.iy[rows][perm]
+        idx = _spike_sample_indices(prep, spikes)
+        from ephys.social_spatial_fields import _accumulate
+        occ = _accumulate(prep, iy_i[prep.keep], ix_i[prep.keep], prep.dt[prep.keep])
+        counts = _accumulate(prep, iy_i[idx], ix_i[idx], 1.0)
+        return observed, occ, counts
+
+    @pytest.mark.parametrize("gated", [False, True], ids=["ungated", "speed_gated"])
+    def test_surrogate_occupancy_matches_observed(self, gated):
+        observed, occ, _ = self._surrogate_maps(gated)
+        # A permutation of the same positions over the same dwell intervals:
+        # total and peak occupancy must both be preserved.
+        assert occ.sum() == pytest.approx(observed.occupancy.sum())
+        peak_obs = observed.occupancy.max() / observed.occupancy.sum()
+        peak_sur = occ.max() / occ.sum()
+        assert peak_sur == pytest.approx(peak_obs, rel=0.25), (
+            f"peak occupancy fraction moved {peak_obs:.3f} -> {peak_sur:.3f}; "
+            "the surrogate is not sampling the observed occupancy")
+
+    def test_surrogate_retains_the_same_spike_count(self):
+        observed, _, counts = self._surrogate_maps(gated=True)
+        assert counts.sum() == observed.spike_counts.sum()
+
+    def test_occupancy_preserved_under_a_stratum_too(self):
+        observed, occ, _ = self._surrogate_maps(gated=True, stratum_radius=15.0)
+        assert occ.sum() == pytest.approx(observed.occupancy.sum())
+
+
 class TestProgressReporting:
     def test_callback_receives_every_cell_target_fit(self):
         tr = _three_animal_tracking(n=3000)
@@ -486,8 +722,11 @@ class TestProgressReporting:
 class TestFastNullPath:
     """The null loop hoists spike-independent work out; results must not move.
 
-    The reference here is the pre-optimization loop — three ``compute_rate_map``
-    calls per shuffle — driven by the same seeded RNG.
+    The reference is an independent slow implementation — surrogates built as
+    DataFrames and pushed through ``compute_rate_map``, three maps per shuffle —
+    driven by the same seeded RNG. For ``position_shuffle`` it rolls positions
+    within the retained rows (HZ-STAT-014), matching the fast path's semantics
+    rather than the whole-trajectory roll that predated the fix.
     """
 
     @staticmethod
@@ -509,23 +748,19 @@ class TestFastNullPath:
         spar = np.full(n_shuffles, np.nan)
         x0 = target_xy["x"].to_numpy()
         y0 = target_xy["y"].to_numpy()
-        s0 = read_stratum_mask(target_xy)
-        roll_rows = np.flatnonzero(s0) if s0 is not None else None
+        # Retained rows: speed gate AND any stratum, in original-row indices.
+        prep = _prep_from_kwargs(target_xy, kw)
+        orig_rows = prep.sel[np.flatnonzero(prep.keep)]
         for i in range(n_shuffles):
             tau = rng.uniform(0.1 * span, 0.9 * span)
             if null_method == "circular_shift":
                 sp_i, xy_i = w0 + np.mod(st - w0 + tau, span), target_xy
             else:
-                k = int(round(tau / max(median_dt, 1e-9)))
-                if roll_rows is None:
-                    xi, yi = np.roll(x0, k), np.roll(y0, k)
-                else:
-                    k_eff = int(round(k * roll_rows.size / max(x0.size, 1)))
-                    if roll_rows.size > 1:
-                        k_eff = max(k_eff, 1)
-                    xi, yi = x0.copy(), y0.copy()
-                    xi[roll_rows] = np.roll(x0[roll_rows], k_eff)
-                    yi[roll_rows] = np.roll(y0[roll_rows], k_eff)
+                perm = np.roll(np.arange(orig_rows.size),
+                               int(round((tau / span) * orig_rows.size)))
+                xi, yi = x0.copy(), y0.copy()
+                xi[orig_rows] = x0[orig_rows][perm]
+                yi[orig_rows] = y0[orig_rows][perm]
                 xy_i = target_xy.copy()
                 xy_i["x"], xy_i["y"] = xi, yi
                 sp_i = st

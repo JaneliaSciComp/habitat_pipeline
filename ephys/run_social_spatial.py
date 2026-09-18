@@ -72,8 +72,10 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Which animal's speed gates the time samples.")
     p.add_argument("--n_shuffles", type=int, default=500,
                    help="Number of shuffles for the significance null.")
-    p.add_argument("--null_method", type=str, default="circular_shift",
-                   choices=["circular_shift", "position_shuffle"])
+    p.add_argument("--null_method", type=str, default="auto",
+                   choices=["auto", "circular_shift", "position_shuffle"],
+                   help="'auto' picks position_shuffle under a self-position "
+                        "stratum and circular_shift otherwise.")
     p.add_argument("--min_n_spikes", type=int, default=50,
                    help="Cells with fewer in-window spikes skip significance.")
     p.add_argument("--use_quality_cells", action="store_true",

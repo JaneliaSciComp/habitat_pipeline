@@ -45,7 +45,7 @@ class TestArgParser:
         assert args.focal == "631"
         assert args.speed_filter_subject == "target"
         assert args.n_shuffles == 500
-        assert args.null_method == "circular_shift"  # default
+        assert args.null_method == "auto"  # resolves per run in the sweep
 
     def test_required_args_enforced(self):
         with pytest.raises(SystemExit):

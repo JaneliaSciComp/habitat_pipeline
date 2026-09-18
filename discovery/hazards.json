@@ -1602,6 +1602,114 @@
         "docs/AI_DISCOVERY_LOOP_DESIGN.md - section 5",
         ".claude/skills/interpret-results/SKILL.md"
       ]
+    },
+    {
+      "id": "HZ-STAT-014",
+      "slug": "position-shuffle-ignores-the-speed-gate",
+      "title": "position_shuffle rolled the whole trajectory while the speed gate stayed put",
+      "severity": "critical",
+      "kind": "statistical",
+      "status": "resolved",
+      "added": "2026-09-17",
+      "applies_to": {
+        "stages": [
+          "propose",
+          "run",
+          "interpret"
+        ],
+        "modules": [
+          "ephys.social_spatial_fields"
+        ],
+        "analyses": [
+          "ephys.social_spatial_fields"
+        ]
+      },
+      "symptom": "A social place field sweep reports a large fraction of cells as tuned, and tightening the self-position stratum makes MORE tests significant rather than fewer. The self-map positive control also fails.",
+      "mechanism": "field_significance's position_shuffle null rolled the target's (x, y) across every tracking row, but the speed-derived keep mask was computed once from the unrolled trajectory and never moved. The observed map's occupancy was therefore the target's position distribution WHILE MOVING, while each surrogate's was built by dropping rolled positions onto the moving-sample times - the distribution over ALL times, dominated by wherever the animal rests. A concentrated surrogate occupancy lets one bin define r-bar, which suppresses surrogate Skaggs, so the observed value beat essentially every shuffle. Severity scales with how much the gate removes: on 20251210 only 15-21% of samples exceed 5 cm/s.",
+      "consequence": "The null was grossly anti-conservative whenever a speed gate was active. Measured on real 20251210 tracking with spatially untuned flat-Poisson spike trains: 93.1% of tests reached p <= 0.05 and 47.2% sat exactly on the permutation floor, against a nominal 5%. Any classification count or stratum comparison produced with null_method='position_shuffle' and a speed gate is invalid.",
+      "detector": {
+        "type": "test",
+        "test": [
+          "tests/test_social_spatial_fields.py::TestNullCalibration",
+          "tests/test_social_spatial_fields.py::TestPositionShuffleInvariants"
+        ],
+        "pass_if": {
+          "field": "returncode",
+          "op": "==",
+          "value": 0
+        },
+        "on_fail": "The position_shuffle null is flagging spatially untuned cells, or its surrogates no longer reproduce the observed occupancy. A null that fires on untuned data is worse than no test; do not interpret any p-value from the run."
+      },
+      "remedies": [
+        "fixed: position_shuffle now rolls positions only WITHIN the retained samples (speed gate and self-position stratum), so every surrogate preserves the observed occupancy multiset and the observed retained spike count",
+        "circular_shift was never affected - it leaves positions untouched, so occupancy is identical between observed and surrogate",
+        "assert occupancy preservation, not just plausible p-values, when adding a null"
+      ],
+      "known_gaps": [
+        "Slow rate drift remains a residual confound for both nulls and is NOT fixed. Spatially untuned cells with a sinusoidal 600 s rate drift over the 1797 s 20251210 window reach p <= 0.05 at 41.7% under position_shuffle and 12.5% under circular_shift; at 300 s and 1200 s periods both are near nominal. Drift coupled to non-uniform spatial sampling over time makes real apparent fields. A block-wise shuffle (permute within time blocks shorter than the drift timescale) is the standard remedy and does not exist here yet.",
+        "The self-position stratum suppresses the drift inflation (down to 2.9-6.9%), so stratified results are less exposed than unrestricted ones."
+      ],
+      "evidence": {
+        "occurred": true,
+        "date": "2026-09-17",
+        "where": [
+          "ephys/social_place_fields_demo.ipynb - a 20251210 run reported 153 of 377 cells as tuned (partner_only 62, conjunctive 49, self_only 22, broadcast 20); after the fix a 40-cell sample spanning the same spike-count range yielded 0-1 significant partner tests out of 80",
+          "the same run showed 238 tests becoming significant only under the stratum, and 19 self-map positive controls failing"
+        ]
+      },
+      "references": [
+        "ephys/social_spatial_fields.py::field_significance",
+        "tests/test_social_spatial_fields.py::TestNullCalibration",
+        "tests/test_social_spatial_fields.py::TestPositionShuffleInvariants"
+      ]
+    },
+    {
+      "id": "HZ-STAT-015",
+      "slug": "social-place-field-nulls-do-not-control-rate-drift",
+      "title": "Neither social-place-field null controls slow firing-rate drift",
+      "severity": "high",
+      "kind": "statistical",
+      "status": "active",
+      "added": "2026-09-17",
+      "applies_to": {
+        "stages": [
+          "propose",
+          "run",
+          "interpret"
+        ],
+        "modules": [
+          "ephys.social_spatial_fields"
+        ],
+        "analyses": [
+          "ephys.social_spatial_fields"
+        ]
+      },
+      "symptom": "A social place field is significant, stable across halves, and has no obvious artefact - but the cell's firing rate also drifts slowly across the session.",
+      "mechanism": "Both nulls break the spike-position pairing by a single rigid offset, which re-pairs a slow rate drift with a different stretch of trajectory. Because the animal does not sample the arena uniformly over time, a rate that is high during one epoch concentrates spikes wherever the target happened to be then, producing real spatial structure that is temporal in origin. The observed map keeps that alignment; the surrogates do not, so the observed value wins.",
+      "consequence": "Measured on real 20251210 tracking (1797 s window) with spatially untuned Poisson trains carrying a sinusoidal rate drift: at a 600 s period, 41.7% of tests reach p <= 0.05 under position_shuffle and 12.5% under circular_shift, against a nominal 5%. At 300 s and 1200 s periods both nulls are near nominal, so the inflation depends on how the drift timescale sits against the session length.",
+      "detector": {
+        "type": "none",
+        "note": "No automated detector. Check the cell's firing rate against session time before trusting a field; a monotonic or slowly oscillating rate is the warning sign. The self-position stratum suppresses the inflation to 2.9-6.9%, so a field that survives the stratum is far less exposed."
+      },
+      "remedies": [
+        "prefer circular_shift over position_shuffle when no stratum is active - measured 12.5% vs 41.7% inflation at the worst drift period",
+        "run the self-position stratum control, which brings drift inflation back to near nominal",
+        "not implemented: a block-wise shuffle that permutes within time blocks shorter than the drift timescale, which is the standard remedy"
+      ],
+      "known_gaps": [
+        "There is no drift-aware null in this module. Until there is, a significant unrestricted social place field on a rate-drifting cell is not trustworthy on its own."
+      ],
+      "evidence": {
+        "occurred": true,
+        "date": "2026-09-17",
+        "where": [
+          "found while validating the HZ-STAT-014 fix: with the speed-gate bug repaired, flat-Poisson nulls came back to 5.0% but 600 s-drift nulls remained at 31.7% unrestricted"
+        ]
+      },
+      "references": [
+        "ephys/social_spatial_fields.py::field_significance",
+        "HZ-STAT-014"
+      ]
     }
   ]
 }

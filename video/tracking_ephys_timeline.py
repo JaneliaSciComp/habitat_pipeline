@@ -167,6 +167,14 @@ def build_day_sync(record: Mapping[str, Any], config_path: Optional[str],
     Any animal of the primary block works — the sync is per recording, not
     per animal (CLAUDE.md: "any animal's DIO + pulse log works because they
     all share the clock").
+
+    Built with ``use_cache=False``: ``DataStorageManager``'s on-disk path
+    cache has no staleness check (only a version bump invalidates it), so a
+    cached entry silently keeps whatever tracking files existed the day it was
+    written. Confirmed on 20251216: the cache for ``rat613_20251216_094334``
+    listed 3 tracking files while the share now has 7 APT chunks for that
+    date. A tool whose entire point is to surface tracking gaps must not read
+    a path list that can go stale in exactly that direction.
     """
     animals = sorted((record.get('ephys') or {}).get('animals') or [])
     recording_id = (record.get('recording') or {}).get('recording_id') \
@@ -174,7 +182,8 @@ def build_day_sync(record: Mapping[str, Any], config_path: Optional[str],
     last_exc = None
     for animal in animals:
         try:
-            dsm = DataStorageManager(animal, recording_id, config_path=config_path)
+            dsm = DataStorageManager(animal, recording_id, config_path=config_path,
+                                     use_cache=False)
             sync = DataSyncManager(dsm, dio_channel=dio_channel)
             return dsm, sync
         except Exception as exc:

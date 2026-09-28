@@ -192,10 +192,16 @@ def single_cell_lda_decode(spike_times: np.ndarray,
         except Exception:
             balanced = np.nan
 
-        lda = LinearDiscriminantAnalysis()
-        lda.fit(features_scaled, labels)
-        predictions = lda.predict(features_scaled)
-        conf_matrix = confusion_matrix(labels, predictions, labels=unique_labels)
+        if cv_folds == 'loo' or cv_folds == -1:
+            cv_cm = LeaveOneOut()
+        else:
+            cv_cm = StratifiedKFold(n_splits=min(int(cv_folds), int(np.min(counts))),
+                                    shuffle=True, random_state=42)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            cv_predictions = cross_val_predict(
+                LinearDiscriminantAnalysis(), features_scaled, labels, cv=cv_cm)
+        conf_matrix = confusion_matrix(labels, cv_predictions, labels=unique_labels)
 
         return {
             'accuracy': float(np.mean(cv_scores)),

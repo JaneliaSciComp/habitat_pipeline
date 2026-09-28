@@ -124,6 +124,7 @@ def decode_opponent_identity_population(ks_data,
                                         cv_folds: int = 5,
                                         min_events_per_class: int = 5,
                                         selected_opponents: Optional[List[str]] = None,
+                                        max_opponents: Optional[int] = None,
                                         label_mode: str = 'opponent',
                                         n_shuffles: int = 0,
                                         alpha: float = 0.05,
@@ -166,6 +167,13 @@ def decode_opponent_identity_population(ks_data,
 
     if selected_opponents is not None:
         mask = np.isin(opponent_labels, selected_opponents)
+        event_times = event_times[mask]
+        opponent_labels = opponent_labels[mask]
+
+    if max_opponents is not None:
+        unique_opps, counts = np.unique(opponent_labels, return_counts=True)
+        top_opponents = unique_opps[np.argsort(counts)[::-1][:max_opponents]]
+        mask = np.isin(opponent_labels, top_opponents)
         event_times = event_times[mask]
         opponent_labels = opponent_labels[mask]
 
@@ -249,6 +257,7 @@ def decode_opponent_identity_population(ks_data,
             'time_bin_size': time_bin_size,
             'cv_folds': cv_folds,
             'min_events_per_class': min_events_per_class,
+            'max_opponents': max_opponents,
             'label_mode': label_mode,
             'n_shuffles': n_shuffles,
             'alpha': alpha,
@@ -374,6 +383,9 @@ def main():
                         help="Per-cell null (exact, resolution-limited) vs pooled across cells "
                              "(~n_cells better p-value resolution at the same compute, assumes "
                              "cells share a null)")
+    parser.add_argument('--max_opponents', type=int, default=None,
+                        help='Keep only the top N opponents by event count (applied after '
+                             'behavior_type and min_events_per_class filters)')
     parser.add_argument('--save_plots', action='store_true', help='Save plots to files')
     parser.add_argument('--output_dir', type=str, help='Output directory for plots')
 
@@ -425,6 +437,7 @@ def main():
         n_shuffles=args.n_shuffles,
         alpha=args.alpha,
         null_mode=args.null_mode,
+        max_opponents=args.max_opponents,
     )
 
     if results['status'] != 'success':

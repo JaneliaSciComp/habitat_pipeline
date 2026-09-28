@@ -129,7 +129,8 @@ def decode_opponent_identity_population(ks_data,
                                         n_shuffles: int = 0,
                                         alpha: float = 0.05,
                                         seed: int = 0,
-                                        null_mode: str = 'per_cell') -> Dict:
+                                        null_mode: str = 'per_cell',
+                                        restrict_to_ephys_range: bool = True) -> Dict:
     """Decode opponent identity across the population (per-cell LDA).
 
     ``n_shuffles`` (default 0, i.e. off) opts into the rigor layer: a
@@ -142,6 +143,17 @@ def decode_opponent_identity_population(ks_data,
     per-cell result as biology**). ``null_mode='pooled'`` trades a shared-null
     assumption for ~n_cells better p-value resolution at the same compute.
     When off, all three are ``None`` and every other key is unchanged.
+
+    ``restrict_to_ephys_range`` (default ``True``) drops any event whose
+    ``time_window`` around it falls partly or fully outside
+    ``[min, max]`` of the selected cells' own spike times. A behavioral
+    event can be timestamped well past the point where the selected cells
+    stop firing (e.g. a stale cached ``duration_seconds`` reports a longer
+    window than the cells actually have data for — see the
+    ``duration_disagrees_with_window`` gotcha in CLAUDE.md); decoding such
+    an event pulls all-zero features regardless of the true label. Set to
+    ``False`` to reproduce the old behavior of decoding every event
+    ``_extract_labels`` returns.
     """
     if label_mode not in ('opponent', 'group'):
         raise ValueError(f"label_mode must be 'opponent' or 'group', got {label_mode!r}")
@@ -189,6 +201,54 @@ def decode_opponent_identity_population(ks_data,
     if len(selected_cluster_ids) == 0:
         print("No cells selected for analysis")
         return {'error': 'No cells selected', 'status': 'failed'}
+
+    ephys_time_range = None
+    n_events_dropped_outside_ephys_range = 0
+    if restrict_to_ephys_range:
+        cell_spike_mins = [st.min() for st in spike_times_list if len(st) > 0]
+        cell_spike_maxs = [st.max() for st in spike_times_list if len(st) > 0]
+        if not cell_spike_mins:
+            print("Selected cells have no spikes")
+            return {'error': 'Selected cells have no spikes', 'status': 'failed'}
+        ephys_lo, ephys_hi = min(cell_spike_mins), max(cell_spike_maxs)
+        ephys_time_range = (float(ephys_lo), float(ephys_hi))
+        print(f"Selected cells' spike time range: [{ephys_lo:.1f}, {ephys_hi:.1f}]s")
+
+        window_start = event_times + time_window[0]
+        window_end = event_times + time_window[1]
+        in_range = (window_start >= ephys_lo) & (window_end <= ephys_hi)
+        n_events_dropped_outside_ephys_range = int(np.sum(~in_range))
+        if n_events_dropped_outside_ephys_range > 0:
+            print(f"Dropping {n_events_dropped_outside_ephys_range}/{len(event_times)} events "
+                  f"whose ({time_window[0]:+.1f}, {time_window[1]:+.1f})s analysis window falls "
+                  f"outside the selected cells' spike time range "
+                  f"[{ephys_lo:.1f}, {ephys_hi:.1f}]s")
+        event_times = event_times[in_range]
+        opponent_labels = opponent_labels[in_range]
+
+        if len(event_times) == 0:
+            print("No events remain within the selected cells' ephys time range")
+            return {'error': 'No events within ephys time range', 'status': 'failed'}
+
+        # Dropping events can push a class below min_events_per_class even
+        # though _extract_labels already enforced that threshold on the
+        # pre-filter counts; re-apply it so every remaining class still
+        # clears it (otherwise every cell fails single_cell_lda_decode's
+        # own check and the run silently decodes 0/N cells).
+        if min_events_per_class > 1:
+            unique_after, counts_after = np.unique(opponent_labels, return_counts=True)
+            valid_after = unique_after[counts_after >= min_events_per_class]
+            if len(valid_after) < len(unique_after):
+                dropped = sorted(set(unique_after) - set(valid_after))
+                print(f"Dropping classes below min_events_per_class={min_events_per_class} "
+                      f"after ephys-range filtering: {dropped}")
+            keep = np.isin(opponent_labels, valid_after)
+            event_times = event_times[keep]
+            opponent_labels = opponent_labels[keep]
+
+        if len(np.unique(opponent_labels)) < 2:
+            print("Fewer than 2 classes remain after ephys-range filtering")
+            return {'error': 'Fewer than 2 classes remain after ephys-range filtering', 'status': 'failed'}
 
     cell_results, successful_cluster_ids, accuracies = run_population_per_cell_decode(
         spike_times_list=spike_times_list,
@@ -262,6 +322,9 @@ def decode_opponent_identity_population(ks_data,
             'n_shuffles': n_shuffles,
             'alpha': alpha,
             'null_mode': null_mode,
+            'restrict_to_ephys_range': restrict_to_ephys_range,
+            'ephys_time_range': ephys_time_range,
+            'n_events_dropped_outside_ephys_range': n_events_dropped_outside_ephys_range,
             'class_label': _CLASS_LABEL,
             'analysis_title': _ANALYSIS_TITLE,
         },

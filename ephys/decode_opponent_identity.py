@@ -205,12 +205,13 @@ def decode_opponent_identity_population(ks_data,
     ephys_time_range = None
     n_events_dropped_outside_ephys_range = 0
     if restrict_to_ephys_range:
-        cell_spike_mins = [st.min() for st in spike_times_list if len(st) > 0]
-        cell_spike_maxs = [st.max() for st in spike_times_list if len(st) > 0]
-        if not cell_spike_mins:
+        if use_quality_cells:
+            ephys_lo, ephys_hi = ks_data.quality_ephys_window(**quality_thresholds)
+        else:
+            ephys_lo, ephys_hi = ks_data.ephys_window
+        if ephys_lo == 0.0 and ephys_hi == 0.0:
             print("Selected cells have no spikes")
             return {'error': 'Selected cells have no spikes', 'status': 'failed'}
-        ephys_lo, ephys_hi = min(cell_spike_mins), max(cell_spike_maxs)
         ephys_time_range = (float(ephys_lo), float(ephys_hi))
         print(f"Selected cells' spike time range: [{ephys_lo:.1f}, {ephys_hi:.1f}]s")
 

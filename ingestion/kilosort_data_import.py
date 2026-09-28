@@ -89,6 +89,50 @@ class KilosortData:
             return float(max(st[-1] for st in valid) - min(st[0] for st in valid))
         return 0.0
 
+    @property
+    def ephys_window(self) -> tuple[float, float]:
+        """``(first spike, last spike)`` in seconds across all clusters.
+
+        This is the actual usable ephys time range for this animal/session
+        — not the same thing as ``[0, duration_seconds]``. A recording
+        doesn't start at zero, and ``duration_seconds`` can itself disagree
+        with what the spikes cover (see the ``duration_disagrees_with_window``
+        gotcha in CLAUDE.md: a stale cached duration loaded from a pkl can
+        be shorter — or, via a stray noise-like cluster, longer — than what
+        the real cells span). Any event-aligned analysis should check its
+        events against this window, not against ``duration_seconds``.
+        Returns ``(0.0, 0.0)`` if there are no spikes anywhere.
+        """
+        valid = [st for st in (self.spike_times_by_cell or []) if len(st) > 0]
+        if not valid:
+            return (0.0, 0.0)
+        return (float(min(st[0] for st in valid)), float(max(st[-1] for st in valid)))
+
+    def quality_ephys_window(self, **filter_kwargs) -> tuple[float, float]:
+        """``(first spike, last spike)`` in seconds across quality-filtered clusters.
+
+        Same idea as ``ephys_window``, but computed only over clusters that
+        pass ``filter_cells_by_firing_patterns`` (default
+        ``_DEFAULT_QUALITY_THRESHOLDS`` unless overridden via
+        ``filter_kwargs`` — the same defaults ``use_quality_cells=True``
+        uses in the decoders). ``ephys_window`` alone can be misleading: a
+        single noise-like cluster with pathological ISI statistics (that
+        never passes quality filtering) can keep firing long after every
+        real single unit has gone quiet, inflating the raw window's upper
+        bound (this is exactly what happens for rat631/20251216 — see the
+        ``duration_disagrees_with_window`` gotcha in CLAUDE.md). Filter
+        behavioral events against *this* window, not ``ephys_window``, when
+        the analysis itself uses quality-filtered cells. Returns
+        ``(0.0, 0.0)`` if no cluster passes.
+        """
+        thresholds = dict(_DEFAULT_QUALITY_THRESHOLDS)
+        thresholds.update(filter_kwargs)
+        _, spike_times_list = self.get_filtered_cells_spike_times(**thresholds)
+        valid = [st for st in spike_times_list if len(st) > 0]
+        if not valid:
+            return (0.0, 0.0)
+        return (float(min(st[0] for st in valid)), float(max(st[-1] for st in valid)))
+
     def get_firing_rates(self, bin_size_sec: float = 1.0) -> Dict[int, float]:
         """Calculate mean firing rate (Hz) for every cluster."""
         duration = self.duration_seconds

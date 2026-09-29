@@ -100,7 +100,8 @@ def decode_event_outcome_population(ks_data,
                                     n_shuffles: int = 0,
                                     alpha: float = 0.05,
                                     seed: int = 0,
-                                    null_mode: str = 'per_cell') -> Dict:
+                                    null_mode: str = 'per_cell',
+                                    restrict_to_ephys_range: bool = True) -> Dict:
     """Decode event outcome (winner vs loser) cell-by-cell across the population.
 
     Parameters mirror ``decode_opponent_identity_population``. ``behavior_type``
@@ -117,10 +118,48 @@ def decode_event_outcome_population(ks_data,
     per-cell result as biology**). ``null_mode='pooled'`` trades a shared-null
     assumption for ~n_cells better p-value resolution at the same compute.
     When off, all three are ``None`` and every other key is unchanged.
+
+    ``restrict_to_ephys_range`` (default ``True``) behaves as in
+    ``decode_opponent_identity_population``: drops any event whose
+    ``time_window`` around it falls partly or fully outside the selected
+    cells' own spike time range (first via ``ephys_time_range`` passed into
+    ``extract_outcome_labels``, then again against the padded window
+    actually used for features). Unlike the opponent decoder there is no
+    per-class pruning — winner/loser is a fixed binary pair, so if either
+    side drops below ``min_events_per_class`` after filtering the whole
+    call fails rather than silently continuing with one class.
     """
+    # Cell selection happens first so the ephys window it implies can be
+    # passed into label extraction below.
+    if use_quality_cells:
+        quality_thresholds = dict(_DEFAULT_QUALITY_THRESHOLDS) if quality_thresholds is None else quality_thresholds
+        selected_cluster_ids, spike_times_list = ks_data.get_filtered_cells_spike_times(**quality_thresholds)
+        print(f"Using {len(selected_cluster_ids)} quality-filtered cells")
+    else:
+        selected_cluster_ids = list(ks_data.ks_ids)
+        spike_times_list = list(ks_data.spike_times_by_cell)
+        print(f"Using all {len(selected_cluster_ids)} cells")
+
+    if len(selected_cluster_ids) == 0:
+        print("No cells selected for analysis")
+        return {'error': 'No cells selected', 'status': 'failed'}
+
+    ephys_time_range = None
+    if restrict_to_ephys_range:
+        if use_quality_cells:
+            ephys_lo, ephys_hi = ks_data.quality_ephys_window(**quality_thresholds)
+        else:
+            ephys_lo, ephys_hi = ks_data.ephys_window
+        if ephys_lo == 0.0 and ephys_hi == 0.0:
+            print("Selected cells have no spikes")
+            return {'error': 'Selected cells have no spikes', 'status': 'failed'}
+        ephys_time_range = (float(ephys_lo), float(ephys_hi))
+        print(f"Selected cells' spike time range: [{ephys_lo:.1f}, {ephys_hi:.1f}]s")
+
     try:
         event_start_times, event_end_times, outcome_labels = behavior_data.extract_outcome_labels(
-            animal_of_interest, behavior_type, min_events_per_class
+            animal_of_interest, behavior_type, min_events_per_class,
+            ephys_time_range=ephys_time_range,
         )
         if len(event_start_times) == 0:
             scope = behavior_type if behavior_type is not None else 'aggressive'
@@ -139,18 +178,34 @@ def decode_event_outcome_population(ks_data,
     else:
         raise ValueError("alignment must be 'start' or 'end'")
 
-    if use_quality_cells:
-        quality_thresholds = dict(_DEFAULT_QUALITY_THRESHOLDS) if quality_thresholds is None else quality_thresholds
-        selected_cluster_ids, spike_times_list = ks_data.get_filtered_cells_spike_times(**quality_thresholds)
-        print(f"Using {len(selected_cluster_ids)} quality-filtered cells")
-    else:
-        selected_cluster_ids = list(ks_data.ks_ids)
-        spike_times_list = list(ks_data.spike_times_by_cell)
-        print(f"Using all {len(selected_cluster_ids)} cells")
+    # The ephys_time_range filter above only checks each event's own
+    # (ts_start_ephys, ts_end_ephys) span; it doesn't know about
+    # time_window. An event whose own span is in range can still pull an
+    # analysis window that sticks out past the selected cells' spikes, so
+    # re-check here against the padded window actually used for features.
+    n_events_dropped_outside_ephys_range = 0
+    if restrict_to_ephys_range:
+        ephys_lo, ephys_hi = ephys_time_range
+        window_start = event_times + time_window[0]
+        window_end = event_times + time_window[1]
+        in_range = (window_start >= ephys_lo) & (window_end <= ephys_hi)
+        n_events_dropped_outside_ephys_range = int(np.sum(~in_range))
+        if n_events_dropped_outside_ephys_range > 0:
+            print(f"Dropping {n_events_dropped_outside_ephys_range}/{len(event_times)} events "
+                  f"whose ({time_window[0]:+.1f}, {time_window[1]:+.1f})s analysis window falls "
+                  f"outside the selected cells' spike time range "
+                  f"[{ephys_lo:.1f}, {ephys_hi:.1f}]s")
+        event_times = event_times[in_range]
+        outcome_labels = outcome_labels[in_range]
 
-    if len(selected_cluster_ids) == 0:
-        print("No cells selected for analysis")
-        return {'error': 'No cells selected', 'status': 'failed'}
+        unique_after, counts_after = np.unique(outcome_labels, return_counts=True)
+        if len(unique_after) < 2 or int(np.min(counts_after)) < min_events_per_class:
+            print("Fewer than min_events_per_class events remain in one or both "
+                  "outcome classes after ephys-range filtering")
+            return {
+                'error': 'Insufficient events per class after ephys-range filtering',
+                'status': 'failed',
+            }
 
     cell_results, successful_cluster_ids, accuracies = run_population_per_cell_decode(
         spike_times_list=spike_times_list,
@@ -222,6 +277,9 @@ def decode_event_outcome_population(ks_data,
             'n_shuffles': n_shuffles,
             'alpha': alpha,
             'null_mode': null_mode,
+            'restrict_to_ephys_range': restrict_to_ephys_range,
+            'ephys_time_range': ephys_time_range,
+            'n_events_dropped_outside_ephys_range': n_events_dropped_outside_ephys_range,
             'class_label': _CLASS_LABEL,
             'analysis_title': _ANALYSIS_TITLE,
         },

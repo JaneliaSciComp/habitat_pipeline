@@ -214,13 +214,6 @@ def decode_opponent_identity_population(ks_data,
         event_times = event_times[mask]
         opponent_labels = opponent_labels[mask]
 
-    if max_opponents is not None:
-        unique_opps, counts = np.unique(opponent_labels, return_counts=True)
-        top_opponents = unique_opps[np.argsort(counts)[::-1][:max_opponents]]
-        mask = np.isin(opponent_labels, top_opponents)
-        event_times = event_times[mask]
-        opponent_labels = opponent_labels[mask]
-
     # The ephys_time_range filter above only checks each event's own
     # (ts_start_ephys, ts_end_ephys) span; it doesn't know about
     # time_window. An event whose own span is in range can still pull an
@@ -264,6 +257,17 @@ def decode_opponent_identity_population(ks_data,
         if len(np.unique(opponent_labels)) < 2:
             print("Fewer than 2 classes remain after ephys-range filtering")
             return {'error': 'Fewer than 2 classes remain after ephys-range filtering', 'status': 'failed'}
+
+    # max_opponents picks the top-N opponents by count; it runs last so
+    # that count reflects the fully ephys-range-filtered events, not the
+    # raw pre-filter counts (an opponent that looks well-represented before
+    # filtering can end up with very few — or zero — surviving events).
+    if max_opponents is not None:
+        unique_opps, counts = np.unique(opponent_labels, return_counts=True)
+        top_opponents = unique_opps[np.argsort(counts)[::-1][:max_opponents]]
+        mask = np.isin(opponent_labels, top_opponents)
+        event_times = event_times[mask]
+        opponent_labels = opponent_labels[mask]
 
     cell_results, successful_cluster_ids, accuracies = run_population_per_cell_decode(
         spike_times_list=spike_times_list,

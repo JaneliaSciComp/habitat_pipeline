@@ -337,11 +337,34 @@ class PopulationGeometryAnalyzer:
         ax.grid(True, alpha=0.3)
         return fig
 
+    @staticmethod
+    def _sphere_surface(center: np.ndarray, radius: float,
+                        resolution: int = 12) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Points on a sphere surface (lat/long grid), for a plotly
+        ``Mesh3d(alphahull=0)`` sphere: points sampled on a sphere's surface
+        are their own convex hull, so ``alphahull=0`` reconstructs the
+        surface without hand-built triangulation indices.
+        """
+        u = np.linspace(0, 2 * np.pi, resolution)
+        v = np.linspace(0, np.pi, resolution)
+        x = center[0] + radius * np.outer(np.cos(u), np.sin(v))
+        y = center[1] + radius * np.outer(np.sin(u), np.sin(v))
+        z = center[2] + radius * np.outer(np.ones_like(u), np.cos(v))
+        return x.ravel(), y.ravel(), z.ravel()
+
     def plot_population_dynamics_interactive(self,
                                              reduced_data: Dict,
                                              show_individual: bool = False,
                                              time_range: Optional[Tuple[float, float]] = None):
-        """Interactive plotly version of :meth:`plot_population_dynamics`."""
+        """Interactive plotly version of :meth:`plot_population_dynamics`.
+
+        When ``show_individual`` is ``False``, every point along each
+        condition's mean trajectory is wrapped in a semi-transparent sphere
+        whose radius is the across-event standard deviation at that time
+        bin (averaged over the 3 components — a sphere can't show
+        anisotropic spread, so this is a single representative radius, not
+        a per-axis ellipsoid).
+        """
         import plotly.express as px
         import plotly.graph_objects as go
 
@@ -396,6 +419,24 @@ class PopulationGeometryAnalyzer:
                     marker=dict(color=color, size=6, symbol='square'),
                     name=f'{label} end', showlegend=False,
                 ))
+
+                if n_events > 1:
+                    # One representative radius per time bin (mean std
+                    # across the 3 components), rendered as a semi-
+                    # transparent sphere around that bin's mean point.
+                    std_traj = np.std(traj, axis=0)[time_mask]
+                    sphere_radius = std_traj.mean(axis=1)
+                    for t_idx in range(mean_traj.shape[0]):
+                        r = sphere_radius[t_idx]
+                        if r <= 0:
+                            continue
+                        sx, sy, sz = self._sphere_surface(mean_traj[t_idx], r)
+                        fig.add_trace(go.Mesh3d(
+                            x=sx, y=sy, z=sz, alphahull=0,
+                            color=color, opacity=0.12,
+                            name=f'{label} ±1 SD', showlegend=False,
+                            hoverinfo='skip',
+                        ))
 
         title_suffix = (' - All Individual Trials' if show_individual
                         else ' - Mean per Condition')

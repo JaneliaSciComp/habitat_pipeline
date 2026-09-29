@@ -134,17 +134,50 @@ class BehavioralEventsData:
                 ids.update(self.events_data[col].dropna().unique())
         return sorted(ids)
 
+    @staticmethod
+    def _filter_to_ephys_range(
+        df: pd.DataFrame,
+        ephys_time_range: Optional[Tuple[float, float]],
+    ) -> pd.DataFrame:
+        """Drop rows whose ``(ts_start_ephys, ts_end_ephys)`` falls outside
+        ``ephys_time_range``. No-op when ``ephys_time_range`` is ``None``.
+
+        An event timestamped past the point where the recorded cells stop
+        firing has no real spike data to decode from regardless of its
+        label — see the ``duration_disagrees_with_window`` gotcha in
+        CLAUDE.md, where a stale cached ``duration_seconds`` masked exactly
+        this for rat631/20251216.
+        """
+        if ephys_time_range is None:
+            return df
+        lo, hi = ephys_time_range
+        in_range = (df['ts_start_ephys'] >= lo) & (df['ts_end_ephys'] <= hi)
+        n_dropped = int((~in_range).sum())
+        if n_dropped > 0:
+            print(f"[OK] Dropping {n_dropped}/{len(df)} events outside "
+                  f"ephys_time_range [{lo:.1f}, {hi:.1f}]s")
+        return df[in_range]
+
     def extract_opponent_labels(
         self,
         animal_of_interest: str,
         behavior_type: Optional[str] = None,
         min_events_per_class: int = 5,
+        ephys_time_range: Optional[Tuple[float, float]] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Extract (start_times, end_times, opponent_labels) for events involving
         ``animal_of_interest``, using ephys-synchronized timestamps.
 
         Requires ``synchronize_with_ephys`` to have been called (ts_*_ephys columns).
+
+        ``ephys_time_range``, if given as ``(lo, hi)`` seconds — e.g. from
+        ``KilosortData.quality_ephys_window()`` — drops any event whose
+        ``ts_start_ephys``/``ts_end_ephys`` falls outside that range before
+        ``min_events_per_class`` is applied, so an opponent with too few
+        in-range events is correctly excluded rather than passed through with
+        events that have no real spike data behind them (see the
+        ``duration_disagrees_with_window`` gotcha in CLAUDE.md).
         """
         df = self.events_data
         if behavior_type is not None:
@@ -165,6 +198,10 @@ class BehavioralEventsData:
 
         if 'ts_start_ephys' not in df.columns:
             raise ValueError("No ephys-synchronized timestamp columns found in behavioral data")
+
+        df = self._filter_to_ephys_range(df, ephys_time_range)
+        if len(df) == 0:
+            return np.array([]), np.array([]), np.array([])
 
         event_start_times = df['ts_start_ephys'].values
         event_end_times = df['ts_end_ephys'].values
@@ -246,6 +283,7 @@ class BehavioralEventsData:
         animal_of_interest: str,
         behavior_type: Optional[str] = None,
         min_events_per_class: int = 5,
+        ephys_time_range: Optional[Tuple[float, float]] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Extract (start_times, end_times, group_labels) where group_labels are
@@ -258,7 +296,8 @@ class BehavioralEventsData:
         groups relative to ``animal_of_interest``. ``min_events_per_class``
         is applied at the group level: each of ``'self'`` / ``'others'``
         must have at least ``min_events_per_class`` events, otherwise empty
-        arrays are returned.
+        arrays are returned. ``ephys_time_range`` behaves as in
+        ``extract_opponent_labels``, applied before that group-level check.
         """
         df = self.events_data
         if behavior_type is not None:
@@ -279,6 +318,10 @@ class BehavioralEventsData:
 
         if 'ts_start_ephys' not in df.columns:
             raise ValueError("No ephys-synchronized timestamp columns found in behavioral data")
+
+        df = self._filter_to_ephys_range(df, ephys_time_range)
+        if len(df) == 0:
+            return np.array([]), np.array([]), np.array([])
 
         event_start_times = df['ts_start_ephys'].values
         event_end_times = df['ts_end_ephys'].values
@@ -315,6 +358,7 @@ class BehavioralEventsData:
         animal_of_interest: str,
         behavior_type: Optional[str] = None,
         min_events_per_class: int = 5,
+        ephys_time_range: Optional[Tuple[float, float]] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Extract (start_times, end_times, outcome_labels) for events where
@@ -325,8 +369,8 @@ class BehavioralEventsData:
         ``loser`` columns are populated, regardless of behavior type. Pass
         ``behavior_type='F'`` (or another type) to restrict the scope.
 
-        Mirrors ``extract_opponent_labels`` and requires
-        ``synchronize_with_ephys`` to have been called.
+        Mirrors ``extract_opponent_labels`` (including ``ephys_time_range``)
+        and requires ``synchronize_with_ephys`` to have been called.
         """
         if 'winner' not in self.events_data.columns or 'loser' not in self.events_data.columns:
             raise ValueError("Behavioral data must have 'winner' and 'loser' columns")
@@ -355,6 +399,10 @@ class BehavioralEventsData:
 
         if 'ts_start_ephys' not in df.columns:
             raise ValueError("No ephys-synchronized timestamp columns found in behavioral data")
+
+        df = self._filter_to_ephys_range(df, ephys_time_range)
+        if len(df) == 0:
+            return np.array([]), np.array([]), np.array([])
 
         event_start_times = df['ts_start_ephys'].values
         event_end_times = df['ts_end_ephys'].values

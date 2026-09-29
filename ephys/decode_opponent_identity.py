@@ -102,13 +102,16 @@ def _extract_labels(behavior_data,
                     animal_of_interest: str,
                     behavior_type: Optional[str],
                     min_events_per_class: int,
-                    label_mode: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+                    label_mode: str,
+                    ephys_time_range: Optional[Tuple[float, float]] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     if label_mode == 'group':
         return behavior_data.extract_group_labels(
-            animal_of_interest, behavior_type, min_events_per_class
+            animal_of_interest, behavior_type, min_events_per_class,
+            ephys_time_range=ephys_time_range,
         )
     return behavior_data.extract_opponent_labels(
-        animal_of_interest, behavior_type, min_events_per_class
+        animal_of_interest, behavior_type, min_events_per_class,
+        ephys_time_range=ephys_time_range,
     )
 
 
@@ -158,10 +161,39 @@ def decode_opponent_identity_population(ks_data,
     if label_mode not in ('opponent', 'group'):
         raise ValueError(f"label_mode must be 'opponent' or 'group', got {label_mode!r}")
 
+    # Cell selection happens first so the ephys window it implies can be
+    # passed into label extraction below (an opponent with too few in-range
+    # events is then excluded right away, before selected_opponents/
+    # max_opponents ever sees it).
+    if use_quality_cells:
+        quality_thresholds = dict(_DEFAULT_QUALITY_THRESHOLDS) if quality_thresholds is None else quality_thresholds
+        selected_cluster_ids, spike_times_list = ks_data.get_filtered_cells_spike_times(**quality_thresholds)
+        print(f"Using {len(selected_cluster_ids)} quality-filtered cells")
+    else:
+        selected_cluster_ids = list(ks_data.ks_ids)
+        spike_times_list = list(ks_data.spike_times_by_cell)
+        print(f"Using all {len(selected_cluster_ids)} cells")
+
+    if len(selected_cluster_ids) == 0:
+        print("No cells selected for analysis")
+        return {'error': 'No cells selected', 'status': 'failed'}
+
+    ephys_time_range = None
+    if restrict_to_ephys_range:
+        if use_quality_cells:
+            ephys_lo, ephys_hi = ks_data.quality_ephys_window(**quality_thresholds)
+        else:
+            ephys_lo, ephys_hi = ks_data.ephys_window
+        if ephys_lo == 0.0 and ephys_hi == 0.0:
+            print("Selected cells have no spikes")
+            return {'error': 'Selected cells have no spikes', 'status': 'failed'}
+        ephys_time_range = (float(ephys_lo), float(ephys_hi))
+        print(f"Selected cells' spike time range: [{ephys_lo:.1f}, {ephys_hi:.1f}]s")
+
     try:
         event_start_times, event_end_times, opponent_labels = _extract_labels(
             behavior_data, animal_of_interest, behavior_type,
-            min_events_per_class, label_mode,
+            min_events_per_class, label_mode, ephys_time_range=ephys_time_range,
         )
         if len(event_start_times) == 0:
             raise ValueError(f"No events found for behavior type '{behavior_type}'")
@@ -189,32 +221,14 @@ def decode_opponent_identity_population(ks_data,
         event_times = event_times[mask]
         opponent_labels = opponent_labels[mask]
 
-    if use_quality_cells:
-        quality_thresholds = dict(_DEFAULT_QUALITY_THRESHOLDS) if quality_thresholds is None else quality_thresholds
-        selected_cluster_ids, spike_times_list = ks_data.get_filtered_cells_spike_times(**quality_thresholds)
-        print(f"Using {len(selected_cluster_ids)} quality-filtered cells")
-    else:
-        selected_cluster_ids = list(ks_data.ks_ids)
-        spike_times_list = list(ks_data.spike_times_by_cell)
-        print(f"Using all {len(selected_cluster_ids)} cells")
-
-    if len(selected_cluster_ids) == 0:
-        print("No cells selected for analysis")
-        return {'error': 'No cells selected', 'status': 'failed'}
-
-    ephys_time_range = None
+    # The ephys_time_range filter above only checks each event's own
+    # (ts_start_ephys, ts_end_ephys) span; it doesn't know about
+    # time_window. An event whose own span is in range can still pull an
+    # analysis window that sticks out past the selected cells' spikes, so
+    # re-check here against the padded window actually used for features.
     n_events_dropped_outside_ephys_range = 0
     if restrict_to_ephys_range:
-        if use_quality_cells:
-            ephys_lo, ephys_hi = ks_data.quality_ephys_window(**quality_thresholds)
-        else:
-            ephys_lo, ephys_hi = ks_data.ephys_window
-        if ephys_lo == 0.0 and ephys_hi == 0.0:
-            print("Selected cells have no spikes")
-            return {'error': 'Selected cells have no spikes', 'status': 'failed'}
-        ephys_time_range = (float(ephys_lo), float(ephys_hi))
-        print(f"Selected cells' spike time range: [{ephys_lo:.1f}, {ephys_hi:.1f}]s")
-
+        ephys_lo, ephys_hi = ephys_time_range
         window_start = event_times + time_window[0]
         window_end = event_times + time_window[1]
         in_range = (window_start >= ephys_lo) & (window_end <= ephys_hi)
@@ -352,15 +366,43 @@ def decode_opponent_identity_time_resolved(ks_data,
                                            min_events_per_class: int = 5,
                                            n_shuffles: int = 0,
                                            selected_opponents: Optional[List[str]] = None,
-                                           label_mode: str = 'opponent') -> Dict:
-    """Population (multi-cell) LDA decoding of opponent identity per time bin."""
+                                           label_mode: str = 'opponent',
+                                           restrict_to_ephys_range: bool = True) -> Dict:
+    """Population (multi-cell) LDA decoding of opponent identity per time bin.
+
+    ``restrict_to_ephys_range`` behaves as in
+    ``decode_opponent_identity_population`` (see that docstring): drops
+    events outside the selected cells' spike time range, first via
+    ``ephys_time_range`` passed into label extraction, then again against
+    the padded ``time_window`` actually used for features.
+    """
     if label_mode not in ('opponent', 'group'):
         return {'error': f"label_mode must be 'opponent' or 'group', got {label_mode!r}",
                 'status': 'failed'}
+
+    if use_quality_cells:
+        thresholds = dict(_DEFAULT_QUALITY_THRESHOLDS) if quality_thresholds is None else quality_thresholds
+        selected_cluster_ids, spike_times_list = ks_data.get_filtered_cells_spike_times(**thresholds)
+    else:
+        selected_cluster_ids = list(ks_data.ks_ids)
+        spike_times_list = list(ks_data.spike_times_by_cell)
+    if len(selected_cluster_ids) == 0:
+        return {'error': 'No cells selected', 'status': 'failed'}
+
+    ephys_time_range = None
+    if restrict_to_ephys_range:
+        if use_quality_cells:
+            ephys_lo, ephys_hi = ks_data.quality_ephys_window(**thresholds)
+        else:
+            ephys_lo, ephys_hi = ks_data.ephys_window
+        if ephys_lo == 0.0 and ephys_hi == 0.0:
+            return {'error': 'Selected cells have no spikes', 'status': 'failed'}
+        ephys_time_range = (float(ephys_lo), float(ephys_hi))
+
     try:
         event_start_times, event_end_times, opponent_labels = _extract_labels(
             behavior_data, animal_of_interest, behavior_type,
-            min_events_per_class, label_mode,
+            min_events_per_class, label_mode, ephys_time_range=ephys_time_range,
         )
         if len(event_start_times) == 0:
             raise ValueError(f"No events found for behavior type '{behavior_type}'")
@@ -379,14 +421,28 @@ def decode_opponent_identity_time_resolved(ks_data,
         event_times = event_times[mask]
         opponent_labels = opponent_labels[mask]
 
-    if use_quality_cells:
-        thresholds = dict(_DEFAULT_QUALITY_THRESHOLDS) if quality_thresholds is None else quality_thresholds
-        selected_cluster_ids, spike_times_list = ks_data.get_filtered_cells_spike_times(**thresholds)
-    else:
-        selected_cluster_ids = list(ks_data.ks_ids)
-        spike_times_list = list(ks_data.spike_times_by_cell)
-    if len(selected_cluster_ids) == 0:
-        return {'error': 'No cells selected', 'status': 'failed'}
+    n_events_dropped_outside_ephys_range = 0
+    if restrict_to_ephys_range:
+        ephys_lo, ephys_hi = ephys_time_range
+        window_start = event_times + time_window[0]
+        window_end = event_times + time_window[1]
+        in_range = (window_start >= ephys_lo) & (window_end <= ephys_hi)
+        n_events_dropped_outside_ephys_range = int(np.sum(~in_range))
+        event_times = event_times[in_range]
+        opponent_labels = opponent_labels[in_range]
+
+        if len(event_times) == 0:
+            return {'error': 'No events within ephys time range', 'status': 'failed'}
+
+        if min_events_per_class > 1:
+            unique_after, counts_after = np.unique(opponent_labels, return_counts=True)
+            valid_after = unique_after[counts_after >= min_events_per_class]
+            keep = np.isin(opponent_labels, valid_after)
+            event_times = event_times[keep]
+            opponent_labels = opponent_labels[keep]
+
+        if len(np.unique(opponent_labels)) < 2:
+            return {'error': 'Fewer than 2 classes remain after ephys-range filtering', 'status': 'failed'}
 
     core = run_time_resolved_population_decode(
         spike_times_list=spike_times_list,
@@ -416,6 +472,9 @@ def decode_opponent_identity_time_resolved(ks_data,
         'min_events_per_class': min_events_per_class,
         'n_shuffles': n_shuffles,
         'label_mode': label_mode,
+        'restrict_to_ephys_range': restrict_to_ephys_range,
+        'ephys_time_range': ephys_time_range,
+        'n_events_dropped_outside_ephys_range': n_events_dropped_outside_ephys_range,
         'class_label': _CLASS_LABEL,
         'analysis_title': _ANALYSIS_TITLE,
     }

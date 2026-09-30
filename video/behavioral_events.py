@@ -134,6 +134,34 @@ class BehavioralEventsData:
                 ids.update(self.events_data[col].dropna().unique())
         return sorted(ids)
 
+    def print_summary(self) -> None:
+        """Print event counts per behavior type and per animal.
+
+        Per-animal counts are "any role" — one event where a rat appears in
+        two role columns at once (e.g. initiator and winner) counts once,
+        matching ``get_events_by_rat(rat_id, role='any')``.
+        """
+        df = self.events_data
+        print(f"=== Behavioral Events Summary - session {self.session_id} ===")
+        print(f"Total events: {len(df)}")
+
+        print("\nEvents per type:")
+        if 'type' in df.columns:
+            for btype, count in df['type'].value_counts().items():
+                full_name = self.BEHAVIOR_TYPES.get(btype, btype)
+                print(f"  {btype} ({full_name}): {count}")
+        else:
+            print("  No 'type' column found")
+
+        print("\nEvents per animal (any role - initiator/victim/winner/loser):")
+        rat_columns = [c for c in _RAT_ID_COLUMNS if c in df.columns]
+        if rat_columns:
+            for rat_id in self.get_available_rats():
+                mask = pd.concat([df[c] == rat_id for c in rat_columns], axis=1).any(axis=1)
+                print(f"  {rat_id}: {int(mask.sum())}")
+        else:
+            print("  No rat identity columns found")
+
     @staticmethod
     def _filter_by_behavior_type(
         df: pd.DataFrame,

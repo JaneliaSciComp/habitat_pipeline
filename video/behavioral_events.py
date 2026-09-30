@@ -135,6 +135,23 @@ class BehavioralEventsData:
         return sorted(ids)
 
     @staticmethod
+    def _filter_by_behavior_type(
+        df: pd.DataFrame,
+        behavior_type: Optional[Union[str, Iterable[str]]],
+    ) -> pd.DataFrame:
+        """Filter ``df['type']`` by one abbreviation, a list of them, or no-op.
+
+        ``None`` keeps every type; a single string matches exactly; any
+        other iterable (list, tuple, set, ...) keeps rows matching *any* of
+        the given types.
+        """
+        if behavior_type is None:
+            return df
+        if isinstance(behavior_type, str):
+            return df[df['type'] == behavior_type]
+        return df[df['type'].isin(behavior_type)]
+
+    @staticmethod
     def _filter_to_ephys_range(
         df: pd.DataFrame,
         ephys_time_range: Optional[Tuple[float, float]],
@@ -161,7 +178,7 @@ class BehavioralEventsData:
     def extract_opponent_labels(
         self,
         animal_of_interest: str,
-        behavior_type: Optional[str] = None,
+        behavior_type: Optional[Union[str, Iterable[str]]] = None,
         min_events_per_class: int = 5,
         ephys_time_range: Optional[Tuple[float, float]] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -171,6 +188,10 @@ class BehavioralEventsData:
 
         Requires ``synchronize_with_ephys`` to have been called (ts_*_ephys columns).
 
+        ``behavior_type`` may be a single abbreviation (``'EC'``), a list of
+        them (``['EC', 'F']`` — any matching event is kept), or ``None`` for
+        every type.
+
         ``ephys_time_range``, if given as ``(lo, hi)`` seconds — e.g. from
         ``KilosortData.quality_ephys_window()`` — drops any event whose
         ``ts_start_ephys``/``ts_end_ephys`` falls outside that range before
@@ -179,9 +200,7 @@ class BehavioralEventsData:
         events that have no real spike data behind them (see the
         ``duration_disagrees_with_window`` gotcha in CLAUDE.md).
         """
-        df = self.events_data
-        if behavior_type is not None:
-            df = df[df['type'] == behavior_type]
+        df = self._filter_by_behavior_type(self.events_data, behavior_type)
 
         if 'initiator' not in df.columns or 'victim' not in df.columns:
             raise ValueError("Behavioral data must have 'initiator' and 'victim' columns")
@@ -281,7 +300,7 @@ class BehavioralEventsData:
     def extract_group_labels(
         self,
         animal_of_interest: str,
-        behavior_type: Optional[str] = None,
+        behavior_type: Optional[Union[str, Iterable[str]]] = None,
         min_events_per_class: int = 5,
         ephys_time_range: Optional[Tuple[float, float]] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -293,15 +312,14 @@ class BehavioralEventsData:
         ``_assign_id_groups``.
 
         Mirrors ``extract_opponent_labels`` but pools opponents into two
-        groups relative to ``animal_of_interest``. ``min_events_per_class``
+        groups relative to ``animal_of_interest``. ``behavior_type`` accepts
+        the same single-value / list / ``None`` forms. ``min_events_per_class``
         is applied at the group level: each of ``'self'`` / ``'others'``
         must have at least ``min_events_per_class`` events, otherwise empty
         arrays are returned. ``ephys_time_range`` behaves as in
         ``extract_opponent_labels``, applied before that group-level check.
         """
-        df = self.events_data
-        if behavior_type is not None:
-            df = df[df['type'] == behavior_type]
+        df = self._filter_by_behavior_type(self.events_data, behavior_type)
 
         if 'initiator' not in df.columns or 'victim' not in df.columns:
             raise ValueError("Behavioral data must have 'initiator' and 'victim' columns")
@@ -356,7 +374,7 @@ class BehavioralEventsData:
     def extract_outcome_labels(
         self,
         animal_of_interest: str,
-        behavior_type: Optional[str] = None,
+        behavior_type: Optional[Union[str, Iterable[str]]] = None,
         min_events_per_class: int = 5,
         ephys_time_range: Optional[Tuple[float, float]] = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -367,7 +385,8 @@ class BehavioralEventsData:
 
         Default ``behavior_type=None`` keeps every row whose ``winner`` and
         ``loser`` columns are populated, regardless of behavior type. Pass
-        ``behavior_type='F'`` (or another type) to restrict the scope.
+        ``behavior_type='F'`` (or a list, e.g. ``['F', 'CO']``) to restrict
+        the scope.
 
         Mirrors ``extract_opponent_labels`` (including ``ephys_time_range``)
         and requires ``synchronize_with_ephys`` to have been called.
@@ -375,9 +394,7 @@ class BehavioralEventsData:
         if 'winner' not in self.events_data.columns or 'loser' not in self.events_data.columns:
             raise ValueError("Behavioral data must have 'winner' and 'loser' columns")
 
-        df = self.events_data
-        if behavior_type is not None:
-            df = df[df['type'] == behavior_type]
+        df = self._filter_by_behavior_type(self.events_data, behavior_type)
 
         winner_str = df['winner'].astype('string').str.strip()
         loser_str = df['loser'].astype('string').str.strip()

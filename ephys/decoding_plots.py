@@ -41,7 +41,11 @@ def _analysis_title(results: Dict, default: str = 'Decoding') -> str:
 
 def _behavior_label(results: Dict) -> str:
     btype = results.get('parameters', {}).get('behavior_type')
-    return btype if btype is not None else 'any'
+    if btype is None:
+        return 'any'
+    if isinstance(btype, str):
+        return btype
+    return '+'.join(btype)
 
 
 def _draw_confusion_matrix(ax,

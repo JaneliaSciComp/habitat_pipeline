@@ -37,7 +37,7 @@ Usage:
 import argparse
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -100,7 +100,7 @@ def decode_opponent_identity_single_cell(spike_times: np.ndarray,
 
 def _extract_labels(behavior_data,
                     animal_of_interest: str,
-                    behavior_type: Optional[str],
+                    behavior_type: Optional[Union[str, Iterable[str]]],
                     min_events_per_class: int,
                     label_mode: str,
                     ephys_time_range: Optional[Tuple[float, float]] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -118,7 +118,7 @@ def _extract_labels(behavior_data,
 def decode_opponent_identity_population(ks_data,
                                         behavior_data,
                                         animal_of_interest: str,
-                                        behavior_type: Optional[str] = None,
+                                        behavior_type: Optional[Union[str, Iterable[str]]] = None,
                                         use_quality_cells: bool = True,
                                         quality_thresholds: Optional[Dict] = None,
                                         alignment: str = 'start',
@@ -135,6 +135,11 @@ def decode_opponent_identity_population(ks_data,
                                         null_mode: str = 'per_cell',
                                         restrict_to_ephys_range: bool = True) -> Dict:
     """Decode opponent identity across the population (per-cell LDA).
+
+    ``behavior_type`` may be a single abbreviation (``'EC'``), a list of
+    them (``['EC', 'F']`` — any matching event is kept), or ``None`` for
+    every type; passed straight through to ``extract_opponent_labels`` /
+    ``extract_group_labels``.
 
     ``n_shuffles`` (default 0, i.e. off) opts into the rigor layer: a
     label-permutation significance test + Benjamini-Hochberg FDR correction
@@ -196,7 +201,7 @@ def decode_opponent_identity_population(ks_data,
             min_events_per_class, label_mode, ephys_time_range=ephys_time_range,
         )
         if len(event_start_times) == 0:
-            raise ValueError(f"No events found for behavior type '{behavior_type}'")
+            raise ValueError(f"No events found for behavior type {behavior_type!r}")
         print(f"Found {len(event_start_times)} behavioral events")
     except Exception as e:
         print(f"Error extracting behavioral events: {e}")
@@ -492,7 +497,8 @@ def main():
     parser = argparse.ArgumentParser(description='Decode opponent identity from ephys activity')
     parser.add_argument('--animal_id', type=str, required=True, help='Animal identifier')
     parser.add_argument('--session_id', type=str, required=True, help='Session identifier')
-    parser.add_argument('--behavior_type', type=str, default='F', help='Behavior type to analyze')
+    parser.add_argument('--behavior_type', type=str, nargs='+', default=['F'],
+                        help='Behavior type(s) to analyze (one or more, e.g. --behavior_type EC F)')
     parser.add_argument('--alignment', type=str, default='start', choices=['start', 'end'],
                         help='Event alignment point')
     parser.add_argument('--time_window', type=float, nargs=2, default=[-0.5, 1.0],
@@ -583,11 +589,12 @@ def main():
     if args.save_plots:
         output_dir = Path(args.output_dir) if args.output_dir else Path.cwd()
         output_dir.mkdir(exist_ok=True)
-        summary_path = output_dir / f"opponent_decoding_summary_{args.animal_id}_{args.session_id}_{args.behavior_type}.png"
+        btag = '+'.join(args.behavior_type)
+        summary_path = output_dir / f"opponent_decoding_summary_{args.animal_id}_{args.session_id}_{btag}.png"
         plot_decoding_summary(results, save_path=summary_path)
-        dist_path = output_dir / f"opponent_decoding_distribution_{args.animal_id}_{args.session_id}_{args.behavior_type}.png"
+        dist_path = output_dir / f"opponent_decoding_distribution_{args.animal_id}_{args.session_id}_{btag}.png"
         plot_decoding_accuracy_distribution(results, save_path=dist_path)
-        best_path = output_dir / f"opponent_decoding_best_cells_{args.animal_id}_{args.session_id}_{args.behavior_type}.png"
+        best_path = output_dir / f"opponent_decoding_best_cells_{args.animal_id}_{args.session_id}_{btag}.png"
         plot_best_cells_decoding(results, save_path=best_path)
     else:
         plot_decoding_summary(results)

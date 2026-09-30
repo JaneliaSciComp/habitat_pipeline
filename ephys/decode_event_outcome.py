@@ -31,7 +31,7 @@ Usage:
 import argparse
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -62,6 +62,16 @@ _CLASS_LABEL = 'Outcome'
 _ANALYSIS_TITLE = 'Event Outcome Decoding'
 
 
+def _behavior_type_scope(behavior_type: Optional[Union[str, Iterable[str]]]) -> str:
+    """Human-readable ``behavior_type`` for error messages: ``None`` ->
+    'aggressive', a string as-is, a list joined with '+'."""
+    if behavior_type is None:
+        return 'aggressive'
+    if isinstance(behavior_type, str):
+        return behavior_type
+    return '+'.join(behavior_type)
+
+
 def decode_event_outcome_single_cell(spike_times: np.ndarray,
                                      event_times: np.ndarray,
                                      outcome_labels: np.ndarray,
@@ -89,7 +99,7 @@ def decode_event_outcome_single_cell(spike_times: np.ndarray,
 def decode_event_outcome_population(ks_data,
                                     behavior_data,
                                     animal_of_interest: str,
-                                    behavior_type: Optional[str] = None,
+                                    behavior_type: Optional[Union[str, Iterable[str]]] = None,
                                     use_quality_cells: bool = True,
                                     quality_thresholds: Optional[Dict] = None,
                                     alignment: str = 'end',
@@ -106,7 +116,8 @@ def decode_event_outcome_population(ks_data,
 
     Parameters mirror ``decode_opponent_identity_population``. ``behavior_type``
     defaults to ``None``, in which case any event with both ``winner`` and
-    ``loser`` populated is included.
+    ``loser`` populated is included; it may also be a single abbreviation
+    or a list of them (``['F', 'CO']`` — any matching event is kept).
 
     ``n_shuffles`` (default 0, i.e. off) opts into the rigor layer: a
     label-permutation significance test + Benjamini-Hochberg FDR correction
@@ -162,7 +173,7 @@ def decode_event_outcome_population(ks_data,
             ephys_time_range=ephys_time_range,
         )
         if len(event_start_times) == 0:
-            scope = behavior_type if behavior_type is not None else 'aggressive'
+            scope = _behavior_type_scope(behavior_type)
             raise ValueError(
                 f"No {scope} events with outcome labels found for {animal_of_interest}"
             )
@@ -295,7 +306,7 @@ def decode_event_outcome_population(ks_data,
 def decode_event_outcome_time_resolved(ks_data,
                                        behavior_data,
                                        animal_of_interest: str,
-                                       behavior_type: Optional[str] = None,
+                                       behavior_type: Optional[Union[str, Iterable[str]]] = None,
                                        use_quality_cells: bool = True,
                                        quality_thresholds: Optional[Dict] = None,
                                        alignment: str = 'start',
@@ -308,14 +319,16 @@ def decode_event_outcome_time_resolved(ks_data,
     """Population (multi-cell) LDA decoding of event outcome per time bin.
 
     Mirrors ``decode_opponent_identity_time_resolved``. Labels are
-    ``'winner'`` / ``'loser'`` from ``extract_outcome_labels``.
+    ``'winner'`` / ``'loser'`` from ``extract_outcome_labels``. ``behavior_type``
+    accepts the same single-value / list / ``None`` forms as
+    ``decode_event_outcome_population``.
     """
     try:
         event_start_times, event_end_times, outcome_labels = behavior_data.extract_outcome_labels(
             animal_of_interest, behavior_type, min_events_per_class
         )
         if len(event_start_times) == 0:
-            scope = behavior_type if behavior_type is not None else 'aggressive'
+            scope = _behavior_type_scope(behavior_type)
             raise ValueError(
                 f"No {scope} events with outcome labels found for {animal_of_interest}"
             )
@@ -380,8 +393,9 @@ def main():
     parser = argparse.ArgumentParser(description='Decode event outcome (winner/loser) from ephys activity')
     parser.add_argument('--animal_id', type=str, required=True, help='Animal identifier')
     parser.add_argument('--session_id', type=str, required=True, help='Session identifier')
-    parser.add_argument('--behavior_type', type=str, default=None,
-                        help="Behavior type to analyze (default: any with winner/loser)")
+    parser.add_argument('--behavior_type', type=str, nargs='+', default=None,
+                        help="Behavior type(s) to analyze, e.g. --behavior_type F CO "
+                             "(default: any with winner/loser)")
     parser.add_argument('--alignment', type=str, default='start', choices=['start', 'end'],
                         help='Event alignment point')
     parser.add_argument('--time_window', type=float, nargs=2, default=[-1.0, 2.0],
@@ -470,7 +484,7 @@ def main():
     if args.save_plots:
         output_dir = Path(args.output_dir) if args.output_dir else Path.cwd()
         output_dir.mkdir(parents=True, exist_ok=True)
-        btag = args.behavior_type if args.behavior_type is not None else 'any'
+        btag = _behavior_type_scope(args.behavior_type)
 
         summary_path = output_dir / f"outcome_decoding_summary_{args.animal_id}_{args.session_id}_{btag}.png"
         plot_decoding_summary(results, save_path=summary_path)

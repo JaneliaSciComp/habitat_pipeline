@@ -5,6 +5,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
 import panel as pn
+import param
 from bokeh.layouts import column as bk_col
 from bokeh.models import (
     ColumnDataSource, FixedTicker, HoverTool, LinearColorMapper,
@@ -18,10 +19,11 @@ from sklearn.decomposition import PCA
 from ephys.decode_opponent_identity import align_spikes_to_events, extract_firing_rate_features
 from ingestion.data_paths import DataStorageManager, get_animals_and_sessions
 from ingestion.ephys_sync import DataSyncManager
+from gui.session_browser import SessionBrowser
 from ingestion.kilosort_data_import import load_kilosort_data
 from video.behavioral_events import BehavioralEventsData, load_behavioral_events
 
-pn.extension("plotly")
+pn.extension("plotly", "tabulator")
 
 PALETTE = Category10[10]
 
@@ -33,6 +35,17 @@ CONFIG_OPTIONS = {
     "Cohort 7 (default)": None,
     "Cohort 5": "cohort5_paths.json",
 }
+#: Same labels -> cohort names as the capability manifest / session index spell them.
+COHORT_NAMES = {
+    "Cohort 7 (default)": "cohort7",
+    "Cohort 5": "cohort5",
+}
+
+
+@pn.cache(max_items=4)
+def _recordings(cfg):
+    """``get_animals_and_sessions`` walks the share; once per process is enough."""
+    return get_animals_and_sessions(config_path=cfg)
 # Two parallel lists: labels displayed in the widget, abbreviations used in code
 BTYPE_LABELS = [f"{k} — {v}" for k, v in BehavioralEventsData.BEHAVIOR_TYPES.items()]
 BTYPE_ABBREVS = list(BehavioralEventsData.BEHAVIOR_TYPES.keys())
@@ -249,6 +262,7 @@ class HabitatApp:
         self._bokeh_pane = None
         self._plotly_pane = None
         self._loading = False
+        self._view = "browser"
 
         self._content = pn.Column(
             pn.pane.Alert(
@@ -282,6 +296,14 @@ class HabitatApp:
             name="Rastermap bin size (s)", value=1.0, start=0.1, end=2.0, step=0.1
         )
 
+        self.back_btn = pn.widgets.Button(
+            name="← Session browser", button_type="light", width=220
+        )
+        self.back_btn.on_click(lambda *_: self._show_view("browser"))
+        self.browser = SessionBrowser(COHORT_NAMES, on_explore=self._explore_from_browser)
+        self._main = pn.Column(self.browser.view, sizing_mode="stretch_both")
+        self._sidebar = pn.Column(self.browser.sidebar, width=280)
+
         self.cohort_sel.param.watch(self._update_sessions, "value")
         self.session_sel.param.watch(self._update_animals, "value")
         self.load_btn.on_click(self._on_load)
@@ -291,13 +313,67 @@ class HabitatApp:
         self._update_sessions()
         pn.state.add_periodic_callback(self._check_range_update, period=600)
         self._try_restore_from_cache()
+        # Return to the cohort/row last selected (theme toggles reload the page).
+        browser_state = pn.state.cache.get("session_browser_state") or {}
+        with param.parameterized.discard_events(self.browser.cohort_sel):
+            if browser_state.get("cohort") in self.browser.cohort_sel.options:
+                self.browser.cohort_sel.value = browser_state["cohort"]
+        self.browser.reload(select=browser_state.get("recording"))
+
+    # ── Browser ↔ explore views ────────────────────────────────────────────────
+
+    def _show_view(self, view):
+        self._view = view
+        if view == "browser":
+            self._main[:] = [self.browser.view]
+            self._sidebar[:] = [self.browser.sidebar]
+        else:
+            self._main[:] = [self._content]
+            self._sidebar[:] = [self._explore_sidebar]
+        state = pn.state.cache.get("habitat_last_state")
+        if state is not None:
+            state["view"] = view
+
+    def _explore_from_browser(self, cohort_label, session_id, animal_id):
+        """Explore button: point the existing dropdowns at the row, then load."""
+        if self.cohort_sel.value != cohort_label:
+            self.cohort_sel.value = cohort_label  # triggers _update_sessions
+        if session_id not in self.session_sel.options:
+            self.session_sel.options = sorted(set(self.session_sel.options) | {session_id})
+        self.session_sel.value = session_id       # triggers _update_animals
+        if animal_id not in self.animal_sel.options:
+            self.animal_sel.options = sorted(set(self.animal_sel.options) | {animal_id})
+        self.animal_sel.value = animal_id
+        self._show_view("explore")
+
+        if self._restore_data(cohort_label, session_id, animal_id):
+            self._refresh_behavior()
+            return
+        self._content[:] = [pn.pane.Alert(
+            f"Loading {animal_id} · {session_id}…", alert_type="warning")]
+        # Defer the (slow, synchronous) load one tick so the view switch and the
+        # "Loading" alert reach the browser before it starts.
+        pn.state.add_periodic_callback(lambda: self._on_load(None), period=50, count=1)
+
+    def _restore_data(self, cohort, session_id, animal_id):
+        data = pn.state.cache.get(_cache_key(cohort, session_id, animal_id))
+        if data is None:
+            return False
+        self._ks_data = data["ks_data"]
+        self._events = data["events"]
+        self._raster_img = data["raster_img"]
+        self._t0 = data["t0"]
+        self._t1 = data["t1"]
+        self._x_range = None
+        self._last_x_range = [self._t0, self._t1]
+        return True
 
     # ── Session / animal dropdowns ─────────────────────────────────────────────
 
     def _update_sessions(self, *args):
         cfg = CONFIG_OPTIONS[self.cohort_sel.value]
         try:
-            manifest = get_animals_and_sessions(config_path=cfg)
+            manifest = _recordings(cfg)
             sessions = sorted(manifest["session"].unique().tolist())
         except Exception:
             sessions = []
@@ -311,7 +387,7 @@ class HabitatApp:
             return
         cfg = CONFIG_OPTIONS[self.cohort_sel.value]
         try:
-            manifest = get_animals_and_sessions(config_path=cfg)
+            manifest = _recordings(cfg)
             animals = sorted(
                 manifest.loc[manifest["session"] == session, "animal"].tolist()
             )
@@ -353,18 +429,11 @@ class HabitatApp:
             self.raster_bin_sl.value = state["raster_bin"]
 
         # Restore heavy data objects
-        data = pn.state.cache.get(_cache_key(cohort, session_id, animal_id))
-        if data is None:
+        if not self._restore_data(cohort, session_id, animal_id):
             return
-
-        self._ks_data = data["ks_data"]
-        self._events = data["events"]
-        self._raster_img = data["raster_img"]
-        self._t0 = data["t0"]
-        self._t1 = data["t1"]
-        self._last_x_range = [self._t0, self._t1]
-
         self._refresh_behavior()
+        if state.get("view") == "explore":
+            self._show_view("explore")
 
     # ── Load: spike data + rastermap only ─────────────────────────────────────
 
@@ -432,6 +501,7 @@ class HabitatApp:
             "min_events": self.min_events_sl.value,
             "pca_bin": self.pca_bin_sl.value,
             "raster_bin": self.raster_bin_sl.value,
+            "view": "explore",
         }
 
         self._refresh_behavior()
@@ -612,7 +682,17 @@ class HabitatApp:
 
     @property
     def layout(self):
-        sidebar = pn.Column(
+        return pn.template.FastListTemplate(
+            title="Habitat Pipeline — Interactive",
+            sidebar=[self._sidebar],
+            main=[self._main],
+        )
+
+    @property
+    def _explore_sidebar(self):
+        return pn.Column(
+            self.back_btn,
+            pn.layout.Divider(),
             "## Session",
             self.cohort_sel,
             self.session_sel,
@@ -633,11 +713,6 @@ class HabitatApp:
                 styles={"font-size": "12px", "color": "#888"},
             ),
             width=280,
-        )
-        return pn.template.FastListTemplate(
-            title="Habitat Pipeline — Interactive",
-            sidebar=[sidebar],
-            main=[self._content],
         )
 
 

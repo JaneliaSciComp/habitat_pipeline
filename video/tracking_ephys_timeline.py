@@ -227,7 +227,8 @@ def ephys_grid(intervals: Mapping[str, List[Tuple[float, float]]],
     return grid
 
 
-def tracking_grid(dsm, sync, edges: np.ndarray, required_animals: Sequence[str] = ()
+def tracking_grid(dsm, sync, edges: np.ndarray, required_animals: Sequence[str] = (),
+                  files: Optional[Sequence[Path]] = None
                   ) -> Tuple[List[str], np.ndarray, np.ndarray]:
     """Per animal, per bin: fraction of expected frames detected.
 
@@ -237,16 +238,20 @@ def tracking_grid(dsm, sync, edges: np.ndarray, required_animals: Sequence[str] 
     detects still gets a row, rather than silently disappearing). Also
     returns which bins any tracking file actually spans — the rest are
     masked, not zeroed, by the caller.
+
+    ``files`` overrides ``dsm.get_tracking_files()`` (``dsm`` may then be
+    ``None``) — the session browser passes the list its index already resolved.
     """
     n_bins = len(edges) - 1
     counts: Dict[str, np.ndarray] = defaultdict(lambda: np.zeros(n_bins))
     expected = np.zeros(n_bins)
 
-    try:
-        files = dsm.get_tracking_files() or []
-    except Exception as exc:
-        logger.warning("no tracking files resolved: %s", exc)
-        files = []
+    if files is None:
+        try:
+            files = dsm.get_tracking_files() or []
+        except Exception as exc:
+            logger.warning("no tracking files resolved: %s", exc)
+            files = []
 
     for path in files:
         try:
@@ -386,9 +391,10 @@ def plot_day_timeline(session_date: str, cohort: str, ephys_animals: Sequence[st
 
 # ---------------------------------------------------------------------------
 
-def run_one_day(manifest: Mapping[str, Any], cohort: str, session_date: str,
-                config_path: Optional[str], out_dir: Path, dio_channel: int = 1,
-                bin_seconds: float = 60.0) -> None:
+def compute_day_timeline(manifest: Mapping[str, Any], cohort: str, session_date: str,
+                         config_path: Optional[str], dio_channel: int = 1,
+                         bin_seconds: float = 60.0) -> Dict[str, Any]:
+    """Everything :func:`plot_day_timeline` draws, as arrays (no plotting)."""
     records = day_records(manifest, cohort, session_date)
     if not records:
         raise ValueError(f"no manifest sessions for {cohort} {session_date}")
@@ -418,10 +424,28 @@ def run_one_day(manifest: Mapping[str, Any], cohort: str, session_date: str,
         x_edges = edges / 3600.0
         is_time_of_day = False
 
+    return {
+        'edges': edges,
+        'x_edges': x_edges,
+        'is_time_of_day': is_time_of_day,
+        'ephys_animals': animals,
+        'ephys_grid': e_grid,
+        'track_animals': track_animals,
+        'tracking_grid': t_grid,
+        'covered': covered,
+    }
+
+
+def run_one_day(manifest: Mapping[str, Any], cohort: str, session_date: str,
+                config_path: Optional[str], out_dir: Path, dio_channel: int = 1,
+                bin_seconds: float = 60.0) -> None:
+    t = compute_day_timeline(manifest, cohort, session_date, config_path,
+                             dio_channel=dio_channel, bin_seconds=bin_seconds)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f'{cohort}_{session_date}_coverage_timeline.png'
-    plot_day_timeline(session_date, cohort, animals, track_animals, e_grid, t_grid,
-                      covered, x_edges, is_time_of_day, out_path)
+    plot_day_timeline(session_date, cohort, t['ephys_animals'], t['track_animals'],
+                      t['ephys_grid'], t['tracking_grid'], t['covered'], t['x_edges'],
+                      t['is_time_of_day'], out_path)
 
 
 def main(argv=None) -> int:

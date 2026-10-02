@@ -84,6 +84,7 @@ The decoding modules went through a recent refactor (commits `9eab430`, `797de45
 | AI-in-the-loop discovery platform | [docs/AI_DISCOVERY_LOOP_DESIGN.md](docs/AI_DISCOVERY_LOOP_DESIGN.md), [docs/PHASE0_FINDINGS.md](docs/PHASE0_FINDINGS.md), [HANDOFF.md](HANDOFF.md), [scripts/phase0_probe.py](scripts/phase0_probe.py); skills in `.claude/skills/{run-analysis,interpret-results,propose-hypotheses,implement-module}/`, subagents `.claude/agents/interpreter.md` and `.claude/agents/coder.md` |
 | Decoding plots | [ephys/decoding_plots.py](ephys/decoding_plots.py) |
 | Result-dict schema | [ephys/_lda_decoding.py](ephys/_lda_decoding.py) returns; wrappers in [ephys/decode_opponent_identity.py](ephys/decode_opponent_identity.py) and [ephys/decode_event_outcome.py](ephys/decode_event_outcome.py) add `parameters` and `behavioral_summary` |
+| Panel session browser (landing table of recording blocks → timeline/neurons → Explore) | [gui/session_browser.py](gui/session_browser.py) (UI), [gui/session_index.py](gui/session_index.py) (cached index: manifest ephys facts + share scan of video chunks/tracking/events; sync placed via the manifest's stored slope/intercept, no DIO reads); cache in `.gui_cache/session_browser/`; precompute with [scripts/build_session_index.py](scripts/build_session_index.py) |
 | Streamlit GUI plumbing | [gui/state.py](gui/state.py) (typed `SessionKey`/`AnalysisParams`), [gui/loaders.py](gui/loaders.py), [gui/runners.py](gui/runners.py) (`cached_step`) |
 | Adding a new analysis tab | Pattern: write a `render(session_key, params)` in [gui/tabs/](gui/tabs/), wire it into [gui/app.py](gui/app.py) |
 | Inter-brain shared subspace (multi-animal CCA, nulls, behavior regression) | [ephys/README.md](ephys/README.md) is the entry point; modules in [ephys/inter_brain_dynamics.py](ephys/inter_brain_dynamics.py), [ephys/inter_brain_plots.py](ephys/inter_brain_plots.py), [ephys/run_inter_brain.py](ephys/run_inter_brain.py), [ingestion/multi_animal_session.py](ingestion/multi_animal_session.py), [video/behavior_features.py](video/behavior_features.py), [gui/tabs/inter_brain.py](gui/tabs/inter_brain.py) |
@@ -97,6 +98,10 @@ The user's working directory is on a Janelia Windows workstation; data paths in 
 ```bash
 # Run the Streamlit GUI (primary entry point)
 streamlit run gui/app.py
+
+# Panel dashboard: session browser -> timeline/rastermap/PCA
+panel serve gui/interactive_app.py --show
+python scripts/build_session_index.py --cohort cohort7 --timelines   # precompute per-day tracking grids
 
 # Run tests (run_tests.py crashes on Windows cp1252 consoles - emoji in its banner;
 # use pytest directly). Heavy permutation tests are marked `slow`.

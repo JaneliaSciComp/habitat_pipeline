@@ -157,18 +157,24 @@ def plot_rat_behavior_heatmap(events: "BehavioralEventsData",
 def plot_behavioral_event_timeline(events: "BehavioralEventsData",
                                    rats: Optional[List[str]] = None,
                                    event_types: Optional[List[str]] = None,
+                                   use_ephys_time: bool = False,
                                    figsize: Tuple[int, int] = (16, 6)
                                    ) -> Optional[plt.Figure]:
     """Plot behavioral events as connected pairs of points on a timeline.
 
     Each event is drawn as two markers (one per animal involved) at the same
-    chronological event index on the x-axis, connected by a vertical line.
-    Y positions correspond to animal IDs; line/marker color encodes event type.
+    x position, connected by a vertical line. Y positions correspond to
+    animal IDs; line/marker color encodes event type.
 
     Args:
         events: BehavioralEventsData instance.
         rats: Optional list of rat IDs to include (default: all rats).
         event_types: Optional list of event-type abbreviations (default: all).
+        use_ephys_time: If True, place events by their ``ts_start_ephys``
+            value (seconds, ephys clock) rather than chronological event
+            index. Requires ``synchronize_with_ephys`` to have been called;
+            falls back to the index (with a warning) if that column is
+            missing, and drops any event missing an ephys timestamp.
         figsize: Figure size as (width, height).
     """
     data = events.events_data
@@ -193,6 +199,20 @@ def plot_behavioral_event_timeline(events: "BehavioralEventsData",
     if data.empty:
         logger.warning("No events found for the specified filters.")
         return None
+
+    if use_ephys_time and 'ts_start_ephys' not in data.columns:
+        logger.warning("use_ephys_time=True but 'ts_start_ephys' column not found "
+                       "(call synchronize_with_ephys first) - falling back to event index.")
+        use_ephys_time = False
+    elif use_ephys_time:
+        n_before = len(data)
+        data = data.dropna(subset=['ts_start_ephys'])
+        if len(data) < n_before:
+            logger.warning("Dropping %d/%d events with no ephys timestamp.",
+                           n_before - len(data), n_before)
+        if data.empty:
+            logger.warning("No events left with an ephys timestamp.")
+            return None
 
     data = data.reset_index(drop=True)
 
@@ -235,7 +255,12 @@ def plot_behavioral_event_timeline(events: "BehavioralEventsData",
     type_colors = _type_color_map(all_types)
 
     # Vectorized geometry: one LineCollection + one scatter call.
-    xs = np.arange(len(data))
+    if use_ephys_time:
+        xs = data['ts_start_ephys'].to_numpy(dtype=float)
+        xlabel = 'Time (s, ephys clock)'
+    else:
+        xs = np.arange(len(data))
+        xlabel = 'Event Index (chronological)'
     y_init = data['initiator'].map(rat_positions).to_numpy()
     y_vic = data['victim'].map(rat_positions).to_numpy()
     if 'type' in data.columns:
@@ -254,12 +279,17 @@ def plot_behavioral_event_timeline(events: "BehavioralEventsData",
                np.concatenate([y_init, y_vic]),
                c=np.concatenate([colors, colors]),
                s=20, zorder=3, alpha=0.9)
-    ax.set_xlim(-0.5, len(data) - 0.5)
+    if use_ephys_time:
+        x_min, x_max = float(xs.min()), float(xs.max())
+        pad = (x_max - x_min) * 0.02 if x_max > x_min else 1.0
+        ax.set_xlim(x_min - pad, x_max + pad)
+    else:
+        ax.set_xlim(-0.5, len(data) - 0.5)
     ax.set_ylim(-0.5, len(all_rats) - 0.5)
 
     ax.set_yticks(list(rat_positions.values()))
     ax.set_yticklabels(list(rat_positions.keys()))
-    ax.set_xlabel('Event Index (chronological)')
+    ax.set_xlabel(xlabel)
     ax.set_ylabel('Animal ID')
     ax.set_title(f'Behavioral Event Timeline\nSession: {events.session_id}')
 

@@ -25,11 +25,14 @@ import json
 import logging
 import os
 import pickle
+import re
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 
 import numpy as np
+import pandas as pd
 from scipy.stats import zscore
 from sklearn.decomposition import PCA
 
@@ -37,6 +40,9 @@ logger = logging.getLogger(__name__)
 
 EXPLORE_CACHE_VERSION = 1
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".gui_cache" / "explore"
+
+#: Bump when the cached trajectory's shape changes (2: every tracking format kept).
+TRAJECTORY_VERSION = 2
 
 #: The bin sizes the explore sliders start at; only these are cached.
 DEFAULT_RASTER_BIN = 1.0
@@ -127,6 +133,92 @@ def compute_view_products(ks_data, raster_bin: float, pca_bin: float) -> Dict[st
 
 
 # ---------------------------------------------------------------------------
+# Focal animal's trajectory
+# ---------------------------------------------------------------------------
+
+#: An APT chunk directory is ``<cohort>_<YYYYMMDD>_<HHMM>``, 30 min long.
+_APT_CHUNK_RE = re.compile(r"(20\d{6})_(\d{4})(?!\d)")
+_APT_CHUNK_SECONDS = 30 * 60
+
+
+def _apt_chunk_epoch_span(path: Path):
+    """Wall-clock span of an APT ``TQT_named.csv`` from its directory name, or None."""
+    for part in (path.parent.name, path.parent.parent.name):
+        m = _APT_CHUNK_RE.search(part)
+        if m:
+            t0 = datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M").timestamp()
+            return t0, t0 + _APT_CHUNK_SECONDS
+    return None
+
+
+def load_focal_trajectory(tracking_files: Sequence[Path], sync, animal_id: str,
+                          t0: float, t1: float) -> Optional[Dict[str, Any]]:
+    """The focal animal's ``(t, x, y)`` within ``[t0, t1]`` (ephys s), in pixels.
+
+    Goes through :func:`video.tracking_import.resolve_tracking_on_ephys_clock`,
+    the one place tracking↔ephys conversion lives. Two tracking formats exist
+    and their pixel spaces differ (the manual export's source video is
+    2148×1064, APT's is 4500×2050 and differently cropped), so they are never
+    mixed: each format is returned separately, and ``default`` names the one
+    with the most in-window frames for this animal. Positions stay in
+    pixels — ``pixels_per_cm`` is calibrated for one format only (CLAUDE.md).
+
+    APT chunks whose directory time cannot overlap the window are skipped
+    before loading (each is a ~100 MB CSV on the share).
+    """
+    from video.tracking_import import load_tracking_data, resolve_tracking_on_ephys_clock
+
+    bare = animal_id[3:] if animal_id.startswith("rat") else animal_id
+    by_format: Dict[str, list] = {}
+    for path in map(Path, tracking_files):
+        if path.name.lower() == "tqt_named.csv":
+            span = _apt_chunk_epoch_span(path)
+            if span is not None:
+                a, b = sync.convert_behavior_to_ephys(np.array(span))
+                if b < t0 or a > t1:
+                    continue
+        elif path.suffix.lower() not in (".csv", ".tsv"):
+            continue
+        try:
+            tracking = load_tracking_data(path)
+            resolved = resolve_tracking_on_ephys_clock(
+                tracking, sync, [animal_id, bare], t_start_ephys=t0, t_end_ephys=t1)
+        except Exception as exc:
+            logger.warning("skipping tracking file %s: %s", path, exc)
+            continue
+        df = resolved.get(animal_id)
+        if df is None or df.empty:
+            df = resolved.get(bare)
+        if df is None or df.empty:
+            continue
+        by_format.setdefault(tracking.tracking_format, []).append(df[["t", "x", "y"]])
+
+    if not by_format:
+        return None
+    formats = {}
+    for fmt, frames in by_format.items():
+        df = (pd.concat(frames, ignore_index=True)
+              .sort_values("t").drop_duplicates("t").reset_index(drop=True))
+        formats[fmt] = {"t": df["t"].to_numpy(), "x": df["x"].to_numpy(),
+                        "y": df["y"].to_numpy(), "n_files": len(frames)}
+    return {
+        "formats": formats,
+        # Default: the source with the most in-window frames for this animal.
+        "default": max(formats, key=lambda k: len(formats[k]["t"])),
+    }
+
+
+def trajectory_formats(trajectory: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """``{format: {t, x, y}}`` for any cached trajectory, including the
+    single-format shape written before sources became selectable."""
+    if not trajectory:
+        return {}
+    if "formats" in trajectory:
+        return trajectory["formats"]
+    return {trajectory["format"]: trajectory}
+
+
+# ---------------------------------------------------------------------------
 # Signature + disk cache
 # ---------------------------------------------------------------------------
 
@@ -147,6 +239,33 @@ def source_signature(kilosort_path: Optional[Path], event_files: Sequence[Path])
         "events": sorted(_stat(Path(f)) for f in event_files),
     }
     return hashlib.sha256(json.dumps(payload, default=str).encode()).hexdigest()[:16]
+
+
+def tracking_signature(tracking_files: Sequence[Path]) -> str:
+    """Hash of the tracking files a cached trajectory came from (stats only)."""
+    payload = {"v": EXPLORE_CACHE_VERSION, "trajectory_v": TRAJECTORY_VERSION,
+               "files": sorted(str(Path(f)) + repr(_stat(Path(f))[1:]) for f in tracking_files)}
+    return hashlib.sha256(json.dumps(payload).encode()).hexdigest()[:16]
+
+
+def update_cached_trajectory(cohort: str, session_id: str, animal_id: str,
+                             trajectory: Optional[Dict[str, Any]], signature: str) -> bool:
+    """Add/replace the trajectory in an existing cache entry (no-op if none)."""
+    path = cache_path(cohort, session_id, animal_id)
+    if not path.exists():
+        return False
+    try:
+        with open(path, "rb") as fh:
+            entry = pickle.load(fh)
+    except Exception:
+        return False
+    entry["trajectory"] = trajectory
+    entry["tracking_signature"] = signature
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "wb") as fh:
+        pickle.dump(entry, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    os.replace(tmp, path)
+    return True
 
 
 def _safe(part: str) -> str:

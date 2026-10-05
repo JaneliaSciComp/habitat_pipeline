@@ -123,3 +123,41 @@ class TestDiskCache:
         path.parent.mkdir(parents=True)
         path.write_bytes(b"not a pickle")
         assert xc.load_view_cache("cohort7", "s", "rat613") is None
+
+
+class TestTrajectory:
+    def _traj(self):
+        t = np.arange(0.0, 100.0, 0.1)
+        return {"formats": {
+            "apt_tqt": {"t": t, "x": 1000 + t, "y": 500 + 0 * t, "n_files": 2},
+            "mask_metrics": {"t": t[:300], "x": t[:300], "y": t[:300], "n_files": 1},
+        }, "default": "apt_tqt"}
+
+    def test_formats_of_both_shapes(self):
+        assert set(xc.trajectory_formats(self._traj())) == {"apt_tqt", "mask_metrics"}
+        legacy = {"format": "apt_tqt", "t": np.arange(3), "x": np.arange(3), "y": np.arange(3)}
+        assert list(xc.trajectory_formats(legacy)) == ["apt_tqt"]
+        assert xc.trajectory_formats(None) == {}
+
+    def test_tracking_signature_tracks_files(self, sources):
+        _, ev = sources
+        before = xc.tracking_signature([ev])
+        st = ev.stat()
+        os.utime(ev, (st.st_atime, st.st_mtime + 5))
+        assert xc.tracking_signature([ev]) != before
+
+    def test_update_cached_trajectory(self):
+        products = xc.compute_view_products(StubKs(), xc.DEFAULT_RASTER_BIN, xc.DEFAULT_PCA_BIN)
+        assert not xc.update_cached_trajectory("c", "s", "rat1", self._traj(), "tsig")
+        xc.save_view_cache("c", "s", "rat1", products, None, "sig")
+        assert xc.update_cached_trajectory("c", "s", "rat1", self._traj(), "tsig")
+        entry = xc.load_view_cache("c", "s", "rat1")
+        assert entry["tracking_signature"] == "tsig"
+        assert entry["trajectory"]["default"] == "apt_tqt"
+        assert entry["signature"] == "sig"          # the rest of the entry is untouched
+
+    def test_apt_chunk_span_from_directory(self, tmp_path):
+        f = tmp_path / "cohort7_20251216_0959" / "solution" / "TQT_named.csv"
+        span = xc._apt_chunk_epoch_span(f)
+        assert span is not None and span[1] - span[0] == 30 * 60
+        assert xc._apt_chunk_epoch_span(tmp_path / "x" / "TQT_named.csv") is None

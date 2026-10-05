@@ -18,7 +18,9 @@ from bokeh.palettes import Category10, Inferno256
 from bokeh.plotting import figure
 
 from ephys.decode_opponent_identity import align_spikes_to_events, extract_firing_rate_features
-from ingestion.data_paths import DataStorageManager, get_animals_and_sessions
+from ingestion.data_paths import (
+    DataStorageManager, get_animals_and_sessions, get_tracking_files_by_date,
+)
 from ingestion.ephys_sync import DataSyncManager
 from gui import explore_cache as xc
 from gui.session_browser import SessionBrowser
@@ -149,15 +151,23 @@ def _load_full(cfg, session_id, animal_id, raster_bin, pca_bin, cached_signature
 
     ks_data = load_kilosort_data(ks_path)
     events = load_behavioral_events(event_files, session_id=dsm.session_id)
-    events.synchronize_with_ephys(DataSyncManager(dsm, dio_channel=1), create_new_columns=True)
+    sync = DataSyncManager(dsm, dio_channel=1)
+    events.synchronize_with_ephys(sync, create_new_columns=True)
 
     if signature != cached_signature:
         products = xc.compute_view_products(ks_data, raster_bin, pca_bin)
     else:
         products = None
         ks_data.filter_cells_by_firing_patterns()   # what later re-binning expects
+    # Resolved fresh: the DSM's on-disk path cache has no staleness check and
+    # can list fewer APT chunks than the share has (CLAUDE.md).
+    try:
+        tracking_files = get_tracking_files_by_date(session_id, config_path=cfg)
+    except Exception as exc:
+        logger.info("no tracking files for %s: %s", session_id, exc)
+        tracking_files = []
     return {"ks_data": ks_data, "events": events, "signature": signature,
-            "products": products}
+            "products": products, "sync": sync, "tracking_files": tracking_files}
 
 
 def _make_pca_plotly(pop_data_full, t_view_start, t_view_end):
@@ -190,6 +200,8 @@ def _make_pca_plotly(pop_data_full, t_view_start, t_view_end):
             mode="lines",
             line=dict(
                 color=view_times, colorscale="Viridis", width=3,
+                # Same window-pinned scale as the trajectory panel.
+                cmin=t_view_start, cmax=t_view_end,
                 showscale=True,
                 colorbar=dict(title="Time (s)", x=1.05, len=0.6),
             ),
@@ -252,6 +264,116 @@ def _make_pca_plotly(pop_data_full, t_view_start, t_view_end):
     return fig
 
 
+#: Most trajectory samples drawn at once (tracking runs at ~10 Hz: a 5 h block
+#: is ~180k points); the visible window is strided down to this.
+MAX_TRAJ_POINTS = 20000
+#: An event is placed on the trajectory only if a tracked frame lies this close.
+EVENT_SNAP_S = 1.0
+
+
+def _make_trajectory_plotly(traj, ev_df, opp_colors, min_events, t_view_start, t_view_end,
+                            animal_id, behavior_type, btype_map, status=None,
+                            other_sources=False):
+    """The focal animal's (x, y) path in the view window, coloured by time.
+
+    Mirrors :func:`video.behavioral_visualization.plot_events_on_trajectory`:
+    events sit at the animal's position at event start, coloured by opponent —
+    the same colours as the timeline and PCA. As on the timeline, opponents
+    below ``min_events`` are faded rather than hidden.
+    """
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+    plotly_template = "plotly_dark" if pn.config.theme == "dark" else "plotly"
+    layout = dict(template=plotly_template, height=460,
+                  margin=dict(l=0, r=0, t=60, b=0),
+                  legend=dict(title="Opponent", x=0.01, y=0.99))
+
+    if traj is None:
+        fig.add_annotation(text=status or f"No tracking for {animal_id} in this block.",
+                           xref="paper", yref="paper", x=0.5, y=0.5,
+                           showarrow=False, font=dict(size=13))
+        fig.update_layout(title="Trajectory", xaxis_visible=False, yaxis_visible=False,
+                          **layout)
+        return fig
+
+    t, x, y = traj["t"], traj["x"], traj["y"]
+    in_view = (t >= t_view_start) & (t <= t_view_end)
+    tv, xv, yv = t[in_view], x[in_view], y[in_view]
+    fmt = {"apt_tqt": "APT", "mask_metrics": "manual"}.get(traj["format"], traj["format"])
+    if len(tv) == 0:
+        fig.add_annotation(
+            text=(f"{animal_id} is not tracked by {fmt} in "
+                  f"[{t_view_start:.0f}–{t_view_end:.0f} s].<br>"
+                  f"This source covers {t[0]:.0f}–{t[-1]:.0f} s"
+                  + (" — try the other tracking source above." if other_sources else ".")),
+            xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False, font=dict(size=13))
+        fig.update_layout(title=f"{animal_id} trajectory ({fmt})",
+                          xaxis_visible=False, yaxis_visible=False, **layout)
+        return fig
+    stride = max(1, int(np.ceil(len(tv) / MAX_TRAJ_POINTS)))
+    tv, xv, yv = tv[::stride], xv[::stride], yv[::stride]
+
+    if len(tv) >= 2:
+        # Faint path, broken where tracking has a gap so jumps aren't drawn.
+        gap = np.r_[False, np.diff(tv) > 2.0 * stride]
+        lx = np.where(gap, np.nan, xv)
+        ly = np.where(gap, np.nan, yv)
+        fig.add_trace(go.Scattergl(
+            x=lx, y=ly, mode="lines", line=dict(color="rgba(128,128,128,0.25)", width=1),
+            hoverinfo="skip", showlegend=False, connectgaps=False,
+        ))
+        fig.add_trace(go.Scattergl(
+            x=xv, y=yv, mode="markers",
+            marker=dict(size=3, color=tv, colorscale="Viridis", opacity=0.5,
+                        cmin=t_view_start, cmax=t_view_end, showscale=True,
+                        colorbar=dict(title="Time (s)", x=1.02, len=0.6)),
+            name="Trajectory", customdata=tv,
+            hovertemplate="t=%{customdata:.1f}s<extra></extra>",
+        ))
+
+    # Events at the animal's tracked position at event start.
+    n_shown = n_untracked = 0
+    if ev_df is not None and not ev_df.empty and len(t):
+        ev = ev_df[(ev_df["ts_start_ephys"] >= t_view_start)
+                   & (ev_df["ts_start_ephys"] <= t_view_end)]
+        et = ev["ts_start_ephys"].to_numpy(dtype=float)
+        idx = np.clip(np.searchsorted(t, et), 1, len(t) - 1)
+        idx = np.where(np.abs(t[idx - 1] - et) < np.abs(t[idx] - et), idx - 1, idx)
+        snapped = np.abs(t[idx] - et) <= EVENT_SNAP_S
+        n_untracked = int((~snapped).sum())
+        counts = ev_df["opponent"].value_counts()
+        ev = ev.assign(ex=x[idx], ey=y[idx])[snapped]
+        for opp in sorted(ev["opponent"].unique()):
+            sub = ev[ev["opponent"] == opp]
+            faded = counts.get(opp, 0) < min_events
+            # WebGL like the path: an SVG trace would sit *under* the gl canvas.
+            fig.add_trace(go.Scattergl(
+                x=sub["ex"], y=sub["ey"], mode="markers",
+                marker=dict(size=10, color=opp_colors.get(opp, "grey"),
+                            opacity=0.35 if faded else 0.9,
+                            line=dict(width=0.5, color="black")),
+                name=opp + (" (faded)" if faded else ""),
+                hovertext=[f"t={v:.1f}s<br>{btype_map.get(behavior_type, behavior_type)} "
+                           f"{r.initiator} → {r.victim}"
+                           for v, r in zip(sub["ts_start_ephys"], sub.itertuples())],
+                hoverinfo="text",
+            ))
+            n_shown += len(sub)
+
+    untracked = f" · {n_untracked} not tracked at event time" if n_untracked else ""
+    fig.update_layout(
+        title=dict(text=(f"{animal_id} trajectory — {n_shown} {behavior_type} events in view"
+                         f"<br><sup>[{t_view_start:.0f}–{t_view_end:.0f} s]{untracked}</sup>"),
+                   font=dict(size=15)),
+        xaxis=dict(title=f"x ({fmt} pixels)", constrain="domain"),
+        yaxis=dict(title=f"y ({fmt} pixels)", autorange="reversed",
+                   scaleanchor="x", scaleratio=1),
+        **layout,
+    )
+    return fig
+
+
 # ── App class ──────────────────────────────────────────────────────────────────
 
 def _raster_window(img, t0, bin_s, start, end, max_cols=MAX_RASTER_COLS):
@@ -283,6 +405,9 @@ class HabitatApp:
         self._t1 = None
         self._full_pop = None
         self._pca = None          # behaviour-independent PCA trajectory (see explore_cache)
+        self._traj = None         # focal animal's (t, x, y) in pixels, or None
+        self._traj_status = None  # message while the trajectory is unavailable
+        self._traj_pane = None
         self._load_token = 0      # bumps per load; stale background results are dropped
         self._x_range = None      # the live Range1d shared by both Bokeh figures
         self._last_x_range = [None, None]
@@ -325,6 +450,11 @@ class HabitatApp:
             name="Rastermap bin size (s)", value=1.0, start=0.1, end=2.0, step=0.1
         )
 
+        # Tracking source for the trajectory panel; shown only when a block has
+        # more than one (their pixel spaces differ, so they are never mixed).
+        self.traj_src_sel = pn.widgets.RadioButtonGroup(
+            options={}, button_type="light", visible=False, margin=(0, 10))
+        self.traj_src_sel.param.watch(lambda *_: self._update_traj_pane(), "value")
         self.back_btn = pn.widgets.Button(
             name="← Session browser", button_type="light", width=220
         )
@@ -389,6 +519,9 @@ class HabitatApp:
         self._t0 = data["t0"]
         self._t1 = data["t1"]
         self._pca = data.get("pca")
+        self._traj = data.get("trajectory")
+        self._traj_status = None
+        self._sync_traj_sources()
         self._x_range = None
         self._last_x_range = [self._t0, self._t1]
         return True
@@ -498,6 +631,10 @@ class HabitatApp:
             self._ks_data = None
             self._events = cached["events"]
             self._apply_products(cached)
+            self._traj = cached.get("trajectory")
+            self._traj_status = (None if "trajectory" in cached
+                                 else "Loading tracking in the background…")
+            self._sync_traj_sources()
             self._x_range = None
             saved = datetime.fromtimestamp(cached["saved_at"]).strftime("%Y-%m-%d %H:%M")
             self._set_status(
@@ -507,6 +644,8 @@ class HabitatApp:
             self._refresh_behavior()
         else:
             self._set_status()
+            self._traj, self._traj_status = None, "Loading tracking…"
+            self._sync_traj_sources()
             self._content[:] = [pn.pane.Alert(
                 f"Loading {animal_id} · {session_id}: spikes, events and sync, then "
                 "rastermap and PCA. Later visits open from cache.", alert_type="warning")]
@@ -549,6 +688,7 @@ class HabitatApp:
             "t0": self._t0,
             "t1": self._t1,
             "pca": self._pca,
+            "trajectory": self._traj,
         }
         pn.state.cache["habitat_last_state"] = {
             "cohort": cohort_label,
@@ -569,6 +709,35 @@ class HabitatApp:
         # Redraw when the image changed, or when a PCA bin change was deferred.
         if products is not None or cached is None or self._pca_needs_refit():
             self._refresh_behavior()
+
+        # Stage 2: the focal animal's trajectory (reads tracking CSVs).
+        track_sig = xc.tracking_signature(result["tracking_files"])
+        if (cached is not None and products is None and "trajectory" in cached
+                and cached.get("tracking_signature") == track_sig):
+            return          # the cached trajectory is current
+        if not result["tracking_files"]:
+            traj = None
+            self._traj_status = f"No tracking files for {session_id[:8]}."
+        else:
+            try:
+                traj = await asyncio.to_thread(
+                    xc.load_focal_trajectory, result["tracking_files"], result["sync"],
+                    animal_id, self._t0, self._t1)
+                self._traj_status = None
+            except Exception as e:
+                logger.exception("trajectory load failed")
+                traj, self._traj_status = None, f"Tracking failed to load: {e}"
+        if token != self._load_token:
+            return
+        self._traj = traj
+        self._sync_traj_sources()
+        data = pn.state.cache.get(_cache_key(cohort_label, session_id, animal_id))
+        if data is not None:
+            data["trajectory"] = traj
+        if self._traj_status is None:
+            await asyncio.to_thread(xc.update_cached_trajectory, cohort, session_id,
+                                    animal_id, traj, track_sig)
+        self._update_traj_pane()
 
     def _apply_products(self, products):
         self._raster_img = products["raster_img"]
@@ -621,12 +790,19 @@ class HabitatApp:
         bokeh_layout = bk_col(p_tl, p_rm, sizing_mode="stretch_width")
 
         plotly_fig = self._compute_pca_fig(cur_start, cur_end)
+        traj_fig = self._compute_traj_fig(cur_start, cur_end)
 
         # Always recreate panes — reassigning .object on an existing Bokeh pane
         # can cause document-isolation issues when shared Range1d objects change.
         self._bokeh_pane = pn.pane.Bokeh(bokeh_layout, sizing_mode="stretch_width")
         self._plotly_pane = pn.pane.Plotly(plotly_fig, sizing_mode="stretch_width")
-        self._content[:] = [self._status, self._bokeh_pane, self._plotly_pane]
+        self._traj_pane = pn.pane.Plotly(traj_fig, sizing_mode="stretch_width")
+        self._content[:] = [
+            self._status, self._bokeh_pane,
+            pn.Row(self._plotly_pane,
+                   pn.Column(self.traj_src_sel, self._traj_pane, sizing_mode="stretch_width"),
+                   sizing_mode="stretch_width"),
+        ]
 
     # ── Figure builders ────────────────────────────────────────────────────────
 
@@ -745,6 +921,47 @@ class HabitatApp:
             return fig
         return _make_pca_plotly(self._full_pop, t_start, t_end)
 
+    def _sync_traj_sources(self):
+        """Point the source toggle at ``self._traj``'s formats (default selected)."""
+        formats = xc.trajectory_formats(self._traj)
+        names = {"apt_tqt": "APT", "mask_metrics": "manual"}
+        options = {f"{names.get(k, k)} tracking ({len(v['t']):,} frames)": k
+                   for k, v in formats.items()}
+        default = (self._traj or {}).get("default") or next(iter(formats), None)
+        with param.parameterized.discard_events(self.traj_src_sel):
+            self.traj_src_sel.options = options
+            if self.traj_src_sel.value not in options.values():
+                self.traj_src_sel.value = default
+        self.traj_src_sel.visible = len(options) > 1
+
+    def _selected_traj(self):
+        formats = xc.trajectory_formats(self._traj)
+        fmt = self.traj_src_sel.value if self.traj_src_sel.value in formats else \
+            (self._traj or {}).get("default") or next(iter(formats), None)
+        return None if fmt is None else {**formats[fmt], "format": fmt}
+
+    def _compute_traj_fig(self, t_start, t_end):
+        animal_id = self.animal_sel.value
+        btype = _label_to_abbrev(self.btype_sel.value)
+        ev_df = None
+        if self._events is not None:
+            ev_df = _focal_events(self._events.events_data, btype, animal_id).dropna(
+                subset=["ts_start_ephys", "initiator", "victim"])
+        colors = (self._full_pop or {}).get("opp_colors") or (
+            _rat_colors(ev_df) if ev_df is not None else {})
+        return _make_trajectory_plotly(
+            self._selected_traj(), ev_df, colors, self.min_events_sl.value, t_start, t_end,
+            animal_id, btype, BehavioralEventsData.BEHAVIOR_TYPES, self._traj_status,
+            other_sources=len(xc.trajectory_formats(self._traj)) > 1)
+
+    def _update_traj_pane(self):
+        if self._traj_pane is None:
+            return
+        start, end = self._last_x_range
+        if start is None:
+            start, end = self._t0, self._t1
+        self._traj_pane.object = self._compute_traj_fig(start, end)
+
     # ── Periodic callback: update PCA when zoom/pan changes ───────────────────
 
     def _check_range_update(self):
@@ -757,6 +974,8 @@ class HabitatApp:
         if self._raster_src is not None:
             self._raster_src.data = self._raster_data(cur[0], cur[1])
         self._plotly_pane.object = self._compute_pca_fig(cur[0], cur[1])
+        if self._traj_pane is not None:
+            self._traj_pane.object = self._compute_traj_fig(cur[0], cur[1])
 
     def _on_behavior_change(self, *args):
         # A cached view (no spikes yet) can still switch behaviour type.

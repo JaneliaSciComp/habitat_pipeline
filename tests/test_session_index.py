@@ -246,3 +246,20 @@ class TestDayTrackingGrid:
         si.get_day_tracking_grid("cohortT", day, si.day_sync(index, DATE))
         day["tracking_signature"] = day["tracking_signature"] + [("new.csv", 1, 1.0)]
         assert si.cached_day_tracking_grid("cohortT", day) is None
+
+
+class TestManifestFailure:
+    def test_unreadable_manifest_raises_and_keeps_previous_index(self, share):
+        good = si.load_session_index("cohortT", manifest_path=share["manifest"])
+        share["manifest"].write_text("{not json")
+        with pytest.raises(si.ManifestUnavailable):
+            si.load_session_index("cohortT", manifest_path=share["manifest"], refresh=True)
+        with open(si._index_path("cohortT"), "rb") as fh:
+            kept = __import__("pickle").load(fh)
+        assert kept["meta"]["built_at"] == good["meta"]["built_at"]
+        assert _rows(kept).loc["20251216_094334", "good_neurons"] == 100
+
+    def test_missing_manifest_still_builds(self, share):
+        share["manifest"].unlink()
+        index = si.load_session_index("cohortT", manifest_path=share["manifest"])
+        assert set(index["table"]["manifest"]) == {"missing"}

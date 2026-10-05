@@ -341,16 +341,29 @@ def read_event_times(files: Sequence[Path]) -> pd.DataFrame:
 # Manifest → per-block facts
 # ---------------------------------------------------------------------------
 
+class ManifestUnavailable(RuntimeError):
+    """The capability manifest exists but could not be read.
+
+    Raised rather than building an index without ephys facts: such an index
+    would be cached with valid metadata and silently show every recording as
+    "not in manifest" until the next rescan.
+    """
+
+
 def _manifest_sessions(manifest_path: Optional[Path]) -> Tuple[Dict[str, Any], Optional[str]]:
+    """``(sessions, generated_at)``; ``({}, None)`` only when there is no manifest."""
     path = Path(manifest_path) if manifest_path else DEFAULT_MANIFEST_PATH
     if not path.exists():
+        logger.warning("no capability manifest at %s; index will lack ephys facts", path)
         return {}, None
     try:
         from discovery.capability_manifest import load_manifest
         manifest = load_manifest(path)
     except Exception as exc:
-        logger.warning("capability manifest unreadable (%s); index will lack ephys facts", exc)
-        return {}, None
+        logger.exception("capability manifest at %s could not be read", path)
+        raise ManifestUnavailable(
+            f"capability manifest at {path} could not be read: "
+            f"{type(exc).__name__}: {exc}") from exc
     return manifest.get("sessions", {}), manifest.get("generated_at")
 
 

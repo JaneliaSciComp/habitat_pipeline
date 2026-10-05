@@ -214,6 +214,12 @@ class SessionBrowser:
             cohort = self.cohort
             index = await asyncio.to_thread(load_session_index, cohort, None, True)
             pn.state.cache[f"session_index__{cohort}"] = index
+        except Exception as exc:
+            # The previous index stays on disk and on screen; say why it wasn't replaced.
+            logger.exception("rescan failed")
+            self.status.object = (f"⚠ rescan failed, showing the previous index:<br>"
+                                  f"{type(exc).__name__}: {exc}")
+            return
         finally:
             self.rescan_btn.disabled = False
         self.reload()
@@ -441,8 +447,6 @@ class SessionBrowser:
         for a in animals[::-1]:
             if a["status"] == "ok":
                 note = f"{a['n_quality_cells']} / {a['n_clusters']}"
-                if a["window_suspect"]:
-                    note += "  ⚠ window"
             else:
                 note = _status_reason(a)
             notes.append(note)

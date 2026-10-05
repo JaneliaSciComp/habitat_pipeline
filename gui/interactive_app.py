@@ -300,6 +300,7 @@ class HabitatApp:
             name="← Session browser", button_type="light", width=220
         )
         self.back_btn.on_click(lambda *_: self._show_view("browser"))
+        self.back_btn.js_on_click(code="if (window.closeNav) { closeNav(); }")
         self.browser = SessionBrowser(COHORT_NAMES, on_explore=self._explore_from_browser)
         self._main = pn.Column(self.browser.view, sizing_mode="stretch_both")
         self._sidebar = pn.Column(self.browser.sidebar, width=280)
@@ -686,6 +687,8 @@ class HabitatApp:
             title="Habitat Pipeline — Interactive",
             sidebar=[self._sidebar],
             main=[self._main],
+            # Browser first: the table needs the width; ☰ (or Explore) opens it.
+            collapsed_sidebar=True,
         )
 
     @property

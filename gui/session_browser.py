@@ -53,24 +53,48 @@ _HHMM = CustomJSTickFormatter(code="""
 
 #: Columns shown in the table, with their header titles.
 TABLE_TITLES = {
-    "recording": "Recording",
+    "recording": "Recording",      # hidden: row identity for selection only
     "date": "Date",
     "start": "Start",
     "block": "Block",
-    "ephys_animals": "Ephys rats",
-    "good_neurons": "Good cells",
-    "min_good": "Min / rat",
-    "video": "Video",
-    "tracked": "Tracked",
-    "annotated": "Annotated",
+    "ephys_animals": "Ephys<br>rats",
+    "good_neurons": "Good<br>cells",
+    "video": "Video<br>chunks",
+    "tracked": "Tracked<br>chunks",
+    "annotated": "Annot.<br>chunks",
     "events": "Events",
-    "top_events": "Top events",
-    "loadable": "Loadable",
-    "broken": "Broken",
-    "ephys_h": "Ephys h",
-    "ready": "Ready for",
+    "top_events": "Top<br>events",
+    "loadable": "Load-<br>able",
+    "broken": "Broken<br>chunks",
+    "ephys_h": "Ephys<br>hours",
+    "ready": "Ready<br>for",
     "animals": "Animals",
 }
+
+#: Narrow fixed widths (px); titles wrap onto two lines via TABLE_CSS.
+TABLE_WIDTHS = {
+    "date": 92, "start": 58, "block": 58, "ephys_animals": 58, "good_neurons": 58,
+    "video": 62, "tracked": 66, "annotated": 62, "events": 62, "top_events": 150,
+    "loadable": 58, "broken": 62, "ephys_h": 58, "ready": 150, "animals": 170,
+}
+
+TABLE_CSS = """
+.tabulator .tabulator-header .tabulator-col .tabulator-col-content {
+    padding: 4px 3px; position: relative;
+}
+.tabulator .tabulator-header .tabulator-col .tabulator-col-title {
+    white-space: normal !important; text-overflow: clip !important; overflow: visible;
+    font-size: 11px; line-height: 1.15; padding-right: 0 !important;
+}
+/* Sort arrow pinned to the corner so it doesn't eat the narrow column's width. */
+.tabulator .tabulator-header .tabulator-col .tabulator-col-content .tabulator-col-sorter {
+    position: absolute; right: 1px; top: 3px;
+}
+.tabulator .tabulator-header .tabulator-col .tabulator-col-sorter .tabulator-arrow {
+    transform: scale(0.7);
+}
+.tabulator-row .tabulator-cell { padding: 4px 3px; }
+"""
 
 
 def _hours(epoch, midnight: float):
@@ -122,9 +146,11 @@ class SessionBrowser:
             selectable=1,
             pagination=None,
             layout="fit_data_table",
-            frozen_columns=["recording"],
+            hidden_columns=["recording"],
+            frozen_columns=["date"],
+            widths=TABLE_WIDTHS,
+            stylesheets=[TABLE_CSS],
             header_filters={
-                "recording": {"type": "input", "func": "like", "placeholder": "filter"},
                 "date": {"type": "input", "func": "like", "placeholder": "filter"},
                 "ready": {"type": "input", "func": "like", "placeholder": "filter"},
                 "animals": {"type": "input", "func": "like", "placeholder": "rat…"},
@@ -146,6 +172,9 @@ class SessionBrowser:
         self.rescan_btn.on_click(self._on_rescan)
         self.table.param.watch(self._on_select, "selection")
         self.explore_btn.on_click(self._on_explore_click)
+        # The explore view's controls live in the template sidebar, which the
+        # browser keeps collapsed; open it client-side (FastListTemplate's openNav).
+        self.explore_btn.js_on_click(code="if (window.openNav) { openNav(); }")
         self.track_btn.on_click(self._on_compute_tracking)
 
         self.view = pn.Row(
@@ -192,7 +221,6 @@ class SessionBrowser:
         df = index["table"]
         self.table.value = df[[c for c in TABLE_TITLES if c in df.columns]] \
             if not df.empty else pd.DataFrame(columns=list(TABLE_TITLES))
-        self.table.style.apply(_flag_low, subset=["min_good"], limit=MIN_GOOD_CELLS)
         self.table.style.apply(_flag_low, subset=["loadable"], limit=1)
         self.table.loading = False
 

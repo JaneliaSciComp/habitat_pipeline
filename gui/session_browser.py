@@ -10,6 +10,7 @@ computed on request in a worker thread.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from datetime import datetime
 from typing import Any, Callable, Dict, Mapping, Optional
@@ -523,6 +524,9 @@ class SessionBrowser:
         self.track_btn.name = "Compute per-animal tracking coverage"
         self._render_detail()
 
-    def _on_explore_click(self, event):
+    async def _on_explore_click(self, event):
         if self._selected and self.animal_sel.value:
-            self._on_explore(self.cohort_sel.value, self._selected, self.animal_sel.value)
+            result = self._on_explore(self.cohort_sel.value, self._selected,
+                                      self.animal_sel.value)
+            if inspect.isawaitable(result):
+                await result

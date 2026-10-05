@@ -13,6 +13,14 @@ scikit-learn>=1.0.0
 matplotlib>=3.5.0
 seaborn>=0.11.0
 
+# Dashboards: Streamlit app (gui/app.py) and Panel app (gui/interactive_app.py,
+# whose 3D PCA panel needs plotly)
+streamlit>=1.32.0
+panel>=1.3.0
+bokeh>=3.3.0
+param>=2.0.0
+plotly>=5.0.0
+
 # File I/O and data formats
 h5py>=3.6.0
 

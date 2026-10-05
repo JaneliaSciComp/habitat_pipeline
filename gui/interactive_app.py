@@ -1,5 +1,8 @@
 # Run from project root: panel serve gui/interactive_app.py --show
+import asyncio
+import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -13,12 +16,11 @@ from bokeh.models import (
 )
 from bokeh.palettes import Category10, Inferno256
 from bokeh.plotting import figure
-from scipy.stats import zscore
-from sklearn.decomposition import PCA
 
 from ephys.decode_opponent_identity import align_spikes_to_events, extract_firing_rate_features
 from ingestion.data_paths import DataStorageManager, get_animals_and_sessions
 from ingestion.ephys_sync import DataSyncManager
+from gui import explore_cache as xc
 from gui.session_browser import SessionBrowser
 from ingestion.kilosort_data_import import load_kilosort_data
 from video.behavioral_events import BehavioralEventsData, load_behavioral_events
@@ -26,6 +28,13 @@ from video.behavioral_events import BehavioralEventsData, load_behavioral_events
 pn.extension("plotly", "tabulator")
 
 PALETTE = Category10[10]
+logger = logging.getLogger(__name__)
+
+#: Most rastermap columns ever sent to the browser. The full image (one column
+#: per raster bin, ~19k for a 5 h block) is ~10x what a screen can show and was
+#: ~21 MB per draw; the visible window is block-averaged down to this and
+#: re-sliced at full resolution as you zoom in.
+MAX_RASTER_COLS = 3000
 
 # ── Per-process data cache (survives theme-toggle page reloads) ────────────────
 
@@ -61,42 +70,31 @@ def _label_to_abbrev(label: str) -> str:
 
 # ── Module-level helpers ───────────────────────────────────────────────────────
 
-def _compute_spike_matrix(ks_data, quality_indices, t0, t1, bin_size_s):
-    """Return (n_quality_cells, n_bins) firing-rate matrix for quality-filtered cells."""
-    edges = np.arange(t0, t1 + bin_size_s, bin_size_s)
-    n_bins = len(edges) - 1
-    mat = np.zeros((len(quality_indices), n_bins), dtype=np.float64)
-    for row, ci in enumerate(quality_indices):
-        counts, _ = np.histogram(ks_data.spike_times_by_cell[ci], bins=edges)
-        mat[row] = counts / bin_size_s
-    return mat
+def _focal_events(events_df, behavior_type, animal_id):
+    """Events of one type involving ``animal_id``, with an ``opponent`` column.
+
+    Not filtered by ``min_events``: that threshold decides which opponents the
+    PCA marks, not which events exist, so the timeline shows all of them.
+    """
+    df = events_df[(events_df["type"] == behavior_type) &
+                   ((events_df["initiator"] == animal_id) |
+                    (events_df["victim"] == animal_id))].copy()
+    df["opponent"] = np.where(df["initiator"] == animal_id, df["victim"], df["initiator"])
+    return df
 
 
-def _fit_rastermap(fr_matrix):
-    """Fit Rastermap on (n_cells, n_time_bins) matrix. Returns display image (float64, C-order)."""
-    from rastermap import Rastermap
-    n_cells = fr_matrix.shape[0]
-    model = Rastermap(
-        n_PCs=min(200, n_cells - 1),
-        n_clusters=min(100, max(4, n_cells // 4)),
-        normalize=True,
-        mean_time=True,
-        verbose=False,
-        verbose_sorting=False,
-    )
-    model.fit(fr_matrix)
-    # [::-1] gives negative strides — Bokeh image glyph requires C-contiguous float64
-    img = np.ascontiguousarray(
-        np.nan_to_num(model.X_embedding[::-1, :], nan=0.0, posinf=0.0, neginf=0.0),
-        dtype=np.float64,
-    )
-    return img
+def _rat_colors(df):
+    """One colour per rat in ``df`` (sorted), shared by the timeline and the PCA."""
+    all_rats = sorted(set(df["initiator"].dropna().tolist() + df["victim"].dropna().tolist()))
+    return {r: PALETTE[i % 10] for i, r in enumerate(all_rats)}
 
 
-def _build_pop_data(events, ks_data, behavior_type, animal_id, pca_bin, min_events, t0, t1):
-    """Fit PCA on the full continuous recording (quality cells, raw FR).
+def _build_pop_data(events, pca_base, behavior_type, animal_id, min_events):
+    """Lay one behaviour type's event markers over a precomputed PCA trajectory.
 
-    Opponent colors use the same PALETTE + all_rats index as the timeline plot.
+    ``pca_base`` is :func:`gui.explore_cache.fit_pca_trajectory`'s output; the
+    fit itself is behaviour-independent, so changing the behaviour type or
+    ``min_events`` never refits it.
 
     Returns dict with keys:
       scores        : ndarray (n_bins, 3)  — full trajectory in PC space
@@ -106,19 +104,10 @@ def _build_pop_data(events, ks_data, behavior_type, animal_id, pca_bin, min_even
       ev_opponents  : ndarray of opponent labels (str)
       opp_colors    : dict {opponent: hex_color}  — same mapping as timeline
       btype_map     : dict {abbrev: full_name}
-    or None on failure.
+    or None when there is no trajectory (< 3 quality cells).
     """
-    # Full recording firing-rate matrix (quality-filtered cells, raw FR — no z-score)
-    spks, bin_centers = ks_data.bin_spike_times(
-        bin_size_sec=pca_bin, t_start=t0, t_end=t1, filtered_only=True,
-    )
-    n_cells, _ = spks.shape
-    if n_cells < 3:
+    if pca_base is None:
         return None
-
-    X = np.nan_to_num(zscore(spks, axis=1), nan=0.0)
-    pca = PCA(n_components=3)
-    scores = pca.fit_transform(X.T)   # (n_bins, 3)
 
     # Gather events of the selected behavior type
     try:
@@ -130,29 +119,45 @@ def _build_pop_data(events, ks_data, behavior_type, animal_id, pca_bin, min_even
     except Exception:
         ev_starts = ev_labels = np.array([])
 
-    # Opponent colors: exact same logic as _make_timeline (including min_events filter)
-    df = events.events_data
-    df_filt = df[(df["type"] == behavior_type) &
-                 ((df["initiator"] == animal_id) | (df["victim"] == animal_id))].copy()
-    df_filt["opponent"] = df_filt.apply(
-        lambda r: r["victim"] if r["initiator"] == animal_id else r["initiator"], axis=1
-    )
-    opp_counts = df_filt["opponent"].value_counts()
-    valid_opps = opp_counts[opp_counts >= min_events].index
-    df_filt = df_filt[df_filt["opponent"].isin(valid_opps)]
-    all_rats = sorted(set(df_filt["initiator"].tolist() + df_filt["victim"].tolist()))
-    opp_colors = {r: PALETTE[all_rats.index(r) % 10] for r in all_rats}
+    # Opponent colors: the same mapping the timeline uses
+    df = _focal_events(events.events_data, behavior_type, animal_id)
+    opp_colors = _rat_colors(df.dropna(subset=["ts_start_ephys", "initiator", "victim"]))
 
     return {
-        "scores": scores,
-        "bin_centers": bin_centers,
-        "var_explained": pca.explained_variance_ratio_,
+        "scores": pca_base["scores"],
+        "bin_centers": pca_base["bin_centers"],
+        "var_explained": pca_base["var_explained"],
         "ev_starts": ev_starts,
         "ev_opponents": ev_labels,
         "btype_map": BehavioralEventsData.BEHAVIOR_TYPES,
         "opp_colors": opp_colors,
         "behavior_type": behavior_type,
     }
+
+
+def _load_full(cfg, session_id, animal_id, raster_bin, pca_bin, cached_signature):
+    """Everything the explore view needs, from the share. Blocking; runs in a thread.
+
+    Rastermap and PCA are recomputed only when the sources differ from the
+    cached view's (``cached_signature``); otherwise ``products`` is ``None``
+    and the cached image/trajectory stay valid.
+    """
+    dsm = DataStorageManager(animal_id, session_id, config_path=cfg, auto_load=True)
+    ks_path = dsm.get_kilosort_path()
+    event_files = dsm.get_behavioral_event_files()
+    signature = xc.source_signature(ks_path, event_files)
+
+    ks_data = load_kilosort_data(ks_path)
+    events = load_behavioral_events(event_files, session_id=dsm.session_id)
+    events.synchronize_with_ephys(DataSyncManager(dsm, dio_channel=1), create_new_columns=True)
+
+    if signature != cached_signature:
+        products = xc.compute_view_products(ks_data, raster_bin, pca_bin)
+    else:
+        products = None
+        ks_data.filter_cells_by_firing_patterns()   # what later re-binning expects
+    return {"ks_data": ks_data, "events": events, "signature": signature,
+            "products": products}
 
 
 def _make_pca_plotly(pop_data_full, t_view_start, t_view_end):
@@ -249,14 +254,36 @@ def _make_pca_plotly(pop_data_full, t_view_start, t_view_end):
 
 # ── App class ──────────────────────────────────────────────────────────────────
 
+def _raster_window(img, t0, bin_s, start, end, max_cols=MAX_RASTER_COLS):
+    """Display slice of the rastermap image for ``[start, end]`` (s, ephys clock).
+
+    Returns ``dict(image, x, dw)`` for an image glyph: the columns covering the
+    window, block-averaged so at most ``max_cols`` remain, as float32.
+    """
+    n_cols = img.shape[1]
+    i0 = int(np.clip(np.floor((start - t0) / bin_s), 0, n_cols - 1))
+    i1 = int(np.clip(np.ceil((end - t0) / bin_s), i0 + 1, n_cols))
+    factor = max(1, int(np.ceil((i1 - i0) / max_cols)))
+    i1 = i0 + max(1, (i1 - i0) // factor) * factor
+    sub = img[:, i0:i1]
+    if factor > 1:
+        sub = sub.reshape(sub.shape[0], -1, factor).mean(axis=2)
+    return {"image": np.ascontiguousarray(sub, dtype=np.float32),
+            "x": t0 + i0 * bin_s, "dw": (i1 - i0) * bin_s}
+
+
 class HabitatApp:
     def __init__(self):
         self._ks_data = None
         self._events = None
         self._raster_img = None
+        self._raster_bin = xc.DEFAULT_RASTER_BIN
+        self._raster_src = None   # image glyph source, re-sliced on zoom
         self._t0 = None
         self._t1 = None
         self._full_pop = None
+        self._pca = None          # behaviour-independent PCA trajectory (see explore_cache)
+        self._load_token = 0      # bumps per load; stale background results are dropped
         self._x_range = None      # the live Range1d shared by both Bokeh figures
         self._last_x_range = [None, None]
         self._bokeh_pane = None
@@ -264,6 +291,8 @@ class HabitatApp:
         self._loading = False
         self._view = "browser"
 
+        self._status = pn.pane.Alert("", alert_type="info", visible=False,
+                                     sizing_mode="stretch_width", margin=(0, 10))
         self._content = pn.Column(
             pn.pane.Alert(
                 "Select a session and animal, then press **Load Session**.",
@@ -335,7 +364,7 @@ class HabitatApp:
         if state is not None:
             state["view"] = view
 
-    def _explore_from_browser(self, cohort_label, session_id, animal_id):
+    async def _explore_from_browser(self, cohort_label, session_id, animal_id):
         """Explore button: point the existing dropdowns at the row, then load."""
         if self.cohort_sel.value != cohort_label:
             self.cohort_sel.value = cohort_label  # triggers _update_sessions
@@ -346,28 +375,28 @@ class HabitatApp:
             self.animal_sel.options = sorted(set(self.animal_sel.options) | {animal_id})
         self.animal_sel.value = animal_id
         self._show_view("explore")
-
-        if self._restore_data(cohort_label, session_id, animal_id):
-            self._refresh_behavior()
-            return
-        self._content[:] = [pn.pane.Alert(
-            f"Loading {animal_id} · {session_id}…", alert_type="warning")]
-        # Defer the (slow, synchronous) load one tick so the view switch and the
-        # "Loading" alert reach the browser before it starts.
-        pn.state.add_periodic_callback(lambda: self._on_load(None), period=50, count=1)
+        await self._load_session(cohort_label, session_id, animal_id)
 
     def _restore_data(self, cohort, session_id, animal_id):
+        """Full data already loaded in this process (back → Explore, theme reload)."""
         data = pn.state.cache.get(_cache_key(cohort, session_id, animal_id))
         if data is None:
             return False
         self._ks_data = data["ks_data"]
         self._events = data["events"]
         self._raster_img = data["raster_img"]
+        self._raster_bin = data.get("raster_bin", xc.DEFAULT_RASTER_BIN)
         self._t0 = data["t0"]
         self._t1 = data["t1"]
+        self._pca = data.get("pca")
         self._x_range = None
         self._last_x_range = [self._t0, self._t1]
         return True
+
+    def _set_status(self, text=None, kind="info"):
+        self._status.object = text or ""
+        self._status.alert_type = kind
+        self._status.visible = bool(text)
 
     # ── Session / animal dropdowns ─────────────────────────────────────────────
 
@@ -436,66 +465,93 @@ class HabitatApp:
         if state.get("view") == "explore":
             self._show_view("explore")
 
-    # ── Load: spike data + rastermap only ─────────────────────────────────────
+    # ── Load: cached view first, full data in the background ──────────────────
 
-    def _on_load(self, event):
-        if self._loading:
+    async def _on_load(self, event=None):
+        await self._load_session(
+            self.cohort_sel.value, self.session_sel.value, self.animal_sel.value)
+
+    async def _load_session(self, cohort_label, session_id, animal_id):
+        """Show the session as fast as possible, then make it fully interactive.
+
+        1. Loaded earlier in this process -> instant.
+        2. A disk cache at the default bins -> drawn immediately; the full
+           data (Kilosort, events, sync) then loads in a worker thread.
+        3. Otherwise -> full load in the worker thread, then draw and cache.
+        The background load recomputes rastermap/PCA only if the source files
+        changed since the cache was written.
+        """
+        self._load_token += 1
+        token = self._load_token
+        cohort = COHORT_NAMES[cohort_label]
+        cfg = CONFIG_OPTIONS[cohort_label]
+        raster_bin, pca_bin = self.raster_bin_sl.value, self.pca_bin_sl.value
+
+        if self._restore_data(cohort_label, session_id, animal_id):
+            self._set_status()
+            self._refresh_behavior()
             return
+
+        cached = (xc.load_view_cache(cohort, session_id, animal_id)
+                  if xc.is_default_bins(raster_bin, pca_bin) else None)
+        if cached is not None:
+            self._ks_data = None
+            self._events = cached["events"]
+            self._apply_products(cached)
+            self._x_range = None
+            saved = datetime.fromtimestamp(cached["saved_at"]).strftime("%Y-%m-%d %H:%M")
+            self._set_status(
+                f"Showing the cached view of {animal_id} · {session_id} (saved {saved}). "
+                "Loading the full spike data in the background — a PCA bin-size change "
+                "applies once it finishes.", "info")
+            self._refresh_behavior()
+        else:
+            self._set_status()
+            self._content[:] = [pn.pane.Alert(
+                f"Loading {animal_id} · {session_id}: spikes, events and sync, then "
+                "rastermap and PCA. Later visits open from cache.", alert_type="warning")]
+
         self._loading = True
-        cfg = CONFIG_OPTIONS[self.cohort_sel.value]
-        animal_id = self.animal_sel.value
-        session_id = self.session_sel.value
-
-        self._content[:] = [pn.pane.Alert("Loading spike data…", alert_type="warning")]
         try:
-            dsm = DataStorageManager(animal_id, session_id, config_path=cfg, auto_load=True)
-            self._ks_data = load_kilosort_data(dsm.get_kilosort_path())
-            self._events = load_behavioral_events(
-                dsm.get_behavioral_event_files(),
-                session_id=dsm.session_id,
-            )
-            sync = DataSyncManager(dsm, dio_channel=1)
-            self._events.synchronize_with_ephys(sync, create_new_columns=True)
+            result = await asyncio.to_thread(
+                _load_full, cfg, session_id, animal_id, raster_bin, pca_bin,
+                cached["signature"] if cached else None)
         except Exception as e:
-            self._content[:] = [pn.pane.Alert(f"Failed to load: {e}", alert_type="danger")]
-            self._loading = False
+            logger.exception("loading %s %s failed", animal_id, session_id)
+            if token == self._load_token:
+                if cached is not None:
+                    self._set_status(f"Background load failed ({e}); showing the cached "
+                                     "view, which cannot re-bin.", "danger")
+                else:
+                    self._content[:] = [pn.pane.Alert(f"Failed to load: {e}",
+                                                      alert_type="danger")]
             return
+        finally:
+            if token == self._load_token:
+                self._loading = False
+        if token != self._load_token:
+            return          # the user moved to another session meanwhile
 
-        self._content[:] = [pn.pane.Alert("Fitting Rastermap…", alert_type="warning")]
-        try:
-            filter_results = self._ks_data.filter_cells_by_firing_patterns()
-            passed_ids = set(filter_results["passed_clusters"])
-            ks_ids = list(self._ks_data.ks_ids)
-            quality_indices = [i for i, cid in enumerate(ks_ids) if cid in passed_ids]
+        self._ks_data = result["ks_data"]
+        self._events = result["events"]
+        products = result["products"]
+        if products is not None:
+            self._apply_products(products)
+            self._x_range = None     # t0/t1 may have moved; start from the full span
+            await asyncio.to_thread(xc.save_view_cache, cohort, session_id, animal_id,
+                                    products, self._events, result["signature"])
 
-            quality_spikes = np.concatenate(
-                [self._ks_data.spike_times_by_cell[i] for i in quality_indices]
-            )
-            self._t0 = float(quality_spikes.min())
-            self._t1 = float(quality_spikes.max())
-
-            fr_matrix = _compute_spike_matrix(
-                self._ks_data, quality_indices, self._t0, self._t1, self.raster_bin_sl.value
-            )
-            self._raster_img = _fit_rastermap(fr_matrix)
-        except Exception as e:
-            self._content[:] = [pn.pane.Alert(f"Rastermap failed: {e}", alert_type="danger")]
-            self._loading = False
-            return
-
-        self._x_range = None
-        self._last_x_range = [self._t0, self._t1]
-
-        # Persist loaded data so theme-toggle page reloads don't require a re-load
-        pn.state.cache[_cache_key(self.cohort_sel.value, session_id, animal_id)] = {
+        pn.state.cache[_cache_key(cohort_label, session_id, animal_id)] = {
             "ks_data": self._ks_data,
             "events": self._events,
             "raster_img": self._raster_img,
+            "raster_bin": self._raster_bin,
             "t0": self._t0,
             "t1": self._t1,
+            "pca": self._pca,
         }
         pn.state.cache["habitat_last_state"] = {
-            "cohort": self.cohort_sel.value,
+            "cohort": cohort_label,
             "session": session_id,
             "animal": animal_id,
             "btype_label": self.btype_sel.value,
@@ -505,8 +561,26 @@ class HabitatApp:
             "view": "explore",
         }
 
-        self._refresh_behavior()
-        self._loading = False
+        if cached is not None and products is not None:
+            self._set_status("Source files changed since the cached view was saved; "
+                             "rastermap and PCA were recomputed.", "warning")
+        else:
+            self._set_status()
+        # Redraw when the image changed, or when a PCA bin change was deferred.
+        if products is not None or cached is None or self._pca_needs_refit():
+            self._refresh_behavior()
+
+    def _apply_products(self, products):
+        self._raster_img = products["raster_img"]
+        self._raster_bin = products["raster_bin"]
+        self._t0 = products["t0"]
+        self._t1 = products["t1"]
+        self._pca = products["pca"]
+        self._last_x_range = [self._t0, self._t1]
+
+    def _pca_needs_refit(self):
+        return (self._pca is not None
+                and abs(self._pca["pca_bin"] - self.pca_bin_sl.value) > 1e-9)
 
     # ── Refresh: rebuild timeline + PCA, reuse rastermap image ───────────────
 
@@ -521,10 +595,17 @@ class HabitatApp:
         else:
             cur_start, cur_end = self._t0, self._t1
 
+        if self._pca_needs_refit() and self._ks_data is not None:
+            # Without spikes (cached view) the old trajectory stays until the
+            # background load finishes; _load_session then redraws.
+            self._pca = xc.fit_pca_trajectory(
+                self._ks_data, self.pca_bin_sl.value, self._t0, self._t1)
+            data = pn.state.cache.get(_cache_key(
+                self.cohort_sel.value, self.session_sel.value, animal_id))
+            if data is not None:
+                data["pca"] = self._pca
         self._full_pop = _build_pop_data(
-            self._events, self._ks_data, btype, animal_id,
-            self.pca_bin_sl.value, self.min_events_sl.value,
-            self._t0, self._t1,
+            self._events, self._pca, btype, animal_id, self.min_events_sl.value,
         )
 
         # ── Build Bokeh figures ────────────────────────────────────────────────
@@ -545,40 +626,40 @@ class HabitatApp:
         # can cause document-isolation issues when shared Range1d objects change.
         self._bokeh_pane = pn.pane.Bokeh(bokeh_layout, sizing_mode="stretch_width")
         self._plotly_pane = pn.pane.Plotly(plotly_fig, sizing_mode="stretch_width")
-        self._content[:] = [self._bokeh_pane, self._plotly_pane]
+        self._content[:] = [self._status, self._bokeh_pane, self._plotly_pane]
 
     # ── Figure builders ────────────────────────────────────────────────────────
 
     def _make_timeline(self, btype, animal_id, cur_start, cur_end, min_events):
-        df = self._events.events_data.copy()
-        df = df[df["type"] == btype]
-        df = df[(df["initiator"] == animal_id) | (df["victim"] == animal_id)]
+        df = _focal_events(self._events.events_data, btype, animal_id)
         df = df.dropna(subset=["ts_start_ephys", "initiator", "victim"]).reset_index(drop=True)
 
-        # Count events per opponent; drop opponents below min_events threshold
-        def get_opp(row):
-            return row["victim"] if row["initiator"] == animal_id else row["initiator"]
-        df["opponent"] = df.apply(get_opp, axis=1)
+        # Every event is drawn; opponents below min_events (which the PCA does
+        # not mark) are faded rather than hidden.
         opp_counts = df["opponent"].value_counts()
-        valid_opps = opp_counts[opp_counts >= min_events].index
-        df = df[df["opponent"].isin(valid_opps)].reset_index(drop=True)
+        df["alpha"] = np.where(df["opponent"].map(opp_counts) >= min_events, 0.85, 0.3)
+        n_faded = int((df["alpha"] < 0.5).sum())
 
-        all_rats = sorted(set(df["initiator"].tolist() + df["victim"].tolist()))
+        colors = _rat_colors(df)
+        all_rats = list(colors)
         rat_to_y = {r: i for i, r in enumerate(all_rats)}
         df["y_init"] = df["initiator"].map(rat_to_y).fillna(0).astype(float)
         df["y_vic"] = df["victim"].map(rat_to_y).fillna(0).astype(float)
-
-        df["color"] = df["opponent"].apply(lambda opp: PALETTE[all_rats.index(opp) % 10])
+        df["color"] = df["opponent"].map(colors)
 
         src = ColumnDataSource(
-            df[["ts_start_ephys", "type", "initiator", "victim", "y_init", "y_vic", "color"]]
+            df[["ts_start_ephys", "type", "initiator", "victim", "y_init", "y_vic",
+                "color", "alpha"]]
         )
         n_rats = max(len(all_rats), 1)
         x_range = Range1d(start=cur_start, end=cur_end, bounds=(self._t0, self._t1))
 
         wz = WheelZoomTool(dimensions="width")
         p = figure(
-            title=f"{btype} events involving {animal_id} — {self.session_sel.value}  │  zoom/pan to filter PCA",
+            title=(f"{len(df)} {btype} events involving {animal_id} — {self.session_sel.value}"
+                   + (f"  │  {n_faded} faded (opponent < {min_events} events, not in PCA)"
+                      if n_faded else "")
+                   + "  │  zoom/pan to filter PCA"),
             height=220, width=900,
             x_range=x_range,
             y_range=(-0.5, n_rats - 0.5),
@@ -602,17 +683,19 @@ class HabitatApp:
         )
         p.scatter(
             x="ts_start_ephys", y="y_init", source=src,
-            color="color", size=9, alpha=0.85,
+            color="color", size=9, alpha="alpha",
         )
         p.scatter(
             x="ts_start_ephys", y="y_vic", source=src,
             fill_color="white", size=9, line_color="color", line_width=1.5,
+            line_alpha="alpha",
         )
         return p
 
     def _make_rastermap(self, shared_x_range):
         img = self._raster_img
-        n_rows, n_cols = img.shape
+        n_rows = img.shape[0]
+        # Colour limits from the full image, so zooming never rescales colours.
         vmin = float(np.nanpercentile(img, 2))
         vmax = float(np.nanpercentile(img, 98))
         if vmax <= vmin:
@@ -631,13 +714,18 @@ class HabitatApp:
             y_axis_label="Neuron (sorted)",
             sizing_mode="stretch_width",
         )
-        p.image(
-            image=[img],
-            x=self._t0, y=0,
-            dw=(self._t1 - self._t0), dh=n_rows,
-            color_mapper=mapper,
-        )
+        self._raster_src = ColumnDataSource(self._raster_data(
+            float(shared_x_range.start), float(shared_x_range.end)))
+        p.image(image="image", x="x", y=0, dw="dw", dh=n_rows,
+                source=self._raster_src, color_mapper=mapper)
         return p
+
+    def _raster_data(self, start, end):
+        """Source columns for the visible window plus one window of margin per side."""
+        span = end - start
+        w = _raster_window(self._raster_img, self._t0, self._raster_bin,
+                           start - span, end + span)
+        return {"image": [w["image"]], "x": [w["x"]], "dw": [w["dw"]]}
 
     def _compute_pca_fig(self, t_start, t_end):
         import plotly.graph_objects as go
@@ -660,16 +748,19 @@ class HabitatApp:
     # ── Periodic callback: update PCA when zoom/pan changes ───────────────────
 
     def _check_range_update(self):
-        if self._loading or self._x_range is None or self._plotly_pane is None:
+        if self._x_range is None or self._plotly_pane is None:
             return
         cur = [float(self._x_range.start), float(self._x_range.end)]
         if cur == self._last_x_range:
             return
         self._last_x_range = cur
+        if self._raster_src is not None:
+            self._raster_src.data = self._raster_data(cur[0], cur[1])
         self._plotly_pane.object = self._compute_pca_fig(cur[0], cur[1])
 
     def _on_behavior_change(self, *args):
-        if self._ks_data is None or self._events is None:
+        # A cached view (no spikes yet) can still switch behaviour type.
+        if self._raster_img is None or self._events is None:
             return
         # Keep cached widget state in sync so theme-toggle restores current settings
         state = pn.state.cache.get("habitat_last_state")

@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -9,10 +10,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import numpy as np
 import panel as pn
 import param
+from bokeh import events as bk_events
 from bokeh.layouts import column as bk_col
 from bokeh.models import (
-    ColumnDataSource, FixedTicker, HoverTool, LinearColorMapper,
-    Range1d, WheelZoomTool,
+    ColumnDataSource, CustomJS, FixedTicker, HoverTool, LinearColorMapper,
+    Range1d, Span, WheelZoomTool,
 )
 from bokeh.palettes import Category10, Inferno256
 from bokeh.plotting import figure
@@ -31,6 +33,42 @@ pn.extension("plotly", "tabulator")
 
 PALETTE = Category10[10]
 logger = logging.getLogger(__name__)
+
+#: The shared time cursor: one moment, shown on every panel. Plotly traces with
+#: this name are moved in place (a small restyle message, not a redraw).
+CURSOR_NAME = "cursor"
+CURSOR_COLOR = "#e53e3e"
+#: How often the server looks at the pending cursor time (ms).
+CURSOR_PERIOD_MS = 100
+#: Plotly markers jump to the cursor once it has been still this long (s) ...
+CURSOR_SETTLE_S = 0.12
+#: ... and, while it is still moving, follow at most this often (s). A 3D
+#: restyle redraws the whole scene, so following every mouse move would queue
+#: redraws in the browser and the marker would crawl behind the mouse.
+CURSOR_FOLLOW_S = 0.25
+#: Browser-side throttle on the vertical lines (ms); each move is one sync message.
+CURSOR_JS_THROTTLE_MS = 33
+
+
+def _cursor_trace_3d(point):
+    import plotly.graph_objects as go
+    x, y, z = ([point[0]], [point[1]], [point[2]]) if point is not None else ([], [], [])
+    return go.Scatter3d(x=x, y=y, z=z, mode="markers", name=CURSOR_NAME, showlegend=False,
+                        hoverinfo="skip",
+                        marker=dict(size=14, color=CURSOR_COLOR, symbol="diamond",
+                                    line=dict(width=3, color="white")))
+
+
+def _cursor_trace_2d(point):
+    import plotly.graph_objects as go
+    x, y = ([point[0]], [point[1]]) if point is not None else ([], [])
+    # WebGL, like the trajectory: an SVG marker would sit under the gl canvas.
+    return go.Scattergl(x=x, y=y, mode="markers", name=CURSOR_NAME, showlegend=False,
+                        hoverinfo="skip",
+                        # An open symbol is stroked with marker.color, not marker.line.color.
+                        marker=dict(size=22, color=CURSOR_COLOR, symbol="circle-open",
+                                    line=dict(width=4)))
+
 
 #: Most rastermap columns ever sent to the browser. The full image (one column
 #: per raster bin, ~19k for a 5 h block) is ~10x what a screen can show and was
@@ -170,7 +208,7 @@ def _load_full(cfg, session_id, animal_id, raster_bin, pca_bin, cached_signature
             "products": products, "sync": sync, "tracking_files": tracking_files}
 
 
-def _make_pca_plotly(pop_data_full, t_view_start, t_view_end):
+def _make_pca_plotly(pop_data_full, t_view_start, t_view_end, cursor=None):
     """Full continuous PCA trajectory with event markers filtered to the current view.
 
     Background: thin line colored by time (viridis) clipped to [t_view_start, t_view_end].
@@ -235,8 +273,11 @@ def _make_pca_plotly(pop_data_full, t_view_start, t_view_end):
                 name=opp,
                 hovertext=hover,
                 hoverinfo="text",
+                customdata=ev_ts_view[opp_mask],   # hover → shared cursor time
             ))
             n_events_shown += opp_mask.sum()
+
+    fig.add_trace(_cursor_trace_3d(cursor))
 
     if len(view_scores) < 2 and n_events_shown == 0:
         fig.add_annotation(
@@ -273,7 +314,7 @@ EVENT_SNAP_S = 1.0
 
 def _make_trajectory_plotly(traj, ev_df, opp_colors, min_events, t_view_start, t_view_end,
                             animal_id, behavior_type, btype_map, status=None,
-                            other_sources=False):
+                            other_sources=False, cursor=None):
     """The focal animal's (x, y) path in the view window, coloured by time.
 
     Mirrors :func:`video.behavioral_visualization.plot_events_on_trajectory`:
@@ -358,8 +399,11 @@ def _make_trajectory_plotly(traj, ev_df, opp_colors, min_events, t_view_start, t
                            f"{r.initiator} → {r.victim}"
                            for v, r in zip(sub["ts_start_ephys"], sub.itertuples())],
                 hoverinfo="text",
+                customdata=sub["ts_start_ephys"].to_numpy(),   # hover → shared cursor
             ))
             n_shown += len(sub)
+
+    fig.add_trace(_cursor_trace_2d(cursor))
 
     untracked = f" · {n_untracked} not tracked at event time" if n_untracked else ""
     fig.update_layout(
@@ -408,6 +452,16 @@ class HabitatApp:
         self._traj = None         # focal animal's (t, x, y) in pixels, or None
         self._traj_status = None  # message while the trajectory is unavailable
         self._traj_pane = None
+        # Shared cursor: the latest requested time, and the one on screen.
+        self._cursor_pending = None
+        self._cursor_source = None     # 'bokeh' | 'plotly': who asked for the move
+        self._cursor_requested_at = 0.0
+        self._cursor_t = None          # on the Bokeh lines / readout
+        self._cursor_plotly_t = None   # on the Plotly markers
+        self._cursor_plotly_at = 0.0
+        self._cursor_spans = []
+        self._cursor_md = pn.pane.Markdown(
+            "", styles={"font-size": "12px", "color": "#888"}, margin=(0, 10))
         self._load_token = 0      # bumps per load; stale background results are dropped
         self._x_range = None      # the live Range1d shared by both Bokeh figures
         self._last_x_range = [None, None]
@@ -472,6 +526,7 @@ class HabitatApp:
         self.pca_bin_sl.param.watch(self._on_behavior_change, "value")
         self._update_sessions()
         pn.state.add_periodic_callback(self._check_range_update, period=600)
+        pn.state.add_periodic_callback(self._flush_cursor, period=CURSOR_PERIOD_MS)
         self._try_restore_from_cache()
         # Return to the cohort/row last selected (theme toggles reload the page).
         browser_state = pn.state.cache.get("session_browser_state") or {}
@@ -786,6 +841,8 @@ class HabitatApp:
         self._x_range = p_tl.x_range
         self._last_x_range = [cur_start, cur_end]
 
+        self._add_cursor_spans(p_tl, p_rm)
+
         # Both figures MUST live in a single Bokeh document (one pn.pane.Bokeh)
         bokeh_layout = bk_col(p_tl, p_rm, sizing_mode="stretch_width")
 
@@ -795,10 +852,18 @@ class HabitatApp:
         # Always recreate panes — reassigning .object on an existing Bokeh pane
         # can cause document-isolation issues when shared Range1d objects change.
         self._bokeh_pane = pn.pane.Bokeh(bokeh_layout, sizing_mode="stretch_width")
-        self._plotly_pane = pn.pane.Plotly(plotly_fig, sizing_mode="stretch_width")
-        self._traj_pane = pn.pane.Plotly(traj_fig, sizing_mode="stretch_width")
+        # link_figure=False: with a linked figure, every restyle the browser
+        # applies is echoed back as `restyle_data`, re-applied to the Python
+        # figure and re-sent — an endless loop that made the cursor crawl.
+        # Cursor moves are sent straight to the browser model instead.
+        self._plotly_pane = pn.pane.Plotly(plotly_fig, sizing_mode="stretch_width",
+                                           link_figure=False)
+        self._traj_pane = pn.pane.Plotly(traj_fig, sizing_mode="stretch_width",
+                                         link_figure=False)
+        for pane in (self._plotly_pane, self._traj_pane):
+            pane.param.watch(self._on_plotly_hover, "hover_data")
         self._content[:] = [
-            self._status, self._bokeh_pane,
+            self._status, self._bokeh_pane, self._cursor_md,
             pn.Row(self._plotly_pane,
                    pn.Column(self.traj_src_sel, self._traj_pane, sizing_mode="stretch_width"),
                    sizing_mode="stretch_width"),
@@ -919,7 +984,8 @@ class HabitatApp:
             )
             fig.update_layout(height=380, margin=dict(l=0, r=0, t=30, b=0))
             return fig
-        return _make_pca_plotly(self._full_pop, t_start, t_end)
+        return _make_pca_plotly(self._full_pop, t_start, t_end,
+                                cursor=self._pca_point_at(self._cursor_t))
 
     def _sync_traj_sources(self):
         """Point the source toggle at ``self._traj``'s formats (default selected)."""
@@ -952,7 +1018,8 @@ class HabitatApp:
         return _make_trajectory_plotly(
             self._selected_traj(), ev_df, colors, self.min_events_sl.value, t_start, t_end,
             animal_id, btype, BehavioralEventsData.BEHAVIOR_TYPES, self._traj_status,
-            other_sources=len(xc.trajectory_formats(self._traj)) > 1)
+            other_sources=len(xc.trajectory_formats(self._traj)) > 1,
+            cursor=self._traj_point_at(self._cursor_t))
 
     def _update_traj_pane(self):
         if self._traj_pane is None:
@@ -961,6 +1028,125 @@ class HabitatApp:
         if start is None:
             start, end = self._t0, self._t1
         self._traj_pane.object = self._compute_traj_fig(start, end)
+
+    # ── Shared time cursor ─────────────────────────────────────────────────────
+
+    def _add_cursor_spans(self, *figs):
+        """A vertical line per Bokeh figure, moved together in the browser.
+
+        The JS callback moves every line on mouse-move/pan with no server round
+        trip; the location change then syncs to Python, where it drives the
+        Plotly cursors (via ``_flush_cursor``).
+        """
+        t = self._cursor_t
+        self._cursor_spans = [
+            Span(location=t, dimension="height", line_color=CURSOR_COLOR,
+                 line_width=1.5, line_alpha=0.9, visible=t is not None)
+            for _ in figs]
+        # Throttled (trailing edge): every location change is a sync message,
+        # and an unthrottled sweep sends hundreds per second.
+        move = CustomJS(args=dict(spans=self._cursor_spans, ms=CURSOR_JS_THROTTLE_MS), code="""
+            const st = window.__habitatCursor || (window.__habitatCursor = {last: 0, timer: null});
+            st.x = cb_obj.x;
+            st.spans = spans;
+            const apply = () => {
+                st.last = Date.now(); st.timer = null;
+                for (const s of st.spans) { s.location = st.x; s.visible = true; }
+            };
+            const wait = ms - (Date.now() - st.last);
+            if (wait <= 0) { apply(); } else if (!st.timer) { st.timer = setTimeout(apply, wait); }
+        """)
+        for fig, span in zip(figs, self._cursor_spans):
+            fig.add_layout(span)
+            fig.js_on_event(bk_events.MouseMove, move)
+            fig.js_on_event(bk_events.Pan, move)
+        self._cursor_spans[0].on_change(
+            "location", lambda attr, old, new: self._request_cursor(new, "bokeh"))
+
+    def _request_cursor(self, t, source):
+        if t is None or not np.isfinite(t) or float(t) == self._cursor_t:
+            return      # includes the server's own span updates echoing back
+        self._cursor_pending = float(t)
+        self._cursor_source = source
+        self._cursor_requested_at = time.monotonic()
+
+    def _on_plotly_hover(self, event):
+        """Hovering a PCA/trajectory point moves the cursor to that point's time."""
+        for point in (event.new or {}).get("points", []):
+            t = point.get("customdata")
+            if isinstance(t, (list, tuple)):
+                t = t[0] if t else None
+            if isinstance(t, (int, float)):
+                self._request_cursor(t, "plotly")
+                return
+
+    def _pca_point_at(self, t):
+        if t is None or self._pca is None:
+            return None
+        bc = self._pca["bin_centers"]
+        i = int(np.clip(np.searchsorted(bc, t), 0, len(bc) - 1))
+        if abs(bc[i] - t) > self._pca["pca_bin"]:
+            return None             # outside the recording
+        return self._pca["scores"][i]
+
+    def _traj_point_at(self, t):
+        traj = self._selected_traj()
+        if t is None or traj is None or len(traj["t"]) == 0:
+            return None
+        tt = traj["t"]
+        i = int(np.clip(np.searchsorted(tt, t), 1, len(tt) - 1))
+        i = i - 1 if abs(tt[i - 1] - t) < abs(tt[i] - t) else i
+        if abs(tt[i] - t) > EVENT_SNAP_S:
+            return None             # not tracked at this moment
+        return traj["x"][i], traj["y"][i]
+
+    @staticmethod
+    def _move_plotly_cursor(pane, point, three_d=False):
+        """Move the pane's cursor trace with a one-trace restyle, browser only."""
+        fig = pane.object if pane is not None else None
+        if fig is None:
+            return
+        for k, trace in enumerate(fig.data):
+            if trace.name == CURSOR_NAME:
+                coords = ([], [], []) if point is None else tuple([v] for v in point)
+                update = {"x": [coords[0]], "y": [coords[1]]}
+                if three_d:
+                    update["z"] = [coords[2]]
+                # Keep the Python figure current for the next full redraw ...
+                trace.update(x=coords[0], y=coords[1], **({"z": coords[2]} if three_d else {}))
+                # ... and send just this trace to the browser. The pane is
+                # unlinked, so the browser's restyle echo is not re-sent.
+                for model, _ in list(pane._models.values()):
+                    model.restyle = {"data": update, "traces": [k]}
+                return
+
+    def _flush_cursor(self):
+        t = self._cursor_pending
+        if t is None:
+            return
+        now = time.monotonic()
+        if t != self._cursor_t:
+            self._cursor_t = t
+            # Lines already show a browser-side move; only a hover in a Plotly
+            # pane has to move them from here.
+            if self._cursor_source == "plotly":
+                for span in self._cursor_spans:
+                    span.location = t
+                    span.visible = True
+            tracked = self._traj_point_at(t)
+            note = "" if tracked is not None or self._traj is None else \
+                " · not tracked at this moment"
+            self._cursor_md.object = (f"Cursor **t = {t:.1f} s** (ephys clock){note} — "
+                                      "hover or pan any plot to move it")
+        if t == self._cursor_plotly_t:
+            return
+        settled = now - self._cursor_requested_at >= CURSOR_SETTLE_S
+        due = now - self._cursor_plotly_at >= CURSOR_FOLLOW_S
+        if not (settled or due):
+            return
+        self._cursor_plotly_t, self._cursor_plotly_at = t, now
+        self._move_plotly_cursor(self._plotly_pane, self._pca_point_at(t), three_d=True)
+        self._move_plotly_cursor(self._traj_pane, self._traj_point_at(t))
 
     # ── Periodic callback: update PCA when zoom/pan changes ───────────────────
 

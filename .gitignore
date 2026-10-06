@@ -218,3 +218,4 @@ reports/out/
 # without these being in git.
 reports/figures/
 habitat_pipeline.db.bak_*
+/results

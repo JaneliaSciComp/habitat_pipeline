@@ -9,6 +9,7 @@ from video.territory import (
     build_territory_map_loo,
     compute_territory_map,
     dwell_time_maps,
+    exclusivity_map,
     label_positions,
     signed_boundary_distance,
     territory_stability,
@@ -178,3 +179,36 @@ class TestStability:
         b = compute_territory_map(_chunk(), bounds=BOUNDS, bins=10, min_tracked_sec=10.0)
         with pytest.raises(ValueError, match="same grid"):
             territory_stability(a, b)
+
+
+class TestExclusivity:
+    def test_bounded_and_highest_at_own_home(self):
+        tm = _tmap()
+        ex = exclusivity_map(tm, "A")
+        assert np.nanmin(ex) >= 0 and np.nanmax(ex) <= 1
+        lab = label_positions(tm, "A", [HOMES["A"][0], HOMES["B"][0]], [HOMES["A"][1], HOMES["B"][1]])
+        assert lab["exclusivity"].iloc[0] > 0.6 > lab["exclusivity"].iloc[1]
+
+    def test_shares_sum_to_one_across_animals(self):
+        tm = _tmap()
+        tot = sum(np.nan_to_num(exclusivity_map(tm, a)) for a in tm.animal_ids)
+        used = ~np.isnan(exclusivity_map(tm, "A"))
+        assert np.allclose(tot[used], 1.0)
+
+    def test_unused_bins_are_nan_not_zero(self):
+        tm = _tmap()
+        assert np.isnan(exclusivity_map(tm, "A")[0, 0])
+
+    def test_does_not_flip_when_two_animals_swap_rank(self):
+        # two animals share a home with nearly equal occupancy: the owner map's winner is
+        # arbitrary, the exclusivity of each stays near one half
+        chunk = {"A": _walk((50, 50), seed=1), "B": _walk((50, 50), seed=2), "C": _walk((10, 10), seed=3)}
+        tm = compute_territory_map(chunk, bounds=BOUNDS, bins=10, min_tracked_sec=10.0)
+        centre = label_positions(tm, "A", [50.0], [50.0])["exclusivity"].iloc[0]
+        assert 0.3 < centre < 0.7
+
+    def test_unmapped_animal_is_nan(self):
+        tm = _tmap()
+        assert np.isnan(label_positions(tm, "Z", [25.0], [50.0])["exclusivity"].iloc[0])
+        with pytest.raises(KeyError):
+            exclusivity_map(tm, "Z")

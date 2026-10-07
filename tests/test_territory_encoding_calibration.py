@@ -150,6 +150,17 @@ class TestOutputContract:
         c = simulate_counts(ses, CellSpec(), np.random.default_rng(1))
         assert _fit(c, ses, n_boot=49, seed=3)["p_value"] == _fit(c, ses, n_boot=49, seed=3)["p_value"]
 
+    def test_exclusivity_effect_runs_and_recovers_sign(self, ses):
+        c = simulate_counts(ses, CellSpec(excl_slope=1.5, base_hz=3.0), np.random.default_rng(2))
+        r = _fit(c, ses, effect="exclusivity", n_boot=99)
+        assert r["status"] == "ok" and r["effect_estimate"] > 0
+
+    def test_exclusivity_needs_the_covariate(self, ses):
+        c = simulate_counts(ses, CellSpec(), np.random.default_rng(2))
+        with pytest.raises(ValueError, match="exclusivity"):
+            te.fit_territory_effect(c, covariates(ses), {"own": ses["own"], "signed_dist": ses["signed_dist"]},
+                                    effect="exclusivity", dt=ses["dt"], n_boot=9)
+
     def test_territory_labels_are_actually_used(self, ses):
         c = simulate_counts(ses, CellSpec(step_log=np.log(3.0), base_hz=3.0),
                             np.random.default_rng(2))
@@ -258,3 +269,59 @@ class TestPower:
                     n += 1
                     hits += r["p_value"] <= 0.05
         assert hits / n < 0.2
+
+
+# ---------------------------------------------------------------------------
+# Continuous exclusivity covariate
+# ---------------------------------------------------------------------------
+# Exclusivity (the focal's share of everyone's occupancy) is smooth in position, so
+# the place model absorbs most of it. Measured behaviour (30 sessions x 6 cells per
+# null scenario): 0/540 false positives at alpha 0.05 and a null median p of ~0.73,
+# i.e. conservative rather than uniform - so there is no uniformity check here, and
+# the power tests below are what stop "never rejects" from passing.
+
+def _excl_spec(slope, drift=False):
+    # mean exclusivity in the simulator is ~0.75, so exp(slope * 0.75) changes the mean rate; keep the
+    # mean rate (hence the spike count, hence the power) equal across slopes so +/- are comparable
+    def fn(ses, rng):
+        return CellSpec(field_center=(rng.uniform(10, 90), rng.uniform(10, 90)),
+                        base_hz=3.0 * np.exp(-slope * float(np.nanmean(ses["exclusivity"]))),
+                        excl_slope=slope, drift_sd=1.0 if drift else 0.0, drift_tau_sec=400.0)
+    return fn
+
+
+@pytest.mark.slow
+class TestExclusivityEffect:
+    @pytest.mark.parametrize("kind", ["smooth", "straddle", "drift", "straddle_drift"])
+    def test_false_positive_rate_within_binomial_bound(self, kind):
+        ps, _ = _run(kind, effect="exclusivity")
+        n = len(ps)
+        assert n >= 0.8 * N_SESSIONS * CELLS_PER_SESSION
+        for alpha in ALPHAS:
+            assert np.mean(ps <= alpha) <= stats.binom.ppf(0.999, n, alpha) / n, (kind, alpha)
+
+    # Power is asymmetric in the sign of the slope even at matched spike counts (measured, 15 sessions
+    # x 6 cells, ~8k spikes: +1.0 -> 0.51, -1.0 -> 0.87, +1.5 -> 0.96, -1.5 -> 1.0). Exclusivity is
+    # skewed (most bins near 1, a rare low tail); a positive slope makes the rare low bins fire
+    # *less*, so they carry fewer spikes and less information about the contrast. Thresholds below
+    # are set from the weaker direction.
+    def test_detects_a_positive_slope_of_one_half_the_time(self):
+        ps, ests = _run(None, effect="exclusivity", spec_fn=_excl_spec(1.0), n_sessions=15)
+        assert np.mean(ps <= 0.05) >= 0.35
+        assert np.median(ests) == pytest.approx(1.0, abs=0.25)
+
+    @pytest.mark.parametrize("slope", [1.5, -1.5])
+    def test_detects_a_slope_of_one_and_a_half(self, slope):
+        ps, ests = _run(None, effect="exclusivity", spec_fn=_excl_spec(slope), n_sessions=15)
+        assert np.mean(ps <= 0.05) >= 0.85
+        assert np.median(ests) == pytest.approx(slope, abs=0.3)
+
+    def test_detects_a_slope_under_drift(self):
+        ps, _ = _run(None, effect="exclusivity", spec_fn=_excl_spec(1.5, drift=True), n_sessions=15)
+        assert np.mean(ps <= 0.05) >= 0.5
+
+    def test_power_increases_with_slope(self):
+        rates = [np.mean(_run(None, effect="exclusivity", spec_fn=_excl_spec(s), n_sessions=12)[0] <= 0.05)
+                 for s in (0.0, 0.5, 1.5)]
+        assert rates[0] < rates[1] < rates[2] + 1e-9
+        assert rates[2] > 0.9 and rates[0] < 0.1

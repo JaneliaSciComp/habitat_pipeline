@@ -9,8 +9,11 @@ Model (counts per bin, ``log(dt)`` offset)::
     baseline:  1 + RBF(x, y) + speed + partner_dist + RBF(time)
     full:      baseline + territory term
 
-``effect='step'`` uses the own-territory indicator; ``effect='gradient'`` uses
-the signed distance to the own-territory boundary (clipped at +/-``grad_clip``,
+``effect='step'`` uses the own-territory indicator; ``effect='exclusivity'`` uses the
+continuous exclusivity measure (``territory['exclusivity']``; the focal's share of
+everyone's occupancy, which does not flip when two animals swap rank - the
+winner-takes-all owner map did not replicate between chunks on real data);
+``effect='gradient'`` uses the signed distance to the own-territory boundary (clipped at +/-``grad_clip``,
 in coordinate units - the default is only meaningful for the simulator's 0-100
 arena, so set it for real data, which is in pixels until ``pixels_per_cm`` is
 re-measured for APT tracking).
@@ -57,6 +60,7 @@ logger = logging.getLogger(__name__)
 MIN_SPIKES = 50
 MIN_SIDE_FRACTION = 0.03     # step: each of own / not-own needs at least this share of bins
 ETA_CLIP = 20.0
+BOOT_BATCH = 400
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +158,21 @@ def _loglik(X, y, offset, beta) -> float:
     return float(np.sum(y * eta - np.exp(eta)))
 
 
+def _heldout_loglik(X_test, y_test, off_test, beta, X_train, off_train, *, margin: float = 1.0) -> float:
+    """Held-out Poisson log-likelihood with predictions confined to the range the fit produced.
+
+    Coefficients fitted on training blocks are unconstrained for basis functions the
+    training data never visited, so a held-out block in a new region can extrapolate to
+    absurd rates (observed: held-out gains of 1e6 per spike). Clipping the held-out linear
+    predictor to the training fit's own range +/- ``margin`` removes that failure without
+    changing what the model says inside the region it was fitted on.
+    """
+    eta_train = X_train @ beta + off_train
+    lo, hi = float(eta_train.min()) - margin, float(eta_train.max()) + margin
+    eta = np.clip(X_test @ beta + off_test, lo, hi)
+    return float(np.sum(y_test * eta - np.exp(eta)))
+
+
 # ---------------------------------------------------------------------------
 # Public test
 # ---------------------------------------------------------------------------
@@ -180,6 +199,7 @@ def fit_territory_effect(
     spatial_grid: int = 6,
     time_knot_sec: float = 120.0,
     ridge: float = 1.0,
+    cv_ridge: float = 30.0,
     min_spikes: int = MIN_SPIKES,
     seed: int = 0,
 ) -> Dict[str, object]:
@@ -190,26 +210,30 @@ def fit_territory_effect(
     ``lrt_stat`` (in-sample, for reference only), ``delta_ll_cv_per_spike``
     (held-out log-likelihood gain of the territory term, per spike),
     ``effect_estimate`` (log rate ratio own vs not-own for ``step``; log-rate per
-    coordinate unit for ``gradient``), ``dispersion``, ``n_spikes``, ``n_boot``.
+    coordinate unit for ``gradient``; log-rate per unit exclusivity, i.e. from 0 to 1, for
+    ``exclusivity``), ``dispersion``, ``n_spikes``, ``n_boot``.
     """
-    if effect not in ("step", "gradient"):
-        raise ValueError(f"effect must be 'step' or 'gradient', got {effect!r}")
+    if effect not in ("step", "gradient", "exclusivity"):
+        raise ValueError(f"effect must be 'step', 'gradient' or 'exclusivity', got {effect!r}")
 
     y = np.asarray(counts, dtype=float)
     n_all = len(y)
     for k in ("x", "y", "speed", "partner_dist"):
         if k not in covariates or len(covariates[k]) != n_all:
             raise ValueError(f"covariates[{k!r}] missing or wrong length")
-    sd = np.asarray(territory["signed_dist"], dtype=float)
-    own = np.asarray(territory["own"], dtype=bool)
-    if len(sd) != n_all or len(own) != n_all:
+    sd = np.asarray(territory["signed_dist"], dtype=float) if "signed_dist" in territory         else np.full(n_all, np.nan)
+    own = np.asarray(territory["own"], dtype=bool) if "own" in territory else np.zeros(n_all, bool)
+    excl = np.asarray(territory["exclusivity"], dtype=float) if "exclusivity" in territory else None
+    if len(sd) != n_all or len(own) != n_all or (excl is not None and len(excl) != n_all):
         raise ValueError("territory arrays must match counts length")
+    if effect == "exclusivity" and excl is None:
+        raise ValueError("effect='exclusivity' needs territory['exclusivity']")
 
     t = np.arange(n_all) * dt
     ok = np.ones(n_all, bool)
     for k in ("x", "y", "speed", "partner_dist"):
         ok &= np.isfinite(covariates[k])
-    ok &= np.isfinite(sd)
+    ok &= np.isfinite(excl) if effect == "exclusivity" else np.isfinite(sd)
     if band is not None:
         ok &= np.abs(sd) < band
     if ok.sum() < 4 * n_folds:
@@ -226,7 +250,7 @@ def fit_territory_effect(
         if min(side, 1 - side) < MIN_SIDE_FRACTION:
             return _result("insufficient_occupancy", n_spikes, n_boot)
     else:
-        cov = np.clip(sd[ok], -grad_clip, grad_clip)
+        cov = excl[ok] if effect == "exclusivity" else np.clip(sd[ok], -grad_clip, grad_clip)
         if np.std(cov) < 1e-6:
             return _result("insufficient_occupancy", n_spikes, n_boot)
     cov_mean, cov_sd = cov.mean(), cov.std()
@@ -268,26 +292,74 @@ def fit_territory_effect(
         return u * u / i_eff
 
     rng = np.random.default_rng(seed)
-    if dispersion > 1.05:
-        r = mu / (dispersion - 1.0)
-        draws = rng.negative_binomial(r[None, :], (r / (r + mu))[None, :], size=(n_boot, len(y)))
-    else:
-        draws = rng.poisson(mu, size=(n_boot, len(y)))
-    null = score_stat(draws.astype(float))
+    r_nb = mu / (dispersion - 1.0) if dispersion > 1.05 else None
+    null_parts = []
+    for start in range(0, n_boot, BOOT_BATCH):          # batched to bound memory at large n_boot
+        m = min(BOOT_BATCH, n_boot - start)
+        if r_nb is not None:
+            d = rng.negative_binomial(r_nb[None, :], (r_nb / (r_nb + mu))[None, :], size=(m, len(y)))
+        else:
+            d = rng.poisson(mu, size=(m, len(y)))
+        null_parts.append(score_stat(d.astype(float)))
+    null = np.concatenate(null_parts)
     obs = float(score_stat(y[None, :])[0])
     p_value = float((1 + np.sum(null >= obs)) / (n_boot + 1))
 
     # --- cross-validated effect size ---------------------------------------
     gain, held_spikes = 0.0, 0.0
+    lam_bc = np.r_[0.0, np.full(Xb.shape[1] - 1, cv_ridge)]
+    lam_fc = np.r_[lam_bc, 0.0]
     for train, test in blocked_folds(len(y), n_folds, purge_bins):
         if len(train) < 4 * Xf.shape[1] or y[train].sum() < 10:
             continue
-        bb = _irls(Xb[train], y[train], off[train], lam_b)
-        bf = _irls(Xf[train], y[train], off[train], lam_f, beta0=np.r_[bb, 0.0])
-        gain += _loglik(Xf[test], y[test], off[test], bf) - _loglik(Xb[test], y[test], off[test], bb)
+        bb = _irls(Xb[train], y[train], off[train], lam_bc)
+        bf = _irls(Xf[train], y[train], off[train], lam_fc, beta0=np.r_[bb, 0.0])
+        gain += (_heldout_loglik(Xf[test], y[test], off[test], bf, Xf[train], off[train])
+                 - _heldout_loglik(Xb[test], y[test], off[test], bb, Xb[train], off[train]))
         held_spikes += y[test].sum()
     delta_cv = float(gain / held_spikes) if held_spikes > 0 else np.nan
 
     return dict(status="ok", p_value=p_value, lrt_stat=float(lrt), delta_ll_cv_per_spike=delta_cv,
                 effect_estimate=effect_est, dispersion=dispersion, n_spikes=n_spikes,
                 n_boot=int(n_boot), n_bins=int(len(y)))
+
+
+def position_coding_gain(
+    counts: np.ndarray, covariates: Dict[str, np.ndarray], *, dt: float = 0.5,
+    n_folds: int = 5, purge_bins: int = 20, spatial_grid: int = 6, time_knot_sec: float = 120.0,
+    ridge: float = 30.0, min_spikes: int = MIN_SPIKES,
+) -> Dict[str, object]:
+    """Held-out gain of place + speed + proximity over a time-only model (positive control).
+
+    A territory analysis is only interpretable where position coding is
+    detectable at all. Returns ``delta_ll_cv_per_spike`` (blocked folds, purge
+    gap); NaN with a status when the cell has too few spikes.
+    """
+    y = np.asarray(counts, dtype=float)
+    ok = np.ones(len(y), bool)
+    for k in ("x", "y", "speed", "partner_dist"):
+        ok &= np.isfinite(covariates[k])
+    t = np.arange(len(y)) * dt
+    y = y[ok]
+    if y.sum() < min_spikes or len(y) < 4 * n_folds:
+        return dict(status="insufficient_spikes", delta_ll_cv_per_spike=np.nan, n_spikes=int(y.sum()))
+    full = _baseline_design(covariates["x"][ok], covariates["y"][ok], covariates["speed"][ok],
+                            covariates["partner_dist"][ok], t[ok], grid=spatial_grid,
+                            time_knot_sec=time_knot_sec)
+    zeros = np.zeros(len(y))
+    base = _baseline_design(zeros, zeros, zeros, zeros, t[ok], grid=spatial_grid,
+                            time_knot_sec=time_knot_sec)          # constant columns dropped
+    off = np.full(len(y), np.log(dt))
+    lam_f = np.r_[0.0, np.full(full.shape[1] - 1, ridge)]
+    lam_b = np.r_[0.0, np.full(base.shape[1] - 1, ridge)]
+    gain, held = 0.0, 0.0
+    for train, test in blocked_folds(len(y), n_folds, purge_bins):
+        if y[train].sum() < 10:
+            continue
+        bb = _irls(base[train], y[train], off[train], lam_b)
+        bf = _irls(full[train], y[train], off[train], lam_f)
+        gain += (_heldout_loglik(full[test], y[test], off[test], bf, full[train], off[train])
+                 - _heldout_loglik(base[test], y[test], off[test], bb, base[train], off[train]))
+        held += y[test].sum()
+    return dict(status="ok", delta_ll_cv_per_spike=float(gain / held) if held > 0 else np.nan,
+                n_spikes=int(y.sum()))

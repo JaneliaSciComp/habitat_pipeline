@@ -94,6 +94,7 @@ def make_session(seed: int, duration_s: float = 1800.0, n_map_chunks: int = 3,
         owner=owner, owner_present=owner_present, owner_dist=owner_dist,
         partner_dist=partner,
         own=lab["own"].to_numpy(), signed_dist=np.nan_to_num(lab["signed_dist"].to_numpy(), nan=-50.0),
+        exclusivity=lab["exclusivity"].to_numpy(),
         territory_map=tmap, seed=seed,
     )
 
@@ -103,7 +104,8 @@ def covariates(session: Dict) -> Dict[str, np.ndarray]:
 
 
 def territory_inputs(session: Dict) -> Dict[str, np.ndarray]:
-    return {"own": session["own"], "signed_dist": session["signed_dist"]}
+    return {"own": session["own"], "signed_dist": session["signed_dist"],
+            "exclusivity": session["exclusivity"]}
 
 
 @dataclass
@@ -114,6 +116,7 @@ class CellSpec:
     field_gain: float = 1.2          # log-gain at the field peak
     step_log: float = 0.0            # log rate ratio own vs not-own
     grad_per_unit: float = 0.0       # log-rate per unit signed boundary distance
+    excl_slope: float = 0.0          # log-rate per unit exclusivity (0..1)
     drift_sd: float = 0.0            # sd of slow log-gain drift
     drift_tau_sec: float = 300.0
 
@@ -134,7 +137,9 @@ def cell_rate(session: Dict, spec: CellSpec, rng: np.random.Generator) -> np.nda
     bump = np.exp(-r2 / (2 * spec.field_sigma ** 2))
     log_rate = (np.log(spec.base_hz) + spec.field_gain * bump
                 + spec.step_log * session["own"].astype(float)
-                + spec.grad_per_unit * np.clip(session["signed_dist"], -30.0, 30.0))
+                + spec.grad_per_unit * np.clip(session["signed_dist"], -30.0, 30.0)
+                + spec.excl_slope * np.nan_to_num(session["exclusivity"],
+                                                  nan=float(np.nanmean(session["exclusivity"]))))
     if spec.drift_sd > 0:
         n = session["x"].size
         a = np.exp(-session["dt"] / spec.drift_tau_sec)

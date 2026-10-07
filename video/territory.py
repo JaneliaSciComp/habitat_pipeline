@@ -301,12 +301,34 @@ def signed_boundary_distance(tmap: TerritoryMap, animal: str) -> np.ndarray:
     return signed_distance_from_mask(tmap.owner_mask(animal), tmap.bin_size)
 
 
+def exclusivity_map(tmap: TerritoryMap, animal: str, *, min_total_frac: float = 0.05) -> np.ndarray:
+    """Continuous territory measure: the animal's share of everyone's occupancy, per bin.
+
+    ``share[animal] / sum(share)`` in [0, 1] using the smoothed, per-animal-normalised
+    occupancy the owner map is built from; ``1/n_animals`` means the bin is used
+    like everyone else's, 1 means only this animal uses it. Unlike the winner-takes-all
+    owner map, it does not flip when two animals with similar occupancy swap rank.
+    Bins where total occupancy is below ``min_total_frac`` of the median occupied
+    bin are NaN (nobody uses them, so "exclusivity" is meaningless).
+    """
+    if animal not in tmap.animal_ids:
+        raise KeyError(f"{animal!r} has no territory in this map "
+                       f"(mapped: {tmap.animal_ids}; excluded: {tmap.excluded})")
+    total = tmap.share.sum(axis=0)
+    occupied = total[total > 0]
+    floor = min_total_frac * float(np.median(occupied)) if occupied.size else np.inf
+    with np.errstate(invalid="ignore", divide="ignore"):
+        ex = tmap.share[tmap.animal_ids.index(animal)] / total
+    return np.where(total > floor, ex, np.nan)
+
+
 def label_positions(tmap: TerritoryMap, animal: str, x: np.ndarray, y: np.ndarray) -> pd.DataFrame:
     """Territory labels for sample positions of ``animal``.
 
     Columns: ``owner`` (animal name or ``None`` when unclaimed / off grid),
     ``own`` (bool), ``foreign`` (bool, in someone else's territory),
-    ``signed_dist``, ``in_grid``.
+    ``signed_dist``, ``exclusivity`` (see :func:`exclusivity_map`; NaN for an unmapped
+    animal or an unused bin), ``in_grid``.
     """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -331,8 +353,13 @@ def label_positions(tmap: TerritoryMap, animal: str, x: np.ndarray, y: np.ndarra
     foreign = in_grid & (cell_owner != UNCLAIMED) & ~own
     signed = np.where(in_grid, dist_grid[ix_c, iy_c], np.nan) if dist_grid is not None \
         else np.full(x.shape, np.nan)
+    if own_idx is not None:
+        ex_grid = exclusivity_map(tmap, animal)
+        excl = np.where(in_grid, ex_grid[ix_c, iy_c], np.nan)
+    else:
+        excl = np.full(x.shape, np.nan)
     return pd.DataFrame({"owner": owner_name, "own": own, "foreign": foreign,
-                         "signed_dist": signed, "in_grid": in_grid})
+                         "signed_dist": signed, "exclusivity": excl, "in_grid": in_grid})
 
 
 # ---------------------------------------------------------------------------

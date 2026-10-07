@@ -60,13 +60,14 @@ def _chunk(rng, n, spreads, t0=0.0):
             for name in HOMES}
 
 
-def make_session(seed: int, duration_s: float = 1800.0, n_map_chunks: int = 3) -> Dict:
+def make_session(seed: int, duration_s: float = 1800.0, n_map_chunks: int = 3,
+                 nbr_spread: float = MAP_SPREAD) -> Dict:
     """One focal-rat session with territory labels from independent chunks."""
     rng = np.random.default_rng(seed)
     n = int(duration_s / DT)
     chunks = {f"map{i}": _chunk(rng, n, {k: MAP_SPREAD for k in HOMES}, t0=i * 1e4)
               for i in range(n_map_chunks)}
-    test = _chunk(rng, n, {**{k: MAP_SPREAD for k in HOMES}, "focal": FOCAL_SPREAD},
+    test = _chunk(rng, n, {"focal": FOCAL_SPREAD, "nbr_b": nbr_spread, "nbr_c": nbr_spread},
                   t0=1e5)
     chunks["test"] = test
     tmap = build_territory_map_loo(chunks, "test", bounds=(0, ARENA, 0, ARENA), bins=20,
@@ -78,8 +79,19 @@ def make_session(seed: int, duration_s: float = 1800.0, n_map_chunks: int = 3) -
     speed = np.r_[0.0, np.hypot(np.diff(x), np.diff(y)) / DT]
     partner = np.minimum(np.hypot(x - test["nbr_b"]["x"].to_numpy(), y - test["nbr_b"]["y"].to_numpy()),
                          np.hypot(x - test["nbr_c"]["x"].to_numpy(), y - test["nbr_c"]["y"].to_numpy()))
+    # who owns the bin the focal is in, is that neighbour home, and how far away is it
+    owner = np.array([o if o in ("nbr_b", "nbr_c") else None for o in lab["owner"]], dtype=object)
+    owner_present = np.full(len(x), np.nan)
+    owner_dist = np.full(len(x), np.nan)
+    for nb in ("nbr_b", "nbr_c"):
+        nx_, ny_ = test[nb]["x"].to_numpy(), test[nb]["y"].to_numpy()
+        home = label_positions(tmap, nb, nx_, ny_)["own"].to_numpy()
+        sel = owner == nb
+        owner_present[sel] = home[sel].astype(float)
+        owner_dist[sel] = np.hypot(x - nx_, y - ny_)[sel]
     return dict(
         t=f["t"].to_numpy() - f["t"].iloc[0], dt=DT, x=x, y=y, speed=speed,
+        owner=owner, owner_present=owner_present, owner_dist=owner_dist,
         partner_dist=partner,
         own=lab["own"].to_numpy(), signed_dist=np.nan_to_num(lab["signed_dist"].to_numpy(), nan=-50.0),
         territory_map=tmap, seed=seed,
@@ -137,6 +149,43 @@ def cell_rate(session: Dict, spec: CellSpec, rng: np.random.Generator) -> np.nda
 
 def simulate_counts(session: Dict, spec: CellSpec, rng: np.random.Generator) -> np.ndarray:
     return rng.poisson(cell_rate(session, spec, rng) * session["dt"])
+
+
+def simulate_population(session: Dict, rng: np.random.Generator, n_cells: int = 40, *,
+                        frac_step: float = 0.0, step_ratio: float = 1.5, drift_sd: float = 0.0,
+                        density: str = "uniform", frac_presence: float = 0.0,
+                        presence_ratio: float = 1.5, dist_gain: float = 0.0,
+                        base_hz: float = 2.0) -> np.ndarray:
+    """(n_bins, n_cells) spike counts for a population.
+
+    density      'uniform' place-field centres anywhere; 'boundary_dense' half the
+                 cells have narrow fields ON the territory boundary (a place-coding
+                 confound that has nothing to do with territory).
+    frac_step    share of cells with a genuine own-territory step.
+    frac_presence share of cells whose rate rises when the owner of the territory
+                 the focal is in is home.
+    dist_gain    all cells' log-rate slope on (capped) focal-owner distance / 50:
+                 neural information about distance that is *not* about presence.
+    """
+    n_t = session["x"].size
+    od = np.nan_to_num(np.minimum(session["owner_dist"], 100.0), nan=0.0) / 50.0
+    pres = np.nan_to_num(session["owner_present"], nan=0.0)
+    out = np.empty((n_t, n_cells), dtype=np.int64)
+    for c in range(n_cells):
+        near_boundary = density == "boundary_dense" and c < n_cells // 2
+        spec = CellSpec(
+            base_hz=base_hz,
+            field_center=boundary_point(session, rng) if near_boundary
+            else (rng.uniform(5, 95), rng.uniform(5, 95)),
+            field_sigma=8.0 if near_boundary else rng.uniform(12, 20),
+            field_gain=1.8 if near_boundary else 1.2,
+            step_log=np.log(step_ratio) if c < int(round(frac_step * n_cells)) else 0.0,
+            drift_sd=drift_sd, drift_tau_sec=400.0)
+        rate = cell_rate(session, spec, rng) * np.exp(dist_gain * od)
+        if c >= n_cells - int(round(frac_presence * n_cells)):
+            rate = rate * np.exp(np.log(presence_ratio) * pres)
+        out[:, c] = rng.poisson(rate * session["dt"])
+    return out
 
 
 # ---------------------------------------------------------------------------

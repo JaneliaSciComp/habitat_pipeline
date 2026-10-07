@@ -277,21 +277,28 @@ def build_territory_map_loo(
 # Per-sample labels and boundary distance
 # ---------------------------------------------------------------------------
 
+def signed_distance_from_mask(mask: np.ndarray, sampling: Tuple[float, float]) -> np.ndarray:
+    """Signed distance (coordinate units) to the boundary of a boolean grid mask.
+
+    Positive inside, negative outside; the boundary sits half a bin either side.
+    An empty mask gives ``-inf`` everywhere. Usable on displaced/shifted masks.
+    """
+    mask = np.asarray(mask, dtype=bool)
+    if not mask.any():
+        return np.full(mask.shape, -np.inf)
+    d_in = ndimage.distance_transform_edt(mask, sampling=sampling)
+    d_out = ndimage.distance_transform_edt(~mask, sampling=sampling)
+    half = 0.5 * min(sampling)
+    return np.where(mask, d_in - half, -(d_out - half))
+
+
 def signed_boundary_distance(tmap: TerritoryMap, animal: str) -> np.ndarray:
     """Signed distance (coordinate units) to the boundary of ``animal``'s territory.
 
-    Positive inside the animal's own territory, negative outside. Uses the
-    larger bin dimension as isotropic spacing only if bins are square; otherwise
-    each axis is scaled by its own bin size.
+    Positive inside the animal's own territory, negative outside; each axis is
+    scaled by its own bin size.
     """
-    inside = tmap.owner_mask(animal)
-    if not inside.any():
-        return np.full(inside.shape, -np.inf)
-    sampling = tmap.bin_size
-    d_in = ndimage.distance_transform_edt(inside, sampling=sampling)
-    d_out = ndimage.distance_transform_edt(~inside, sampling=sampling)
-    # distance to the boundary sits half a bin inside either side
-    return np.where(inside, d_in - 0.5 * min(sampling), -(d_out - 0.5 * min(sampling)))
+    return signed_distance_from_mask(tmap.owner_mask(animal), tmap.bin_size)
 
 
 def label_positions(tmap: TerritoryMap, animal: str, x: np.ndarray, y: np.ndarray) -> pd.DataFrame:

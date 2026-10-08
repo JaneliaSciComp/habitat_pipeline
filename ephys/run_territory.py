@@ -319,7 +319,11 @@ def run(args) -> Dict[str, object]:
 
     focal = f"rat{args.animal_id}"
     dsm = DataStorageManager(args.animal_id, args.session_id, config_path=args.config_path)
-    ks = load_kilosort_data(dsm.get_kilosort_path())
+    ks_path = dsm.get_kilosort_path()
+    if ks_path is None:
+        return dict(session_id=args.session_id, animal=focal, status="no_ephys_for_this_animal_and_recording",
+                    recording_id=dsm.recording_id, purpose=args.purpose, smoke=args.smoke)
+    ks = load_kilosort_data(ks_path)
     sync = DataSyncManager(dsm, dio_channel=args.dio_channel)
     cluster_ids, spike_times = ks.get_filtered_cells_spike_times()
     win = ks.quality_ephys_window()
@@ -433,6 +437,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dio_channel", type=int, default=1)
     p.add_argument("--purpose", choices=["exploratory", "confirmatory"], default="exploratory")
     p.add_argument("--hypothesis_id", type=int, default=None)
+    p.add_argument("--note", default=None, help="free text stored in the saved parameters (e.g. a caveat)")
     p.add_argument("--output_dir", default=None)
     p.add_argument("--gates_only", action="store_true", help="feasibility + gates, no analysis")
     p.add_argument("--ignore_gates", action="store_true")

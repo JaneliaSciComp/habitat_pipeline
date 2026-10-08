@@ -215,6 +215,41 @@ def position_control_gate(counts: np.ndarray, cov: Dict[str, np.ndarray], *, min
                 thresholds=dict(min_gain_per_spike=min_gain, min_fraction=min_fraction, note="provisional"))
 
 
+def exclusivity_spread_gate(chunks: Dict[str, Dict[str, pd.DataFrame]], focal: str, window, *, bounds, bins: int,
+                            map_kw: Dict, min_eff_bins: float, min_range: float) -> Dict[str, object]:
+    """Does the focal visit enough of the grid, and see enough of the exclusivity range, to separate the
+    covariate from position?
+
+    Per chunk the exclusivity comes from the other chunks' map (as in the analysis) and is read at the
+    focal's own positions. ``eff_bins`` is exp(entropy) of its dwell over grid bins (2-3 for a rat
+    resting in one spot); ``range`` is the 5-95 percentile spread of exclusivity at its positions.
+    On rat630 / 20251216_145034 chunk 1659 these were ~3 bins and 0.08: the covariate was a label for three
+    positions and the GLM's "hits" were place-rate differences. Every chunk must pass.
+    """
+    per = {}
+    for name in chunks:
+        if focal not in chunks[name]:
+            continue
+        try:
+            tmap = build_territory_map_loo(chunks, name, bounds=bounds, bins=bins, **map_kw)
+        except ValueError:
+            per[name] = dict(eff_bins=None, range=None, passed=False)
+            continue
+        inp = chunk_inputs(chunks[name], focal, window)
+        ex = label_positions(tmap, focal, inp["x"], inp["y"])["exclusivity"].to_numpy()
+        xe = np.linspace(bounds[0], bounds[1], bins + 1)
+        ye = np.linspace(bounds[2], bounds[3], bins + 1)
+        ok = np.isfinite(inp["x"]) & np.isfinite(inp["y"])
+        h, _, _ = np.histogram2d(inp["x"][ok], inp["y"][ok], bins=[xe, ye])
+        pr = h[h > 0] / h.sum() if h.sum() else np.array([1.0])
+        eff = float(np.exp(-np.sum(pr * np.log(pr))))
+        v = ex[np.isfinite(ex)]
+        rng = float(np.percentile(v, 95) - np.percentile(v, 5)) if v.size else 0.0
+        per[name] = dict(eff_bins=eff, range=rng, passed=bool(eff >= min_eff_bins and rng >= min_range))
+    return dict(passed=bool(per) and all(r["passed"] for r in per.values()), per_chunk=per,
+                thresholds=dict(min_eff_bins=min_eff_bins, min_exclusivity_range=min_range, note="provisional"))
+
+
 # ---------------------------------------------------------------------------
 # One chunk
 # ---------------------------------------------------------------------------
@@ -382,7 +417,11 @@ def run(args) -> Dict[str, object]:
         counts0, dict(x=inp0["x"], y=inp0["y"], speed=inp0["speed"], partner_dist=inp0["partner_dist"]),
         min_gain=args.min_position_gain, min_fraction=args.min_position_fraction,
         max_cells=args.max_cells if args.smoke else None)
-    gates_ok = out["stability_gate"]["passed"] and out["position_control_gate"]["passed"]
+    out["spread_gate"] = exclusivity_spread_gate(chunks, focal, (win[0], win[1]), bounds=bounds, bins=args.bins,
+                                                 map_kw=map_kw, min_eff_bins=args.min_eff_bins,
+                                                 min_range=args.min_exclusivity_range)
+    gates_ok = (out["stability_gate"]["passed"] and out["position_control_gate"]["passed"]
+                and out["spread_gate"]["passed"])
     out["gates_passed"] = bool(gates_ok)
     if args.gates_only or (not gates_ok and not args.ignore_gates):
         out["status"] = "gates_only" if args.gates_only else "stopped_at_failed_gate"
@@ -473,6 +512,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min_owner_agreement", type=float, default=0.5, help="binary-map stability (provisional)")
     p.add_argument("--min_focal_jaccard", type=float, default=0.3, help="stability gate (provisional)")
     p.add_argument("--min_position_gain", type=float, default=0.005, help="position-control gate, ll/spike (provisional)")
+    p.add_argument("--min_eff_bins", type=float, default=10.0,
+                   help="spread gate: effective number of occupied grid bins per chunk (provisional)")
+    p.add_argument("--min_exclusivity_range", type=float, default=0.2,
+                   help="spread gate: 5-95 pct range of exclusivity at the focal's positions (provisional)")
     p.add_argument("--min_position_fraction", type=float, default=0.2, help="position-control gate (provisional)")
     return p
 

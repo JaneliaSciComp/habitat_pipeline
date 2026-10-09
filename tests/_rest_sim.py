@@ -42,6 +42,10 @@ class RestSpec:
     arousal_gain: float = 0.0     # cells' dependence on arousal (log units per SD)
     beta: float = 0.0             # effect of fast distance (log units per SD) on every cell
     frac_cells_affected: float = 1.0
+    flicker_rate: float = 0.0     # bridged speed flickers: expected gaps per second inside rest (each 1-6 bins)
+    move_gain: float = 0.0        # cells' log-rate change during a flicker
+    move_d_coupling: float = 0.0  # flickers are more likely when the partner is close (d_fast low), logit units per SD
+    move_noise: float = 0.3       # measurement noise on the observed movement nuisance
 
 
 def make_rest_session(seed: int, spec: RestSpec) -> Dict[str, object]:
@@ -57,12 +61,20 @@ def make_rest_session(seed: int, spec: RestSpec) -> Dict[str, object]:
     A = np.sqrt(spec.rho) * d_fast + np.sqrt(1 - spec.rho) * _ar1(n, 10.0, rng)
     nuis = np.column_stack([A + spec.nuis_noise * rng.normal(size=n),
                             np.exp(0.5 * (A + spec.nuis_noise * rng.normal(size=n)))])
+    M = np.zeros(n)
+    if spec.flicker_rate > 0:
+        p = spec.flicker_rate * DT * 1 / (1 + np.exp(spec.move_d_coupling * d_fast))     # more flickers when d_fast low
+        p = p / p.mean() * spec.flicker_rate * DT if spec.move_d_coupling else p
+        for i in np.flatnonzero(rest & (rng.random(n) < p)):
+            M[i:i + int(rng.integers(1, 7))] = 1.0
+        M[~rest] = 0.0
+        nuis = np.column_stack([nuis, M + spec.move_noise * rng.normal(size=n)])
     counts = np.empty((n, spec.n_cells))
     affected = rng.random(spec.n_cells) < spec.frac_cells_affected
     d_std = d_fast / d_fast[rest].std()
     for c in range(spec.n_cells):
         drift = spec.drift_sd * _ar1(n, 300.0, rng)
-        eta = (np.log(spec.base_rate_hz) + drift + spec.arousal_gain * np.tanh(A)
+        eta = (np.log(spec.base_rate_hz) + drift + spec.arousal_gain * np.tanh(A) + spec.move_gain * M
                + (spec.beta * d_std if affected[c] else 0.0))
         counts[:, c] = rng.poisson(np.exp(eta) * DT)
     return dict(counts=counts, d=d, nuis=nuis, rest=rest, A=A, affected=affected)

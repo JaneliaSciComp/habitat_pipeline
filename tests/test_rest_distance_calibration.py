@@ -85,6 +85,9 @@ class TestTypeI:
         ("clean", BASE),
         ("slow_drift", RestSpec(slow_sd=2.0, drift_sd=1.0)),
         ("arousal_measured_exactly", RestSpec(rho=0.6, arousal_gain=0.5)),
+        # bridged speed flickers (rat moves briefly inside a rest bout); movement is measured, with noise 0.3
+        ("bridged_flicker", RestSpec(flicker_rate=0.05, move_gain=0.6)),
+        ("bridged_flicker_coupled_to_distance", RestSpec(flicker_rate=0.05, move_gain=0.6, move_d_coupling=1.0)),
     ])
     def test_single_cell_false_positives(self, name, spec):
         cell, _, _ = _pvals(spec, self.N)
@@ -100,6 +103,13 @@ class TestTypeI:
         # distance (correlated with arousal) inherits the dependence. Pin the size of the problem.
         cell, _, _ = _pvals(RestSpec(rho=0.6, arousal_gain=0.5, nuis_noise=0.7), 150)
         assert np.mean(cell <= 0.05) > 0.3
+
+    @pytest.mark.parametrize("noise,lo,hi", [(0.2, 0.05, 0.25), (0.4, 0.15, 0.6), (0.7, 0.5, 1.0)])
+    def test_known_limit_leak_grows_with_arousal_proxy_noise(self, noise, lo, hi):
+        # rho=0.6 arousal-distance coupling, arousal gain 0.5. Noise is in SD of A, so reliability of the proxy is
+        # 1/(1+noise^2): 0.96, 0.86, 0.67. Ranges are wide on purpose: they pin the order of magnitude only.
+        cell, _, _ = _pvals(RestSpec(rho=0.6, arousal_gain=0.5, nuis_noise=noise), 200)
+        assert lo <= np.mean(cell <= 0.05) <= hi, (noise, np.mean(cell <= 0.05))
 
 
 # ---- power ------------------------------------------------------------------

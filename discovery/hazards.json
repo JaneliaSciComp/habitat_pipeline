@@ -149,7 +149,8 @@
         "modules": [
           "ephys._stats_utils",
           "ephys._lda_decoding",
-          "ephys.social_spatial_fields"
+          "ephys.social_spatial_fields",
+          "ephys.decode_conflict_territory"
         ]
       },
       "symptom": "A p-value of exactly 0.0 appears in a result, and survives BH as q = 0.",
@@ -250,7 +251,8 @@
         "modules": [
           "ephys.decode_location",
           "ephys.decode_partner_distance",
-          "ephys.inter_brain_dynamics"
+          "ephys.inter_brain_dynamics",
+          "ephys.decode_conflict_territory"
         ]
       },
       "symptom": "Both the real decode and its null look implausibly tight, and a real effect hides between two artificially small numbers.",
@@ -1060,12 +1062,13 @@
         ],
         "analyses": [
           "ephys.decode_opponent_identity",
-          "ephys.decode_event_outcome"
+          "ephys.decode_event_outcome",
+          "ephys.decode_conflict_territory"
         ]
       },
       "symptom": "Nothing visible. An analysis reports a sample size, and a different version of the same session's scoring would have given a materially different one.",
       "mechanism": "DataStorageManager resolves behavioural events by looking inside date-named directories under the cohort's events root. Files sitting loose at that root are invisible to it, however recent they are, so which scoring an analysis reads is decided by directory layout rather than by choice.",
-      "consequence": "A conclusion about statistical power rests on a file nobody chose. Session 20251216 has three versions: the dated one the analyses use (2026-03-02, 641 rows, 19 usable outcome events for animal 631) and two loose ones five months newer (2026-08-13, 688 and 693 rows, 29 usable outcome events). The 'underpowered null' recorded for outcome decoding was computed on the smaller sample.",
+      "consequence": "A conclusion about statistical power rests on a file nobody chose. Session 20251216 has three versions: the dated one the analyses used until 2026-09-17 (2026-03-02, 641 rows, 19 usable outcome events for animal 631) and two loose ones five months newer (2026-08-13, 688 and 693 rows, 29 usable outcome events). The 'underpowered null' recorded for outcome decoding was computed on the smaller sample. On 2026-09-17 the dated file itself was replaced by a 1141-row version (28 outcome events, 17 winner / 11 loser, for 631 in its quality window), which is canonical by decision of 2026-10-12; every event-based result logged before then used the 641-row version.",
       "detector": {
         "type": "callable",
         "callable": "discovery.detectors:resolved_from_dated_directory",
@@ -1084,7 +1087,7 @@
         "report the event file's path and row count alongside any sample-size claim"
       ],
       "known_gaps": [
-        "Nothing reconciles the three versions. The loose 2026-08-13 files contain 145 winner/loser rows against the dated file's 97, and the discrepancy has not been explained."
+        "Nothing reconciles the versions. The loose 2026-08-13 files contained 145 winner/loser rows against the old dated file's 97; the current dated file (1141 rows) has 194 and extends scoring from 17:00 to 22:28 UTC, but morning-window counts also changed and that has not been explained."
       ],
       "evidence": {
         "occurred": true,
@@ -1092,6 +1095,7 @@
         "where": [
           "//nearline/.../RatCityBehavior/cohort7 holds 20251216/20251216_behavior_event_df.csv plus loose behavior_event_df.csv and behavior_event_df_update.csv",
           "lab notebook iteration 1 (Hypothesis 1) reported a null on 19 events, 12 winner / 7 loser; the newer scoring gives 29 events, 20 winner / 9 loser",
+          "2026-10-12: 20251216/20251216_behavior_event_df.csv found replaced (mtime 2026-09-17, 1141 rows, md5 71801203...); the loose behavior_event_df.csv is now byte-identical to it and behavior_event_df_update.csv is gone; the 641-row scoring survives only as behavior_event_df_1/_orig/_hierarchy_diff.csv in the dated directory",
           "found by the first paths-level capability-manifest build, 2026-08-20"
         ]
       },
@@ -1237,7 +1241,8 @@
         ],
         "analyses": [
           "ephys.decode_opponent_identity",
-          "ephys.decode_event_outcome"
+          "ephys.decode_event_outcome",
+          "ephys.decode_conflict_territory"
         ]
       },
       "symptom": "Label extraction returns nothing, or events cannot be aligned to spikes.",
@@ -1289,7 +1294,8 @@
           "video.behavioral_events"
         ],
         "analyses": [
-          "ephys.decode_opponent_identity"
+          "ephys.decode_opponent_identity",
+          "ephys.decode_conflict_territory"
         ]
       },
       "symptom": "AttributeError: 'int' object has no attribute 'startswith', raised deep inside label extraction.",
@@ -1770,6 +1776,62 @@
         "ephys/social_spatial_fields.py::field_significance",
         "HZ-STAT-014",
         "HZ-STAT-015"
+      ]
+    },
+    {
+      "id": "HZ-STAT-017",
+      "slug": "position-defined-label-map-null-confounded-by-geometry",
+      "title": "Map-specificity null for a position-defined label is fooled by place coding when outcomes are spatially segregated",
+      "severity": "critical",
+      "kind": "statistical",
+      "status": "active",
+      "added": "2026-10-12",
+      "applies_to": {
+        "stages": [
+          "propose",
+          "implement",
+          "interpret"
+        ],
+        "modules": [
+          "ephys.decode_conflict_territory"
+        ],
+        "analyses": [
+          "ephys.decode_conflict_territory"
+        ]
+      },
+      "symptom": "A pure place-cell population gives a small map-null p for the conflict-defined territory label, which reads as territory coding.",
+      "mechanism": "The territory label is a deterministic function of position (a win/loss Voronoi map). The map null permutes outcomes across the conflict locations; when the real wins and losses are spatially segregated (one compact region per class) the real map is geometrically simpler than a typical reassignment, and any place code decodes a simpler partition better. Exchangeability of outcomes across locations - the null's assumption - fails exactly when a territory exists for non-neural reasons.",
+      "consequence": "Place coding is reported as territory coding. On synthetic data (36 place cells, 8 W clustered left / 6 L clustered right) the neural map-null p sits at its floor while the population carries no territory signal at all.",
+      "detector": {
+        "type": "test",
+        "test": [
+          "tests/test_decode_conflict_territory.py::TestMapGeometryConfound::test_clustered_outcomes_fool_the_map_null_and_the_diagnostic_flags_it",
+          "tests/test_decode_conflict_territory.py::TestMapGeometryConfound::test_interleaved_outcomes_do_not_raise_the_flag"
+        ],
+        "pass_if": {
+          "field": "returncode",
+          "op": "==",
+          "value": 0
+        },
+        "on_fail": "The position-only map null (diagnostics['position_map_null']) no longer flags the geometry confound, or the confound no longer reproduces; do not read the neural map-null p of ephys.decode_conflict_territory until this is understood."
+      },
+      "remedies": [
+        "read diagnostics['position_map_null'] BEFORE the neural map_null: if a smooth-position decoder also puts the real map in the null's upper tail, the neural map-null p is confounded by map geometry",
+        "gain_null (neural BA minus position BA against the same permuted maps) is the primary test since 2026-10-12; its synthetic false-positive rate is 0-5% except broad place fields with spatially clustered outcomes, where it is 11/100 (95% CI 5.6-18.8%), so read diagnostics['position_map_null'] to see whether a real map is in that regime"
+      ],
+      "known_gaps": [
+        "Only the interleaved-outcome case has a calibrated map null (4 synthetic seeds). No calibrated test exists yet for the spatially segregated case, which is the biologically expected one."
+      ],
+      "evidence": {
+        "occurred": false,
+        "date": "2026-10-12",
+        "where": [
+          "Not yet on a real result - found while implementing ephys/decode_conflict_territory.py, before its first real run: synthetic place-only population with clustered W/L layout gave map-null p = 0.01-0.03 on 3/3 seeds (99 shuffles), position-only map-null p = 0.01-0.02; with interleaved layout map-null p = 0.26-0.94"
+        ]
+      },
+      "references": [
+        "ephys/decode_conflict_territory.py - module 'Statistical notes'",
+        "tests/test_decode_conflict_territory.py::TestMapGeometryConfound"
       ]
     }
   ]

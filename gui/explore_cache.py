@@ -115,6 +115,151 @@ def fit_pca_trajectory(ks_data, pca_bin, t0, t1) -> Optional[Dict[str, np.ndarra
     }
 
 
+#: CEBRA fit defaults. Only these are cached (one entry per session/animal).
+DEFAULT_CEBRA_BIN = 0.5
+DEFAULT_CEBRA_ITERATIONS = 2000
+DEFAULT_CEBRA_SEED = 0
+CEBRA_INSTALL_HINT = "CEBRA is not installed. Install it with: pip install cebra"
+
+
+def cebra_available() -> bool:
+    """True if ``cebra`` is importable. Uses ``find_spec`` so torch is not imported."""
+    import importlib.util
+    return importlib.util.find_spec("cebra") is not None
+
+
+def cebra_params(bin_size: float, max_iterations: int, seed: int,
+                 mode: str = "time", tracking: Optional[str] = None) -> Dict[str, Any]:
+    """The parameters that define a CEBRA fit; a cached fit is reused only if these match.
+
+    Time fits carry exactly the three base keys (so fits cached before the
+    position variant existed still match); position fits add ``mode`` and the
+    tracking format whose (x, y) supervised them.
+    """
+    params = {"bin": float(bin_size), "max_iterations": int(max_iterations), "seed": int(seed)}
+    if mode != "time":
+        params.update(mode=mode, tracking=tracking)
+    return params
+
+
+def _cebra_inputs(ks_data, bin_size, t0, t1):
+    """z-scored ``(n_bins, n_cells)`` rates and bin centres, or ``(None, None)`` for < 3 cells."""
+    spks, bin_centers = ks_data.bin_spike_times(
+        bin_size_sec=bin_size, t_start=t0, t_end=t1, filtered_only=True,
+    )
+    if spks.shape[0] < 3:
+        return None, None
+    return np.nan_to_num(zscore(spks, axis=1), nan=0.0).T, bin_centers
+
+
+def _run_cebra(X, bin_centers, params, *, labels=None, fit_mask=None,
+               output_dim=3) -> Dict[str, Any]:
+    """Fit CEBRA and embed every bin.
+
+    ``labels is None`` -> CEBRA-Time. Otherwise CEBRA-Behavior (``time_delta``)
+    on the ``fit_mask`` bins, whose rows of ``labels`` are the supervision; the
+    model then embeds *all* bins from neural activity alone.
+    """
+    import cebra
+    try:
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        torch.manual_seed(params["seed"])     # CEBRA.__init__ takes no seed argument
+    except ImportError:
+        device = "cpu"
+    np.random.seed(params["seed"])
+    model = cebra.CEBRA(
+        model_architecture="offset10-model",
+        output_dimension=output_dim,
+        conditional="time" if labels is None else "time_delta",
+        temperature_mode="auto",
+        max_iterations=params["max_iterations"],
+        batch_size=512,
+        learning_rate=3e-4,
+        device=device,
+        verbose=False,
+    )
+    if labels is None:
+        model.fit(X)
+    else:
+        model.fit(X[fit_mask], labels)
+    try:                                   # loss history is informational only
+        loss = model.state_dict_["loss"]
+    except Exception:
+        loss = None
+    return {
+        "scores": np.asarray(model.transform(X), dtype=np.float64),   # (n_bins, output_dim)
+        "bin_centers": bin_centers,
+        "params": params,
+        "device": device,
+        "loss_final": float(loss[-1]) if loss is not None and len(loss) else None,
+        "cebra_version": getattr(cebra, "__version__", None),
+    }
+
+
+def fit_cebra_embedding(ks_data, bin_size: float, t0: float, t1: float, *,
+                        max_iterations: int = DEFAULT_CEBRA_ITERATIONS,
+                        output_dim: int = 3,
+                        seed: int = DEFAULT_CEBRA_SEED) -> Optional[Dict[str, Any]]:
+    """CEBRA-Time embedding of z-scored quality-cell rates (unsupervised).
+
+    Same input as :func:`fit_pca_trajectory`. CEBRA has no explained-variance
+    notion, and the embedding's axes and orientation depend on the seed and
+    iteration count, so those are returned for display. ``None`` for < 3 cells.
+    """
+    if not cebra_available():
+        raise ImportError(CEBRA_INSTALL_HINT)
+    X, bin_centers = _cebra_inputs(ks_data, bin_size, t0, t1)
+    if X is None:
+        return None
+    return _run_cebra(X, bin_centers, cebra_params(bin_size, max_iterations, seed),
+                      output_dim=output_dim)
+
+
+#: Fewest tracked bins a position-supervised fit is allowed to run on.
+MIN_POSITION_BINS = 200
+
+
+def fit_cebra_position_embedding(ks_data, traj, bin_size: float, t0: float, t1: float, *,
+                                 max_iterations: int = DEFAULT_CEBRA_ITERATIONS,
+                                 output_dim: int = 3, seed: int = DEFAULT_CEBRA_SEED,
+                                 max_gap: float = 1.0) -> Optional[Dict[str, Any]]:
+    """CEBRA-Behavior supervised by the focal animal's (x, y) position.
+
+    ``traj`` is one tracking format's ``{t, x, y, format}`` on the ephys clock
+    (pixels). Position is linearly interpolated to the bin centres, and only
+    bins with a tracked frame within ``max_gap`` seconds supervise the fit; the
+    labels are z-scored per axis so the pixel scale (which differs between the
+    APT and manual formats) does not matter. Every bin is then embedded from
+    its neural activity alone, tracked or not. Dropping untracked bins makes the
+    training samples non-contiguous at gaps, so windows spanning a gap are
+    slightly contaminated. ``None`` for < 3 cells or < ``MIN_POSITION_BINS``
+    tracked bins.
+    """
+    if not cebra_available():
+        raise ImportError(CEBRA_INSTALL_HINT)
+    X, bin_centers = _cebra_inputs(ks_data, bin_size, t0, t1)
+    if X is None or traj is None:
+        return None
+    t = np.asarray(traj["t"], dtype=float)
+    if len(t) < 2:
+        return None
+    nearest = np.clip(np.searchsorted(t, bin_centers), 1, len(t) - 1)
+    gap = np.minimum(np.abs(t[nearest] - bin_centers), np.abs(t[nearest - 1] - bin_centers))
+    tracked = gap <= max_gap
+    if int(tracked.sum()) < MIN_POSITION_BINS:
+        return None
+    xy = np.column_stack([np.interp(bin_centers[tracked], t, np.asarray(traj[k], dtype=float))
+                          for k in ("x", "y")])
+    xy = np.nan_to_num((xy - xy.mean(axis=0)) / np.where(xy.std(axis=0) > 0, xy.std(axis=0), 1.0))
+    fit = _run_cebra(X, bin_centers,
+                     cebra_params(bin_size, max_iterations, seed, "position",
+                                  traj.get("format")),
+                     labels=xy.astype(np.float32), fit_mask=tracked, output_dim=output_dim)
+    fit["n_tracked_bins"] = int(tracked.sum())
+    return fit
+
+
 def compute_view_products(ks_data, raster_bin: float, pca_bin: float) -> Dict[str, Any]:
     """Rastermap image, its span and the PCA trajectory for one loaded session."""
     indices = quality_indices(ks_data)
@@ -266,6 +411,53 @@ def update_cached_trajectory(cohort: str, session_id: str, animal_id: str,
         pickle.dump(entry, fh, protocol=pickle.HIGHEST_PROTOCOL)
     os.replace(tmp, path)
     return True
+
+
+#: Cache-entry keys: the time fit keeps its original key, so older entries still load.
+CEBRA_KEYS = {"time": "cebra", "position": "cebra_position"}
+
+
+def update_cached_cebra(cohort: str, session_id: str, animal_id: str,
+                        cebra_fit: Dict[str, Any], signature: str) -> bool:
+    """Add/replace a CEBRA fit in an existing cache entry (no-op if none, or if the
+    fit was not made with the default bin / iterations / seed). The fit's own
+    ``params['mode']`` picks the slot; ``signature`` is what it was computed from
+    (for a position fit, the source and tracking signatures together)."""
+    if cebra_fit is None:
+        return False
+    p = cebra_fit["params"]
+    if (p["bin"], p["max_iterations"], p["seed"]) != (
+            DEFAULT_CEBRA_BIN, DEFAULT_CEBRA_ITERATIONS, DEFAULT_CEBRA_SEED):
+        return False
+    key = CEBRA_KEYS[p.get("mode", "time")]
+    path = cache_path(cohort, session_id, animal_id)
+    if not path.exists():
+        return False
+    try:
+        with open(path, "rb") as fh:
+            entry = pickle.load(fh)
+    except Exception:
+        return False
+    entry[key] = cebra_fit
+    entry[key + "_signature"] = signature
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "wb") as fh:
+        pickle.dump(entry, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    os.replace(tmp, path)
+    return True
+
+
+def cached_cebra(entry: Optional[Dict[str, Any]], signature: str,
+                 params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The entry's CEBRA fit for ``params`` (whose ``mode`` picks the slot) if it
+    came from these sources and parameters."""
+    if not entry:
+        return None
+    key = CEBRA_KEYS[params.get("mode", "time")]
+    fit = entry.get(key)
+    if fit is None or entry.get(key + "_signature") != signature or fit.get("params") != params:
+        return None
+    return fit
 
 
 def _safe(part: str) -> str:

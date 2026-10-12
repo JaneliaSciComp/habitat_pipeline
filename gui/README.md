@@ -14,7 +14,13 @@ Install the GUI dependencies if you haven't already:
 ```bash
 pip install -e ".[gui]"
 pip install rastermap  # required for the interactive app
+pip install cebra      # optional: enables the CEBRA panel (pulls in torch)
 ```
+
+The CEBRA panel (Explore view, below the PCA panel) is fitted on demand with the
+**Fit CEBRA** sidebar button: CEBRA-Time, unsupervised, on the same z-scored binned
+rates as the PCA. A fit at the default parameters is cached with the session's explore
+cache. Without `cebra` installed the panel shows an install hint and the button is disabled.
 
 ## Running
 

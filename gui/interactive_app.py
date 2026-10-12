@@ -129,11 +129,13 @@ def _rat_colors(df):
     return {r: PALETTE[i % 10] for i, r in enumerate(all_rats)}
 
 
-def _build_pop_data(events, pca_base, behavior_type, animal_id, min_events):
-    """Lay one behaviour type's event markers over a precomputed PCA trajectory.
+def _build_pop_data(events, pca_base, behavior_type, animal_id, min_events,
+                    label="PCA", subtitle=""):
+    """Lay one behaviour type's event markers over a precomputed 3-D embedding.
 
-    ``pca_base`` is :func:`gui.explore_cache.fit_pca_trajectory`'s output; the
-    fit itself is behaviour-independent, so changing the behaviour type or
+    ``pca_base`` is :func:`gui.explore_cache.fit_pca_trajectory`'s output (or
+    :func:`~gui.explore_cache.fit_cebra_embedding`'s, with ``label="CEBRA"``);
+    the fit itself is behaviour-independent, so changing the behaviour type or
     ``min_events`` never refits it.
 
     Returns dict with keys:
@@ -166,7 +168,10 @@ def _build_pop_data(events, pca_base, behavior_type, animal_id, min_events):
     return {
         "scores": pca_base["scores"],
         "bin_centers": pca_base["bin_centers"],
-        "var_explained": pca_base["var_explained"],
+        # None for embeddings without a variance notion (CEBRA).
+        "var_explained": pca_base.get("var_explained"),
+        "label": label,
+        "subtitle": subtitle,
         "ev_starts": ev_starts,
         "ev_opponents": ev_labels,
         "btype_map": BehavioralEventsData.BEHAVIOR_TYPES,
@@ -218,7 +223,14 @@ def _make_pca_plotly(pop_data_full, t_view_start, t_view_end, cursor=None):
 
     scores = pop_data_full["scores"]
     bin_centers = pop_data_full["bin_centers"]
-    var = pop_data_full["var_explained"] * 100
+    var = pop_data_full["var_explained"]
+    label = pop_data_full.get("label", "PCA")
+    subtitle = pop_data_full.get("subtitle", "")
+    axis = "PC" if label == "PCA" else f"{label} "
+    if var is not None:
+        axis_titles = [f"{axis}{i + 1} ({v * 100:.1f}%)" for i, v in enumerate(var)]
+    else:
+        axis_titles = [f"{axis}{i + 1}" for i in range(3)]
     ev_starts = pop_data_full["ev_starts"]
     ev_opponents = pop_data_full["ev_opponents"]
     opp_colors = pop_data_full["opp_colors"]
@@ -290,13 +302,14 @@ def _make_pca_plotly(pop_data_full, t_view_start, t_view_end, cursor=None):
     fig.update_layout(
         template=plotly_template,
         scene=dict(
-            xaxis_title=f"PC1 ({var[0]:.1f}%)",
-            yaxis_title=f"PC2 ({var[1]:.1f}%)",
-            zaxis_title=f"PC3 ({var[2]:.1f}%)",
+            xaxis_title=axis_titles[0],
+            yaxis_title=axis_titles[1],
+            zaxis_title=axis_titles[2],
         ),
         title=(
-            f"PCA trajectory — {n_events_shown} events in view"
+            f"{label} trajectory — {n_events_shown} events in view"
             f"  [{t_view_start:.0f}–{t_view_end:.0f} s]"
+            + (f"<br><sup>{subtitle}</sup>" if subtitle else "")
         ),
         height=460,
         legend=dict(title="Opponent", x=0.01, y=0.99),
@@ -452,6 +465,16 @@ class HabitatApp:
         self._traj = None         # focal animal's (t, x, y) in pixels, or None
         self._traj_status = None  # message while the trajectory is unavailable
         self._traj_pane = None
+        self._cebra = None        # CEBRA-Time fit (see explore_cache), fitted on demand
+        self._cebra_pop = None    # ... with event markers laid on top
+        self._cebra_pane = None
+        self._cebra_pos = None    # CEBRA-Behavior fit supervised by the focal rat's (x, y)
+        self._cebra_pos_pop = None
+        self._cebra_pos_pane = None
+        self._track_sig = None    # signature of the tracking files the trajectory came from
+        self._embed_tab = 0       # 0 PCA, 1 CEBRA, 2 CEBRA (position); kept across refreshes
+        self._cebra_fitting = False
+        self._signature = None    # source signature of the loaded session
         # Shared cursor: the latest requested time, and the one on screen.
         self._cursor_pending = None
         self._cursor_source = None     # 'bokeh' | 'plotly': who asked for the move
@@ -503,6 +526,24 @@ class HabitatApp:
         self.raster_bin_sl = pn.widgets.FloatSlider(
             name="Rastermap bin size (s)", value=1.0, start=0.1, end=2.0, step=0.1
         )
+        # CEBRA-Time is fitted on demand (minutes on a CPU), never on load.
+        self.cebra_bin_sl = pn.widgets.FloatSlider(
+            name="CEBRA bin size (s)", value=xc.DEFAULT_CEBRA_BIN, start=0.1, end=2.0, step=0.1
+        )
+        self.cebra_iter_sl = pn.widgets.IntSlider(
+            name="CEBRA iterations", value=xc.DEFAULT_CEBRA_ITERATIONS,
+            start=500, end=10000, step=500
+        )
+        self.cebra_btn = pn.widgets.Button(
+            name="Fit CEBRA", button_type="primary", width=220,
+            disabled=True,
+        )
+        self.cebra_btn.on_click(self._on_fit_cebra)
+        self.cebra_pos_btn = pn.widgets.Button(
+            name="Fit CEBRA (position)", button_type="primary", width=220, disabled=True)
+        self.cebra_pos_btn.on_click(self._on_fit_cebra_position)
+        self._cebra_note = pn.pane.Markdown(
+            "", styles={"font-size": "12px", "color": "#888"})
 
         # Tracking source for the trajectory panel; shown only when a block has
         # more than one (their pixel spaces differ, so they are never mixed).
@@ -574,6 +615,10 @@ class HabitatApp:
         self._t0 = data["t0"]
         self._t1 = data["t1"]
         self._pca = data.get("pca")
+        self._cebra = data.get("cebra")
+        self._cebra_pos = data.get("cebra_position")
+        self._track_sig = data.get("track_sig")
+        self._signature = data.get("signature")
         self._traj = data.get("trajectory")
         self._traj_status = None
         self._sync_traj_sources()
@@ -682,10 +727,22 @@ class HabitatApp:
 
         cached = (xc.load_view_cache(cohort, session_id, animal_id)
                   if xc.is_default_bins(raster_bin, pca_bin) else None)
+        self._cebra, self._signature = None, None      # never carry over another session's
+        self._cebra_pos, self._track_sig = None, None
         if cached is not None:
             self._ks_data = None
             self._events = cached["events"]
+            self._signature = cached["signature"]
+            self._cebra = xc.cached_cebra(cached, cached["signature"], xc.cebra_params(
+                xc.DEFAULT_CEBRA_BIN, xc.DEFAULT_CEBRA_ITERATIONS, xc.DEFAULT_CEBRA_SEED))
             self._apply_products(cached)
+            self._track_sig = cached.get("tracking_signature")
+            if self._track_sig is not None and cached.get("trajectory"):
+                self._cebra_pos = xc.cached_cebra(
+                    cached, f"{cached['signature']}|{self._track_sig}",
+                    xc.cebra_params(xc.DEFAULT_CEBRA_BIN, xc.DEFAULT_CEBRA_ITERATIONS,
+                                    xc.DEFAULT_CEBRA_SEED, "position",
+                                    cached["trajectory"].get("default")))
             self._traj = cached.get("trajectory")
             self._traj_status = (None if "trajectory" in cached
                                  else "Loading tracking in the background…")
@@ -729,7 +786,10 @@ class HabitatApp:
         self._ks_data = result["ks_data"]
         self._events = result["events"]
         products = result["products"]
+        self._signature = result["signature"]
+        self._update_cebra_controls()       # spikes are loaded: fitting is now possible
         if products is not None:
+            self._cebra = self._cebra_pos = None   # sources changed; save_view_cache drops them
             self._apply_products(products)
             self._x_range = None     # t0/t1 may have moved; start from the full span
             await asyncio.to_thread(xc.save_view_cache, cohort, session_id, animal_id,
@@ -743,6 +803,10 @@ class HabitatApp:
             "t0": self._t0,
             "t1": self._t1,
             "pca": self._pca,
+            "cebra": self._cebra,
+            "cebra_position": self._cebra_pos,
+            "track_sig": self._track_sig,
+            "signature": self._signature,
             "trajectory": self._traj,
         }
         pn.state.cache["habitat_last_state"] = {
@@ -785,14 +849,17 @@ class HabitatApp:
         if token != self._load_token:
             return
         self._traj = traj
+        self._track_sig = track_sig if self._traj_status is None else None
         self._sync_traj_sources()
         data = pn.state.cache.get(_cache_key(cohort_label, session_id, animal_id))
         if data is not None:
             data["trajectory"] = traj
+            data["track_sig"] = self._track_sig
         if self._traj_status is None:
             await asyncio.to_thread(xc.update_cached_trajectory, cohort, session_id,
                                     animal_id, traj, track_sig)
         self._update_traj_pane()
+        self._update_cebra_controls()       # tracking is in: the position fit is possible
 
     def _apply_products(self, products):
         self._raster_img = products["raster_img"]
@@ -846,8 +913,12 @@ class HabitatApp:
         # Both figures MUST live in a single Bokeh document (one pn.pane.Bokeh)
         bokeh_layout = bk_col(p_tl, p_rm, sizing_mode="stretch_width")
 
+        self._cebra_pop = self._build_cebra_pop(self._cebra, "CEBRA", btype, animal_id)
+        self._cebra_pos_pop = self._build_cebra_pop(self._cebra_pos, "CEBRA-pos", btype, animal_id)
         plotly_fig = self._compute_pca_fig(cur_start, cur_end)
         traj_fig = self._compute_traj_fig(cur_start, cur_end)
+        cebra_fig = self._compute_cebra_fig("time", cur_start, cur_end)
+        cebra_pos_fig = self._compute_cebra_fig("position", cur_start, cur_end)
 
         # Always recreate panes — reassigning .object on an existing Bokeh pane
         # can cause document-isolation issues when shared Range1d objects change.
@@ -860,14 +931,160 @@ class HabitatApp:
                                            link_figure=False)
         self._traj_pane = pn.pane.Plotly(traj_fig, sizing_mode="stretch_width",
                                          link_figure=False)
-        for pane in (self._plotly_pane, self._traj_pane):
+        self._cebra_pane = pn.pane.Plotly(cebra_fig, sizing_mode="stretch_width",
+                                          link_figure=False)
+        self._cebra_pos_pane = pn.pane.Plotly(cebra_pos_fig, sizing_mode="stretch_width",
+                                              link_figure=False)
+        for pane in (self._plotly_pane, self._traj_pane, self._cebra_pane,
+                     self._cebra_pos_pane):
             pane.param.watch(self._on_plotly_hover, "hover_data")
+        self._update_cebra_controls()
+        # PCA and the two CEBRA variants share one slot as tabs. dynamic=True renders only the
+        # visible tab (a 3-D scene drawn while hidden gets a zero-size canvas);
+        # cursor moves still update the hidden figure, so it is current when shown.
+        embed_tabs = pn.Tabs(("PCA", self._plotly_pane), ("CEBRA", self._cebra_pane),
+                             ("CEBRA (position)", self._cebra_pos_pane),
+                             dynamic=True, active=self._embed_tab,
+                             sizing_mode="stretch_width")
+        embed_tabs.param.watch(lambda e: setattr(self, "_embed_tab", e.new), "active")
         self._content[:] = [
             self._status, self._bokeh_pane, self._cursor_md,
-            pn.Row(self._plotly_pane,
+            pn.Row(embed_tabs,
                    pn.Column(self.traj_src_sel, self._traj_pane, sizing_mode="stretch_width"),
                    sizing_mode="stretch_width"),
         ]
+
+    # ── CEBRA (fitted on demand) ───────────────────────────────────────────────
+
+    def _cebra_request(self):
+        return xc.cebra_params(self.cebra_bin_sl.value, self.cebra_iter_sl.value,
+                               xc.DEFAULT_CEBRA_SEED)
+
+    def _update_cebra_controls(self):
+        """Button/note state: needs the package, the spikes and, for position, tracking."""
+        if self._cebra_fitting:
+            return
+        has_pkg = xc.cebra_available()
+        has_ks = self._ks_data is not None
+        has_traj = self._selected_traj() is not None
+        self.cebra_btn.disabled = not (has_pkg and has_ks)
+        self.cebra_pos_btn.disabled = not (has_pkg and has_ks and has_traj)
+        if not has_pkg:
+            self._cebra_note.object = f"_{xc.CEBRA_INSTALL_HINT}_"
+        elif not has_ks:
+            self._cebra_note.object = "_Available once the full spike data has loaded._"
+        elif not has_traj:
+            self._cebra_note.object = ("_Time fit: minutes, cached. The position fit also "
+                                       "needs tracking for this block._")
+        else:
+            self._cebra_note.object = (
+                "_Time: unsupervised. Position: supervised by the focal rat's (x, y). "
+                "Fits take minutes; default-parameter fits are cached._")
+
+    def _build_cebra_pop(self, fit, label, btype, animal_id):
+        if fit is None or self._events is None:
+            return None
+        p = fit["params"]
+        what = ("CEBRA-Time" if p.get("mode", "time") == "time" else
+                f"CEBRA-Behavior on (x, y), {p['tracking']} tracking, "
+                f"{fit.get('n_tracked_bins', '?')} tracked bins")
+        return _build_pop_data(
+            self._events, fit, btype, animal_id, self.min_events_sl.value,
+            label=label,
+            subtitle=(f"{what} · {p['max_iterations']} iterations · seed {p['seed']} · "
+                      f"{fit['device']} — axes have no intrinsic meaning"))
+
+    def _compute_cebra_fig(self, which, t_start, t_end):
+        import plotly.graph_objects as go
+        pop, fit = ((self._cebra_pop, self._cebra) if which == "time"
+                    else (self._cebra_pos_pop, self._cebra_pos))
+        if pop is None:
+            fig = go.Figure()
+            if not xc.cebra_available():
+                text = xc.CEBRA_INSTALL_HINT
+            elif self._cebra_fitting == which:
+                text = "Fitting CEBRA… this takes minutes."
+            elif fit is not None:
+                text = "No events to mark for this behaviour type."
+            elif which == "position":
+                text = ("Press Fit CEBRA (position) in the sidebar. It is supervised by the "
+                        "focal rat's tracked (x, y), so the block needs tracking.")
+            else:
+                text = "Press Fit CEBRA in the sidebar to compute the embedding."
+            fig.add_annotation(text=text, xref="paper", yref="paper",
+                               x=0.5, y=0.5, showarrow=False, font=dict(size=13))
+            fig.update_layout(title="CEBRA-pos trajectory" if which == "position"
+                              else "CEBRA trajectory", height=380,
+                              margin=dict(l=0, r=0, t=40, b=0),
+                              xaxis_visible=False, yaxis_visible=False)
+            return fig
+        return _make_pca_plotly(pop, t_start, t_end,
+                                cursor=self._embedding_point_at(
+                                    fit, self._cursor_t, fit["params"]["bin"]))
+
+    async def _on_fit_cebra(self, event=None):
+        await self._fit_cebra("time")
+
+    async def _on_fit_cebra_position(self, event=None):
+        await self._fit_cebra("position")
+
+    async def _fit_cebra(self, which):
+        if self._ks_data is None or self._cebra_fitting or not xc.cebra_available():
+            return
+        traj = self._selected_traj() if which == "position" else None
+        if which == "position" and traj is None:
+            return
+        token = self._load_token
+        cohort_label, session_id = self.cohort_sel.value, self.session_sel.value
+        animal_id = self.animal_sel.value
+        params = self._cebra_request()
+        # What the fit is computed from, for the cache (position adds the tracking files).
+        signature = self._signature
+        if which == "position":
+            signature = (f"{self._signature}|{self._track_sig}"
+                         if self._signature and self._track_sig else None)
+        self._cebra_fitting = which
+        self.cebra_btn.disabled = self.cebra_pos_btn.disabled = True
+        self._cebra_note.object = "_Fitting CEBRA…_"
+        self._refresh_behavior()
+        t_start = time.monotonic()
+        try:
+            if which == "time":
+                fit = await asyncio.to_thread(
+                    xc.fit_cebra_embedding, self._ks_data, params["bin"], self._t0, self._t1,
+                    max_iterations=params["max_iterations"], seed=params["seed"])
+                short = "fewer than 3 quality cells"
+            else:
+                fit = await asyncio.to_thread(
+                    xc.fit_cebra_position_embedding, self._ks_data, traj, params["bin"],
+                    self._t0, self._t1,
+                    max_iterations=params["max_iterations"], seed=params["seed"])
+                short = (f"fewer than 3 quality cells or fewer than {xc.MIN_POSITION_BINS} "
+                         "tracked bins")
+        except Exception as e:
+            logger.exception("CEBRA fit failed")
+            fit, error = None, str(e)
+        else:
+            error = None if fit is not None else short
+        self._cebra_fitting = False
+        if token != self._load_token:
+            return          # another session was loaded meanwhile; drop the result
+        if error is not None:
+            self._set_status(f"CEBRA fit failed: {error}", "danger")
+        else:
+            key = "cebra" if which == "time" else "cebra_position"
+            setattr(self, "_cebra" if which == "time" else "_cebra_pos", fit)
+            self._set_status(
+                f"CEBRA ({which}) fit finished in {time.monotonic() - t_start:.0f} s "
+                f"on {fit['device']}.", "success")
+            data = pn.state.cache.get(_cache_key(cohort_label, session_id, animal_id))
+            if data is not None:
+                data[key] = fit
+            if signature is not None:
+                await asyncio.to_thread(
+                    xc.update_cached_cebra, COHORT_NAMES[cohort_label], session_id,
+                    animal_id, fit, signature)
+        self._refresh_behavior()
 
     # ── Figure builders ────────────────────────────────────────────────────────
 
@@ -1080,14 +1297,23 @@ class HabitatApp:
                 self._request_cursor(t, "plotly")
                 return
 
-    def _pca_point_at(self, t):
-        if t is None or self._pca is None:
+    @staticmethod
+    def _embedding_point_at(emb, t, bin_size):
+        if t is None or emb is None:
             return None
-        bc = self._pca["bin_centers"]
+        bc = emb["bin_centers"]
         i = int(np.clip(np.searchsorted(bc, t), 0, len(bc) - 1))
-        if abs(bc[i] - t) > self._pca["pca_bin"]:
+        if abs(bc[i] - t) > bin_size:
             return None             # outside the recording
-        return self._pca["scores"][i]
+        return emb["scores"][i]
+
+    def _pca_point_at(self, t):
+        return self._embedding_point_at(
+            self._pca, t, self._pca["pca_bin"] if self._pca else 0.0)
+
+    def _cebra_point_at(self, t, fit=None):
+        fit = self._cebra if fit is None else fit
+        return self._embedding_point_at(fit, t, fit["params"]["bin"] if fit else 0.0)
 
     def _traj_point_at(self, t):
         traj = self._selected_traj()
@@ -1146,6 +1372,9 @@ class HabitatApp:
             return
         self._cursor_plotly_t, self._cursor_plotly_at = t, now
         self._move_plotly_cursor(self._plotly_pane, self._pca_point_at(t), three_d=True)
+        self._move_plotly_cursor(self._cebra_pane, self._cebra_point_at(t), three_d=True)
+        self._move_plotly_cursor(self._cebra_pos_pane, self._cebra_point_at(t, self._cebra_pos),
+                                 three_d=True)
         self._move_plotly_cursor(self._traj_pane, self._traj_point_at(t))
 
     # ── Periodic callback: update PCA when zoom/pan changes ───────────────────
@@ -1162,6 +1391,10 @@ class HabitatApp:
         self._plotly_pane.object = self._compute_pca_fig(cur[0], cur[1])
         if self._traj_pane is not None:
             self._traj_pane.object = self._compute_traj_fig(cur[0], cur[1])
+        if self._cebra_pane is not None:
+            self._cebra_pane.object = self._compute_cebra_fig("time", cur[0], cur[1])
+        if self._cebra_pos_pane is not None:
+            self._cebra_pos_pane.object = self._compute_cebra_fig("position", cur[0], cur[1])
 
     def _on_behavior_change(self, *args):
         # A cached view (no spikes yet) can still switch behaviour type.
@@ -1207,8 +1440,15 @@ class HabitatApp:
             pn.layout.Divider(),
             "## Rastermap",
             self.raster_bin_sl,
+            pn.layout.Divider(),
+            "## CEBRA",
+            self.cebra_bin_sl,
+            self.cebra_iter_sl,
+            self.cebra_btn,
+            self.cebra_pos_btn,
+            self._cebra_note,
             pn.pane.Markdown(
-                "_Zoom/pan top panels to update PCA._",
+                "_Zoom/pan top panels to update PCA and CEBRA._",
                 styles={"font-size": "12px", "color": "#888"},
             ),
             width=280,

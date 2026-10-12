@@ -125,6 +125,186 @@ class TestDiskCache:
         assert xc.load_view_cache("cohort7", "s", "rat613") is None
 
 
+class _FakeCEBRA:
+    """Stands in for ``cebra.CEBRA``: records what it was fitted on, embeds by PCA-free slicing."""
+    last = None
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.state_dict_ = {"loss": [3.0, 2.0, 1.5]}   # where real CEBRA keeps it
+
+    def fit(self, X, y=None):
+        type(self).last = {"X": np.array(X), "y": None if y is None else np.array(y),
+                           "kwargs": self.kwargs}
+        return self
+
+    def transform(self, X):
+        return np.asarray(X)[:, : self.kwargs["output_dimension"]]
+
+
+@pytest.fixture
+def fake_cebra(monkeypatch):
+    import sys
+    import types
+    mod = types.ModuleType("cebra")
+    mod.CEBRA = _FakeCEBRA
+    mod.__version__ = "0.0-test"
+    monkeypatch.setitem(sys.modules, "cebra", mod)
+    monkeypatch.setattr(xc, "cebra_available", lambda: True)
+    _FakeCEBRA.last = None
+    return mod
+
+
+class TestCebra:
+    def test_missing_package_raises_install_hint(self, monkeypatch):
+        monkeypatch.setattr(xc, "cebra_available", lambda: False)
+        with pytest.raises(ImportError, match="pip install cebra"):
+            xc.fit_cebra_embedding(StubKs(), 0.5, 5.0, 100.0)
+
+    def test_fit_shape_orientation_and_params(self, fake_cebra):
+        fit = xc.fit_cebra_embedding(StubKs(), 0.5, 5.0, 100.0, max_iterations=123, seed=7)
+        n_bins = len(fit["bin_centers"])
+        assert fit["scores"].shape == (n_bins, 3)
+        # CEBRA is fitted on (n_bins, n_cells), z-scored per cell.
+        X = _FakeCEBRA.last["X"]
+        assert X.shape == (n_bins, 6)
+        np.testing.assert_allclose(X.mean(axis=0), 0.0, atol=1e-9)
+        kw = _FakeCEBRA.last["kwargs"]
+        assert kw["conditional"] == "time" and kw["max_iterations"] == 123
+        assert "random_state" not in kw and "seed" not in kw   # not constructor args
+        assert kw["output_dimension"] == 3
+        assert fit["params"] == xc.cebra_params(0.5, 123, 7)
+        assert fit["loss_final"] == 1.5
+
+    def test_needs_three_cells(self, fake_cebra):
+        assert xc.fit_cebra_embedding(StubKs(n_cells=2), 0.5, 5.0, 100.0) is None
+        assert _FakeCEBRA.last is None
+
+    def _default_fit(self, fake_cebra):
+        return xc.fit_cebra_embedding(
+            StubKs(), xc.DEFAULT_CEBRA_BIN, 5.0, 100.0,
+            max_iterations=xc.DEFAULT_CEBRA_ITERATIONS, seed=xc.DEFAULT_CEBRA_SEED)
+
+    def test_cache_round_trip(self, fake_cebra):
+        products = xc.compute_view_products(StubKs(), xc.DEFAULT_RASTER_BIN, xc.DEFAULT_PCA_BIN)
+        fit = self._default_fit(fake_cebra)
+        assert not xc.update_cached_cebra("c", "s", "rat1", fit, "sig")     # no entry yet
+        xc.save_view_cache("c", "s", "rat1", products, None, "sig")
+        assert xc.update_cached_cebra("c", "s", "rat1", fit, "sig")
+        entry = xc.load_view_cache("c", "s", "rat1")
+        got = xc.cached_cebra(entry, "sig", fit["params"])
+        np.testing.assert_array_equal(got["scores"], fit["scores"])
+        assert entry["signature"] == "sig"          # the rest of the entry is untouched
+
+    def test_cache_misses_on_other_params_or_sources(self, fake_cebra):
+        products = xc.compute_view_products(StubKs(), xc.DEFAULT_RASTER_BIN, xc.DEFAULT_PCA_BIN)
+        fit = self._default_fit(fake_cebra)
+        xc.save_view_cache("c", "s", "rat1", products, None, "sig")
+        xc.update_cached_cebra("c", "s", "rat1", fit, "sig")
+        entry = xc.load_view_cache("c", "s", "rat1")
+        other = xc.cebra_params(xc.DEFAULT_CEBRA_BIN, xc.DEFAULT_CEBRA_ITERATIONS + 500,
+                                xc.DEFAULT_CEBRA_SEED)
+        assert xc.cached_cebra(entry, "sig", other) is None
+        assert xc.cached_cebra(entry, "changed", fit["params"]) is None
+
+    def test_only_default_fits_are_cached(self, fake_cebra):
+        products = xc.compute_view_products(StubKs(), xc.DEFAULT_RASTER_BIN, xc.DEFAULT_PCA_BIN)
+        xc.save_view_cache("c", "s", "rat1", products, None, "sig")
+        fit = xc.fit_cebra_embedding(StubKs(), 0.5, 5.0, 100.0, max_iterations=10)
+        assert not xc.update_cached_cebra("c", "s", "rat1", fit, "sig")
+        assert "cebra" not in xc.load_view_cache("c", "s", "rat1")
+
+    def test_legacy_entry_without_cebra_is_a_miss(self):
+        products = xc.compute_view_products(StubKs(), xc.DEFAULT_RASTER_BIN, xc.DEFAULT_PCA_BIN)
+        xc.save_view_cache("c", "s", "rat1", products, None, "sig")
+        entry = xc.load_view_cache("c", "s", "rat1")
+        assert xc.cached_cebra(entry, "sig", xc.cebra_params(0.5, 2000, 0)) is None
+        assert xc.cached_cebra(None, "sig", xc.cebra_params(0.5, 2000, 0)) is None
+
+    @pytest.mark.slow
+    def test_real_cebra_smoke(self):
+        pytest.importorskip("cebra")
+        fit = xc.fit_cebra_embedding(StubKs(), 0.5, 5.0, 100.0, max_iterations=20)
+        assert fit["scores"].shape == (len(fit["bin_centers"]), 3)
+        assert np.isfinite(fit["scores"]).all()
+        assert fit["loss_final"] is not None and np.isfinite(fit["loss_final"])
+
+
+class TestCebraPosition:
+    """CEBRA-Behavior supervised by (x, y); the model itself is the stand-in."""
+
+    def _traj(self, t_end=600.0, fmt="apt_tqt", step=0.1):
+        t = np.arange(5.0, t_end, step)
+        return {"t": t, "x": 1000.0 + 50.0 * np.sin(t / 7), "y": 300.0 + 20.0 * t / t_end,
+                "format": fmt}
+
+    def test_labels_are_zscored_xy_on_tracked_bins_only(self, fake_cebra):
+        traj = self._traj(t_end=300.0)                       # tracked 5-300 s of 5-600 s
+        fit = xc.fit_cebra_position_embedding(StubKs(duration=600.0), traj, 0.5, 5.0, 600.0)
+        kw, X, y = _FakeCEBRA.last["kwargs"], _FakeCEBRA.last["X"], _FakeCEBRA.last["y"]
+        n_bins = len(fit["bin_centers"])
+        assert kw["conditional"] == "time_delta"
+        assert fit["scores"].shape == (n_bins, 3)           # every bin is embedded ...
+        assert fit["n_tracked_bins"] == len(X) == len(y) < n_bins    # ... few were fitted on
+        assert y.shape == (len(X), 2) and y.dtype == np.float32
+        np.testing.assert_allclose(y.mean(axis=0), 0.0, atol=1e-5)
+        np.testing.assert_allclose(y.std(axis=0), 1.0, atol=1e-5)
+        bc = fit["bin_centers"]
+        # The tracked bins are the early ones, plus those within max_gap (1 s) of the last frame.
+        assert bc[bc <= 299.0].size <= len(X) <= bc[bc <= 301.0].size
+
+    def test_params_name_mode_and_tracking_format(self, fake_cebra):
+        fit = xc.fit_cebra_position_embedding(StubKs(duration=600.0), self._traj(fmt="mask_metrics"),
+                                              0.5, 5.0, 600.0, max_iterations=77, seed=3)
+        assert fit["params"] == xc.cebra_params(0.5, 77, 3, "position", "mask_metrics")
+        assert xc.cebra_params(0.5, 77, 3) == {"bin": 0.5, "max_iterations": 77, "seed": 3}
+
+    def test_too_few_tracked_bins_or_no_tracking(self, fake_cebra):
+        short = {"t": np.arange(5.0, 6.0, 0.1), "x": np.zeros(10), "y": np.zeros(10),
+                 "format": "apt_tqt"}
+        assert xc.fit_cebra_position_embedding(StubKs(duration=600.0), short, 0.5, 5.0, 600.0) is None
+        assert xc.fit_cebra_position_embedding(StubKs(duration=600.0), None, 0.5, 5.0, 600.0) is None
+        assert _FakeCEBRA.last is None
+
+    def test_constant_axis_does_not_produce_nan(self, fake_cebra):
+        traj = self._traj()
+        traj["y"] = np.full_like(traj["t"], 123.0)
+        fit = xc.fit_cebra_position_embedding(StubKs(duration=600.0), traj, 0.5, 5.0, 600.0)
+        assert np.isfinite(_FakeCEBRA.last["y"]).all() and np.isfinite(fit["scores"]).all()
+
+    def test_missing_package_raises_install_hint(self, monkeypatch):
+        monkeypatch.setattr(xc, "cebra_available", lambda: False)
+        with pytest.raises(ImportError, match="pip install cebra"):
+            xc.fit_cebra_position_embedding(StubKs(duration=600.0), self._traj(), 0.5, 5.0, 600.0)
+
+    def test_cached_in_its_own_slot_beside_the_time_fit(self, fake_cebra):
+        products = xc.compute_view_products(StubKs(duration=600.0), xc.DEFAULT_RASTER_BIN, xc.DEFAULT_PCA_BIN)
+        xc.save_view_cache("c", "s", "rat1", products, None, "sig")
+        t_fit = xc.fit_cebra_embedding(StubKs(duration=600.0), xc.DEFAULT_CEBRA_BIN, 5.0, 600.0)
+        p_fit = xc.fit_cebra_position_embedding(StubKs(duration=600.0), self._traj(), xc.DEFAULT_CEBRA_BIN,
+                                                5.0, 600.0)
+        assert xc.update_cached_cebra("c", "s", "rat1", t_fit, "sig")
+        assert xc.update_cached_cebra("c", "s", "rat1", p_fit, "sig|tsig")
+        entry = xc.load_view_cache("c", "s", "rat1")
+        assert xc.cached_cebra(entry, "sig", t_fit["params"])["params"] == t_fit["params"]
+        got = xc.cached_cebra(entry, "sig|tsig", p_fit["params"])
+        np.testing.assert_array_equal(got["scores"], p_fit["scores"])
+        # Stale tracking, or another tracking format, is a miss; so is crossing the slots.
+        assert xc.cached_cebra(entry, "sig|other", p_fit["params"]) is None
+        other_fmt = xc.cebra_params(xc.DEFAULT_CEBRA_BIN, xc.DEFAULT_CEBRA_ITERATIONS,
+                                    xc.DEFAULT_CEBRA_SEED, "position", "mask_metrics")
+        assert xc.cached_cebra(entry, "sig|tsig", other_fmt) is None
+        assert xc.cached_cebra(entry, "sig|tsig", t_fit["params"]) is None
+
+    @pytest.mark.slow
+    def test_real_cebra_smoke(self):
+        pytest.importorskip("cebra")
+        fit = xc.fit_cebra_position_embedding(StubKs(duration=600.0), self._traj(), 0.5, 5.0, 600.0,
+                                              max_iterations=20)
+        assert fit["scores"].shape == (len(fit["bin_centers"]), 3)
+        assert np.isfinite(fit["scores"]).all() and np.isfinite(fit["loss_final"])
+
+
 class TestTrajectory:
     def _traj(self):
         t = np.arange(0.0, 100.0, 0.1)

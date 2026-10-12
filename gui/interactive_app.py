@@ -472,7 +472,10 @@ class HabitatApp:
         self._cebra_pos_pop = None
         self._cebra_pos_pane = None
         self._track_sig = None    # signature of the tracking files the trajectory came from
-        self._embed_tab = 0       # 0 PCA, 1 CEBRA, 2 CEBRA (position); kept across refreshes
+        self._umap = None         # UMAP fit (see explore_cache), fitted on demand
+        self._umap_pop = None
+        self._umap_pane = None
+        self._embed_tab = 0       # 0 PCA, 1 CEBRA, 2 CEBRA (position), 3 UMAP; kept across refreshes
         self._cebra_fitting = False
         self._signature = None    # source signature of the loaded session
         # Shared cursor: the latest requested time, and the one on screen.
@@ -542,6 +545,18 @@ class HabitatApp:
         self.cebra_pos_btn = pn.widgets.Button(
             name="Fit CEBRA (position)", button_type="primary", width=220, disabled=True)
         self.cebra_pos_btn.on_click(self._on_fit_cebra_position)
+        # UMAP is fitted on demand too (a minute or so, single-threaded for a fixed seed).
+        self.umap_bin_sl = pn.widgets.FloatSlider(
+            name="UMAP bin size (s)", value=xc.DEFAULT_UMAP_BIN, start=0.1, end=2.0, step=0.1)
+        self.umap_neighbors_sl = pn.widgets.IntSlider(
+            name="UMAP n_neighbors", value=xc.DEFAULT_UMAP_NEIGHBORS, start=5, end=200, step=5)
+        self.umap_min_dist_sl = pn.widgets.FloatSlider(
+            name="UMAP min_dist", value=xc.DEFAULT_UMAP_MIN_DIST, start=0.0, end=0.99, step=0.01)
+        self.umap_btn = pn.widgets.Button(
+            name="Fit UMAP", button_type="primary", width=220, disabled=True)
+        self.umap_btn.on_click(self._on_fit_umap)
+        self._umap_note = pn.pane.Markdown(
+            "", styles={"font-size": "12px", "color": "#888"})
         self._cebra_note = pn.pane.Markdown(
             "", styles={"font-size": "12px", "color": "#888"})
 
@@ -617,6 +632,7 @@ class HabitatApp:
         self._pca = data.get("pca")
         self._cebra = data.get("cebra")
         self._cebra_pos = data.get("cebra_position")
+        self._umap = data.get("umap")
         self._track_sig = data.get("track_sig")
         self._signature = data.get("signature")
         self._traj = data.get("trajectory")
@@ -729,12 +745,16 @@ class HabitatApp:
                   if xc.is_default_bins(raster_bin, pca_bin) else None)
         self._cebra, self._signature = None, None      # never carry over another session's
         self._cebra_pos, self._track_sig = None, None
+        self._umap = None
         if cached is not None:
             self._ks_data = None
             self._events = cached["events"]
             self._signature = cached["signature"]
             self._cebra = xc.cached_cebra(cached, cached["signature"], xc.cebra_params(
                 xc.DEFAULT_CEBRA_BIN, xc.DEFAULT_CEBRA_ITERATIONS, xc.DEFAULT_CEBRA_SEED))
+            self._umap = xc.cached_umap(cached, cached["signature"], xc.umap_params(
+                xc.DEFAULT_UMAP_BIN, xc.DEFAULT_UMAP_NEIGHBORS, xc.DEFAULT_UMAP_MIN_DIST,
+                xc.DEFAULT_UMAP_SEED))
             self._apply_products(cached)
             self._track_sig = cached.get("tracking_signature")
             if self._track_sig is not None and cached.get("trajectory"):
@@ -789,7 +809,8 @@ class HabitatApp:
         self._signature = result["signature"]
         self._update_cebra_controls()       # spikes are loaded: fitting is now possible
         if products is not None:
-            self._cebra = self._cebra_pos = None   # sources changed; save_view_cache drops them
+            # sources changed; save_view_cache drops these too
+            self._cebra = self._cebra_pos = self._umap = None
             self._apply_products(products)
             self._x_range = None     # t0/t1 may have moved; start from the full span
             await asyncio.to_thread(xc.save_view_cache, cohort, session_id, animal_id,
@@ -805,6 +826,7 @@ class HabitatApp:
             "pca": self._pca,
             "cebra": self._cebra,
             "cebra_position": self._cebra_pos,
+            "umap": self._umap,
             "track_sig": self._track_sig,
             "signature": self._signature,
             "trajectory": self._traj,
@@ -915,10 +937,12 @@ class HabitatApp:
 
         self._cebra_pop = self._build_cebra_pop(self._cebra, "CEBRA", btype, animal_id)
         self._cebra_pos_pop = self._build_cebra_pop(self._cebra_pos, "CEBRA-pos", btype, animal_id)
+        self._umap_pop = self._build_cebra_pop(self._umap, "UMAP", btype, animal_id)
         plotly_fig = self._compute_pca_fig(cur_start, cur_end)
         traj_fig = self._compute_traj_fig(cur_start, cur_end)
         cebra_fig = self._compute_cebra_fig("time", cur_start, cur_end)
         cebra_pos_fig = self._compute_cebra_fig("position", cur_start, cur_end)
+        umap_fig = self._compute_cebra_fig("umap", cur_start, cur_end)
 
         # Always recreate panes — reassigning .object on an existing Bokeh pane
         # can cause document-isolation issues when shared Range1d objects change.
@@ -935,15 +959,18 @@ class HabitatApp:
                                           link_figure=False)
         self._cebra_pos_pane = pn.pane.Plotly(cebra_pos_fig, sizing_mode="stretch_width",
                                               link_figure=False)
+        self._umap_pane = pn.pane.Plotly(umap_fig, sizing_mode="stretch_width",
+                                         link_figure=False)
         for pane in (self._plotly_pane, self._traj_pane, self._cebra_pane,
-                     self._cebra_pos_pane):
+                     self._cebra_pos_pane, self._umap_pane):
             pane.param.watch(self._on_plotly_hover, "hover_data")
         self._update_cebra_controls()
-        # PCA and the two CEBRA variants share one slot as tabs. dynamic=True renders only the
+        # PCA, the two CEBRA variants and UMAP share one slot as tabs. dynamic=True renders only the
         # visible tab (a 3-D scene drawn while hidden gets a zero-size canvas);
         # cursor moves still update the hidden figure, so it is current when shown.
         embed_tabs = pn.Tabs(("PCA", self._plotly_pane), ("CEBRA", self._cebra_pane),
                              ("CEBRA (position)", self._cebra_pos_pane),
+                             ("UMAP", self._umap_pane),
                              dynamic=True, active=self._embed_tab,
                              sizing_mode="stretch_width")
         embed_tabs.param.watch(lambda e: setattr(self, "_embed_tab", e.new), "active")
@@ -964,6 +991,11 @@ class HabitatApp:
         """Button/note state: needs the package, the spikes and, for position, tracking."""
         if self._cebra_fitting:
             return
+        self.umap_btn.disabled = not (xc.umap_available() and self._ks_data is not None)
+        self._umap_note.object = (
+            f"_{xc.UMAP_INSTALL_HINT}_" if not xc.umap_available() else
+            "_Available once the full spike data has loaded._" if self._ks_data is None else
+            "_Unsupervised, on the same z-scored rates. Default-parameter fits are cached._")
         has_pkg = xc.cebra_available()
         has_ks = self._ks_data is not None
         has_traj = self._selected_traj() is not None
@@ -985,27 +1017,35 @@ class HabitatApp:
         if fit is None or self._events is None:
             return None
         p = fit["params"]
-        what = ("CEBRA-Time" if p.get("mode", "time") == "time" else
-                f"CEBRA-Behavior on (x, y), {p['tracking']} tracking, "
-                f"{fit.get('n_tracked_bins', '?')} tracked bins")
+        if p.get("mode") == "umap":
+            detail = (f"UMAP · n_neighbors {p['n_neighbors']} · min_dist {p['min_dist']} · "
+                      f"seed {p['seed']}")
+        else:
+            what = ("CEBRA-Time" if p.get("mode", "time") == "time" else
+                    f"CEBRA-Behavior on (x, y), {p['tracking']} tracking, "
+                    f"{fit.get('n_tracked_bins', '?')} tracked bins")
+            detail = (f"{what} · {p['max_iterations']} iterations · seed {p['seed']} · "
+                      f"{fit['device']}")
         return _build_pop_data(
             self._events, fit, btype, animal_id, self.min_events_sl.value,
-            label=label,
-            subtitle=(f"{what} · {p['max_iterations']} iterations · seed {p['seed']} · "
-                      f"{fit['device']} — axes have no intrinsic meaning"))
+            label=label, subtitle=f"{detail} — axes have no intrinsic meaning")
 
     def _compute_cebra_fig(self, which, t_start, t_end):
         import plotly.graph_objects as go
-        pop, fit = ((self._cebra_pop, self._cebra) if which == "time"
-                    else (self._cebra_pos_pop, self._cebra_pos))
+        pop, fit = {"time": (self._cebra_pop, self._cebra),
+                    "position": (self._cebra_pos_pop, self._cebra_pos),
+                    "umap": (self._umap_pop, self._umap)}[which]
+        name = {"time": "CEBRA", "position": "CEBRA-pos", "umap": "UMAP"}[which]
         if pop is None:
             fig = go.Figure()
-            if not xc.cebra_available():
-                text = xc.CEBRA_INSTALL_HINT
+            if not (xc.umap_available() if which == "umap" else xc.cebra_available()):
+                text = xc.UMAP_INSTALL_HINT if which == "umap" else xc.CEBRA_INSTALL_HINT
             elif self._cebra_fitting == which:
-                text = "Fitting CEBRA… this takes minutes."
+                text = f"Fitting {name}… this can take a minute or more."
             elif fit is not None:
                 text = "No events to mark for this behaviour type."
+            elif which == "umap":
+                text = "Press Fit UMAP in the sidebar to compute the embedding."
             elif which == "position":
                 text = ("Press Fit CEBRA (position) in the sidebar. It is supervised by the "
                         "focal rat's tracked (x, y), so the block needs tracking.")
@@ -1013,8 +1053,7 @@ class HabitatApp:
                 text = "Press Fit CEBRA in the sidebar to compute the embedding."
             fig.add_annotation(text=text, xref="paper", yref="paper",
                                x=0.5, y=0.5, showarrow=False, font=dict(size=13))
-            fig.update_layout(title="CEBRA-pos trajectory" if which == "position"
-                              else "CEBRA trajectory", height=380,
+            fig.update_layout(title=f"{name} trajectory", height=380,
                               margin=dict(l=0, r=0, t=40, b=0),
                               xaxis_visible=False, yaxis_visible=False)
             return fig
@@ -1044,7 +1083,7 @@ class HabitatApp:
             signature = (f"{self._signature}|{self._track_sig}"
                          if self._signature and self._track_sig else None)
         self._cebra_fitting = which
-        self.cebra_btn.disabled = self.cebra_pos_btn.disabled = True
+        self.cebra_btn.disabled = self.cebra_pos_btn.disabled = self.umap_btn.disabled = True
         self._cebra_note.object = "_Fitting CEBRA…_"
         self._refresh_behavior()
         t_start = time.monotonic()
@@ -1083,6 +1122,50 @@ class HabitatApp:
             if signature is not None:
                 await asyncio.to_thread(
                     xc.update_cached_cebra, COHORT_NAMES[cohort_label], session_id,
+                    animal_id, fit, signature)
+        self._refresh_behavior()
+
+    def _umap_request(self):
+        return xc.umap_params(self.umap_bin_sl.value, self.umap_neighbors_sl.value,
+                              self.umap_min_dist_sl.value, xc.DEFAULT_UMAP_SEED)
+
+    async def _on_fit_umap(self, event=None):
+        if self._ks_data is None or self._cebra_fitting or not xc.umap_available():
+            return
+        token = self._load_token
+        cohort_label, session_id = self.cohort_sel.value, self.session_sel.value
+        animal_id = self.animal_sel.value
+        params = self._umap_request()
+        signature = self._signature
+        self._cebra_fitting = "umap"      # one embedding fit at a time
+        self.cebra_btn.disabled = self.cebra_pos_btn.disabled = self.umap_btn.disabled = True
+        self._umap_note.object = "_Fitting UMAP…_"
+        self._refresh_behavior()
+        t_start = time.monotonic()
+        try:
+            fit = await asyncio.to_thread(
+                xc.fit_umap_embedding, self._ks_data, params["bin"], self._t0, self._t1,
+                n_neighbors=params["n_neighbors"], min_dist=params["min_dist"],
+                seed=params["seed"])
+            error = None if fit is not None else "fewer than 3 quality cells, or too few bins"
+        except Exception as e:
+            logger.exception("UMAP fit failed")
+            fit, error = None, str(e)
+        self._cebra_fitting = False
+        if token != self._load_token:
+            return          # another session was loaded meanwhile; drop the result
+        if error is not None:
+            self._set_status(f"UMAP fit failed: {error}", "danger")
+        else:
+            self._umap = fit
+            self._set_status(f"UMAP fit finished in {time.monotonic() - t_start:.0f} s.",
+                             "success")
+            data = pn.state.cache.get(_cache_key(cohort_label, session_id, animal_id))
+            if data is not None:
+                data["umap"] = fit
+            if signature is not None:
+                await asyncio.to_thread(
+                    xc.update_cached_umap, COHORT_NAMES[cohort_label], session_id,
                     animal_id, fit, signature)
         self._refresh_behavior()
 
@@ -1375,6 +1458,8 @@ class HabitatApp:
         self._move_plotly_cursor(self._cebra_pane, self._cebra_point_at(t), three_d=True)
         self._move_plotly_cursor(self._cebra_pos_pane, self._cebra_point_at(t, self._cebra_pos),
                                  three_d=True)
+        self._move_plotly_cursor(self._umap_pane, self._cebra_point_at(t, self._umap),
+                                 three_d=True)
         self._move_plotly_cursor(self._traj_pane, self._traj_point_at(t))
 
     # ── Periodic callback: update PCA when zoom/pan changes ───────────────────
@@ -1395,6 +1480,8 @@ class HabitatApp:
             self._cebra_pane.object = self._compute_cebra_fig("time", cur[0], cur[1])
         if self._cebra_pos_pane is not None:
             self._cebra_pos_pane.object = self._compute_cebra_fig("position", cur[0], cur[1])
+        if self._umap_pane is not None:
+            self._umap_pane.object = self._compute_cebra_fig("umap", cur[0], cur[1])
 
     def _on_behavior_change(self, *args):
         # A cached view (no spikes yet) can still switch behaviour type.
@@ -1447,6 +1534,13 @@ class HabitatApp:
             self.cebra_btn,
             self.cebra_pos_btn,
             self._cebra_note,
+            pn.layout.Divider(),
+            "## UMAP",
+            self.umap_bin_sl,
+            self.umap_neighbors_sl,
+            self.umap_min_dist_sl,
+            self.umap_btn,
+            self._umap_note,
             pn.pane.Markdown(
                 "_Zoom/pan top panels to update PCA and CEBRA._",
                 styles={"font-size": "12px", "color": "#888"},

@@ -305,6 +305,98 @@ class TestCebraPosition:
         assert np.isfinite(fit["scores"]).all() and np.isfinite(fit["loss_final"])
 
 
+class _FakeUMAP:
+    """Stands in for ``umap.UMAP``; records its arguments and what it was fitted on."""
+    last = None
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+    def fit_transform(self, X):
+        type(self).last = {"X": np.array(X), "kwargs": self.kwargs}
+        return np.asarray(X)[:, : self.kwargs["n_components"]]
+
+
+@pytest.fixture
+def fake_umap(monkeypatch):
+    import sys
+    import types
+    mod = types.ModuleType("umap")
+    mod.UMAP = _FakeUMAP
+    mod.__version__ = "0.0-test"
+    monkeypatch.setitem(sys.modules, "umap", mod)
+    monkeypatch.setattr(xc, "umap_available", lambda: True)
+    _FakeUMAP.last = None
+    return mod
+
+
+class TestUmap:
+    def test_missing_package_raises_install_hint(self, monkeypatch):
+        monkeypatch.setattr(xc, "umap_available", lambda: False)
+        with pytest.raises(ImportError, match="pip install umap-learn"):
+            xc.fit_umap_embedding(StubKs(), 0.5, 5.0, 100.0)
+
+    def test_fit_shape_input_and_params(self, fake_umap):
+        fit = xc.fit_umap_embedding(StubKs(), 0.5, 5.0, 100.0, n_neighbors=15,
+                                    min_dist=0.3, seed=4)
+        n_bins = len(fit["bin_centers"])
+        assert fit["scores"].shape == (n_bins, 3)
+        # Same input as PCA/CEBRA: (n_bins, n_cells), z-scored per cell.
+        X = _FakeUMAP.last["X"]
+        assert X.shape == (n_bins, 6)
+        np.testing.assert_allclose(X.mean(axis=0), 0.0, atol=1e-9)
+        kw = _FakeUMAP.last["kwargs"]
+        assert (kw["n_components"], kw["n_neighbors"], kw["min_dist"], kw["random_state"])             == (3, 15, 0.3, 4)
+        assert fit["params"] == xc.umap_params(0.5, 15, 0.3, 4)
+
+    def test_needs_three_cells_and_more_bins_than_neighbours(self, fake_umap):
+        assert xc.fit_umap_embedding(StubKs(n_cells=2), 0.5, 5.0, 100.0) is None
+        assert xc.fit_umap_embedding(StubKs(), 0.5, 5.0, 100.0, n_neighbors=500) is None
+        assert _FakeUMAP.last is None
+
+    def test_cache_round_trip_and_misses(self, fake_umap):
+        products = xc.compute_view_products(StubKs(), xc.DEFAULT_RASTER_BIN, xc.DEFAULT_PCA_BIN)
+        xc.save_view_cache("c", "s", "rat1", products, None, "sig")
+        fit = xc.fit_umap_embedding(StubKs(), xc.DEFAULT_UMAP_BIN, 5.0, 100.0)
+        assert fit["params"] == xc.umap_params(xc.DEFAULT_UMAP_BIN, xc.DEFAULT_UMAP_NEIGHBORS,
+                                               xc.DEFAULT_UMAP_MIN_DIST, xc.DEFAULT_UMAP_SEED)
+        assert xc.update_cached_umap("c", "s", "rat1", fit, "sig")
+        entry = xc.load_view_cache("c", "s", "rat1")
+        np.testing.assert_array_equal(xc.cached_umap(entry, "sig", fit["params"])["scores"],
+                                      fit["scores"])
+        assert entry["signature"] == "sig"
+        other = xc.umap_params(xc.DEFAULT_UMAP_BIN, 50, xc.DEFAULT_UMAP_MIN_DIST,
+                               xc.DEFAULT_UMAP_SEED)
+        assert xc.cached_umap(entry, "sig", other) is None          # other parameters
+        assert xc.cached_umap(entry, "changed", fit["params"]) is None   # other sources
+        assert xc.cached_umap(None, "sig", fit["params"]) is None
+
+    def test_only_default_fits_are_cached(self, fake_umap):
+        products = xc.compute_view_products(StubKs(), xc.DEFAULT_RASTER_BIN, xc.DEFAULT_PCA_BIN)
+        xc.save_view_cache("c", "s", "rat1", products, None, "sig")
+        fit = xc.fit_umap_embedding(StubKs(), 0.5, 5.0, 100.0, n_neighbors=10)
+        assert not xc.update_cached_umap("c", "s", "rat1", fit, "sig")
+        assert "umap" not in xc.load_view_cache("c", "s", "rat1")
+
+    def test_umap_slot_does_not_disturb_cebra_slots(self, fake_umap, fake_cebra):
+        products = xc.compute_view_products(StubKs(), xc.DEFAULT_RASTER_BIN, xc.DEFAULT_PCA_BIN)
+        xc.save_view_cache("c", "s", "rat1", products, None, "sig")
+        c_fit = xc.fit_cebra_embedding(StubKs(), xc.DEFAULT_CEBRA_BIN, 5.0, 100.0)
+        u_fit = xc.fit_umap_embedding(StubKs(), xc.DEFAULT_UMAP_BIN, 5.0, 100.0)
+        assert xc.update_cached_cebra("c", "s", "rat1", c_fit, "sig")
+        assert xc.update_cached_umap("c", "s", "rat1", u_fit, "sig")
+        entry = xc.load_view_cache("c", "s", "rat1")
+        assert xc.cached_cebra(entry, "sig", c_fit["params"]) is not None
+        assert xc.cached_umap(entry, "sig", u_fit["params"]) is not None
+
+    @pytest.mark.slow
+    def test_real_umap_smoke(self):
+        pytest.importorskip("umap")
+        fit = xc.fit_umap_embedding(StubKs(duration=300.0), 0.5, 5.0, 300.0, n_neighbors=10)
+        assert fit["scores"].shape == (len(fit["bin_centers"]), 3)
+        assert np.isfinite(fit["scores"]).all()
+
+
 class TestTrajectory:
     def _traj(self):
         t = np.arange(0.0, 100.0, 0.1)

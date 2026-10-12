@@ -142,7 +142,7 @@ def cebra_params(bin_size: float, max_iterations: int, seed: int,
     return params
 
 
-def _cebra_inputs(ks_data, bin_size, t0, t1):
+def _zscored_binned_rates(ks_data, bin_size, t0, t1):
     """z-scored ``(n_bins, n_cells)`` rates and bin centres, or ``(None, None)`` for < 3 cells."""
     spks, bin_centers = ks_data.bin_spike_times(
         bin_size_sec=bin_size, t_start=t0, t_end=t1, filtered_only=True,
@@ -209,7 +209,7 @@ def fit_cebra_embedding(ks_data, bin_size: float, t0: float, t1: float, *,
     """
     if not cebra_available():
         raise ImportError(CEBRA_INSTALL_HINT)
-    X, bin_centers = _cebra_inputs(ks_data, bin_size, t0, t1)
+    X, bin_centers = _zscored_binned_rates(ks_data, bin_size, t0, t1)
     if X is None:
         return None
     return _run_cebra(X, bin_centers, cebra_params(bin_size, max_iterations, seed),
@@ -238,7 +238,7 @@ def fit_cebra_position_embedding(ks_data, traj, bin_size: float, t0: float, t1: 
     """
     if not cebra_available():
         raise ImportError(CEBRA_INSTALL_HINT)
-    X, bin_centers = _cebra_inputs(ks_data, bin_size, t0, t1)
+    X, bin_centers = _zscored_binned_rates(ks_data, bin_size, t0, t1)
     if X is None or traj is None:
         return None
     t = np.asarray(traj["t"], dtype=float)
@@ -258,6 +258,56 @@ def fit_cebra_position_embedding(ks_data, traj, bin_size: float, t0: float, t1: 
                      labels=xy.astype(np.float32), fit_mask=tracked, output_dim=output_dim)
     fit["n_tracked_bins"] = int(tracked.sum())
     return fit
+
+
+#: UMAP fit defaults. Only these are cached (one entry per session/animal).
+DEFAULT_UMAP_BIN = 0.5
+DEFAULT_UMAP_NEIGHBORS = 30
+DEFAULT_UMAP_MIN_DIST = 0.1
+DEFAULT_UMAP_SEED = 0
+UMAP_INSTALL_HINT = "UMAP is not installed. Install it with: pip install umap-learn"
+
+
+def umap_available() -> bool:
+    """True if ``umap`` is importable. Uses ``find_spec`` so numba is not imported."""
+    import importlib.util
+    return importlib.util.find_spec("umap") is not None
+
+
+def umap_params(bin_size: float, n_neighbors: int, min_dist: float, seed: int) -> Dict[str, Any]:
+    """The parameters that define a UMAP fit; a cached fit is reused only if these match."""
+    return {"mode": "umap", "bin": float(bin_size), "n_neighbors": int(n_neighbors),
+            "min_dist": float(min_dist), "seed": int(seed)}
+
+
+def fit_umap_embedding(ks_data, bin_size: float, t0: float, t1: float, *,
+                       n_neighbors: int = DEFAULT_UMAP_NEIGHBORS,
+                       min_dist: float = DEFAULT_UMAP_MIN_DIST,
+                       output_dim: int = 3,
+                       seed: int = DEFAULT_UMAP_SEED) -> Optional[Dict[str, Any]]:
+    """UMAP embedding of the same z-scored binned rates PCA and CEBRA use.
+
+    Unsupervised and time-blind (neighbours are found in rate space, not along
+    time). Setting ``random_state`` makes the layout reproducible but runs UMAP
+    single-threaded, which is slower. Like CEBRA, the axes and the global
+    arrangement of clusters mean little; the neighbourhood structure is what to read.
+    ``None`` for < 3 cells or too few bins for ``n_neighbors``.
+    """
+    if not umap_available():
+        raise ImportError(UMAP_INSTALL_HINT)
+    X, bin_centers = _zscored_binned_rates(ks_data, bin_size, t0, t1)
+    if X is None or len(X) <= max(int(n_neighbors), output_dim + 1):
+        return None
+    import umap
+    reducer = umap.UMAP(n_components=output_dim, n_neighbors=int(n_neighbors),
+                        min_dist=float(min_dist), metric="euclidean",
+                        random_state=int(seed))
+    return {
+        "scores": np.asarray(reducer.fit_transform(X), dtype=np.float64),   # (n_bins, output_dim)
+        "bin_centers": bin_centers,
+        "params": umap_params(bin_size, n_neighbors, min_dist, seed),
+        "umap_version": getattr(umap, "__version__", None),
+    }
 
 
 def compute_view_products(ks_data, raster_bin: float, pca_bin: float) -> Dict[str, Any]:
@@ -417,6 +467,27 @@ def update_cached_trajectory(cohort: str, session_id: str, animal_id: str,
 CEBRA_KEYS = {"time": "cebra", "position": "cebra_position"}
 
 
+def _update_entry(cohort: str, session_id: str, animal_id: str, key: str,
+                  fit: Dict[str, Any], signature: str) -> bool:
+    """Store ``fit`` (and the signature it came from) under ``key`` in an existing
+    cache entry. No-op if there is no entry."""
+    path = cache_path(cohort, session_id, animal_id)
+    if not path.exists():
+        return False
+    try:
+        with open(path, "rb") as fh:
+            entry = pickle.load(fh)
+    except Exception:
+        return False
+    entry[key] = fit
+    entry[key + "_signature"] = signature
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "wb") as fh:
+        pickle.dump(entry, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    os.replace(tmp, path)
+    return True
+
+
 def update_cached_cebra(cohort: str, session_id: str, animal_id: str,
                         cebra_fit: Dict[str, Any], signature: str) -> bool:
     """Add/replace a CEBRA fit in an existing cache entry (no-op if none, or if the
@@ -429,22 +500,8 @@ def update_cached_cebra(cohort: str, session_id: str, animal_id: str,
     if (p["bin"], p["max_iterations"], p["seed"]) != (
             DEFAULT_CEBRA_BIN, DEFAULT_CEBRA_ITERATIONS, DEFAULT_CEBRA_SEED):
         return False
-    key = CEBRA_KEYS[p.get("mode", "time")]
-    path = cache_path(cohort, session_id, animal_id)
-    if not path.exists():
-        return False
-    try:
-        with open(path, "rb") as fh:
-            entry = pickle.load(fh)
-    except Exception:
-        return False
-    entry[key] = cebra_fit
-    entry[key + "_signature"] = signature
-    tmp = path.with_suffix(".tmp")
-    with open(tmp, "wb") as fh:
-        pickle.dump(entry, fh, protocol=pickle.HIGHEST_PROTOCOL)
-    os.replace(tmp, path)
-    return True
+    return _update_entry(cohort, session_id, animal_id,
+                         CEBRA_KEYS[p.get("mode", "time")], cebra_fit, signature)
 
 
 def cached_cebra(entry: Optional[Dict[str, Any]], signature: str,
@@ -456,6 +513,28 @@ def cached_cebra(entry: Optional[Dict[str, Any]], signature: str,
     key = CEBRA_KEYS[params.get("mode", "time")]
     fit = entry.get(key)
     if fit is None or entry.get(key + "_signature") != signature or fit.get("params") != params:
+        return None
+    return fit
+
+
+def update_cached_umap(cohort: str, session_id: str, animal_id: str,
+                       umap_fit: Dict[str, Any], signature: str) -> bool:
+    """Add/replace the UMAP fit in an existing cache entry (no-op if none, or if the
+    fit was not made with the default bin / neighbours / min_dist / seed)."""
+    if umap_fit is None or umap_fit["params"] != umap_params(
+            DEFAULT_UMAP_BIN, DEFAULT_UMAP_NEIGHBORS, DEFAULT_UMAP_MIN_DIST,
+            DEFAULT_UMAP_SEED):
+        return False
+    return _update_entry(cohort, session_id, animal_id, "umap", umap_fit, signature)
+
+
+def cached_umap(entry: Optional[Dict[str, Any]], signature: str,
+                params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The entry's UMAP fit if it came from these sources and parameters."""
+    if not entry:
+        return None
+    fit = entry.get("umap")
+    if fit is None or entry.get("umap_signature") != signature or fit.get("params") != params:
         return None
     return fit
 

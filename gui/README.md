@@ -15,7 +15,13 @@ Install the GUI dependencies if you haven't already:
 pip install -e ".[gui]"
 pip install rastermap  # required for the interactive app
 pip install cebra      # optional: enables the CEBRA panel (pulls in torch)
+pip install umap-learn # optional: enables the UMAP tab
 ```
+
+The UMAP tab (same slot as PCA and CEBRA) is also fitted on demand, with the **Fit UMAP**
+sidebar button: 3-D UMAP of the same z-scored binned rates, with `n_neighbors` and `min_dist`
+sliders. A fit at the default parameters is cached with the session's explore cache. The seed
+is fixed for reproducibility, which makes UMAP single-threaded.
 
 The CEBRA panel (Explore view, below the PCA panel) is fitted on demand with the
 **Fit CEBRA** sidebar button: CEBRA-Time, unsupervised, on the same z-scored binned

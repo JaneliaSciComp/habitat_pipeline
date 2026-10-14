@@ -133,9 +133,9 @@ class _FakeCEBRA:
         self.kwargs = kwargs
         self.state_dict_ = {"loss": [3.0, 2.0, 1.5]}   # where real CEBRA keeps it
 
-    def fit(self, X, y=None):
+    def fit(self, X, y=None, z=None):          # z: the discrete index of a mixed fit
         type(self).last = {"X": np.array(X), "y": None if y is None else np.array(y),
-                           "kwargs": self.kwargs}
+                           "z": None if z is None else np.array(z), "kwargs": self.kwargs}
         return self
 
     def transform(self, X):
@@ -301,6 +301,250 @@ class TestCebraPosition:
         pytest.importorskip("cebra")
         fit = xc.fit_cebra_position_embedding(StubKs(duration=600.0), self._traj(), 0.5, 5.0, 600.0,
                                               max_iterations=20)
+        assert fit["scores"].shape == (len(fit["bin_centers"]), 3)
+        assert np.isfinite(fit["scores"]).all() and np.isfinite(fit["loss_final"])
+
+
+class _StubEvents:
+    """Stands in for ``BehavioralEventsData.extract_opponent_labels`` (filters by min events)."""
+
+    def __init__(self, starts, opponents, fail=False):
+        self.starts, self.opponents, self.fail = np.asarray(starts, float), np.asarray(opponents), fail
+        self.calls = []
+
+    def extract_opponent_labels(self, animal_of_interest, behavior_type, min_events_per_class):
+        self.calls.append((animal_of_interest, behavior_type, min_events_per_class))
+        if self.fail:
+            raise ValueError("No events")
+        names, counts = np.unique(self.opponents, return_counts=True)
+        keep = np.isin(self.opponents, names[counts >= min_events_per_class])
+        return self.starts[keep], self.starts[keep] + 1.0, self.opponents[keep]
+
+
+def _events_fixture():
+    a = 30.0 + 25.0 * np.arange(12)
+    b = 42.0 + 25.0 * np.arange(12)
+    c = np.array([400.0, 450.0])
+    starts = np.concatenate([a, b, c])
+    opp = np.array(["ratA"] * 12 + ["ratB"] * 12 + ["ratC"] * 2)
+    return _StubEvents(starts, opp)
+
+
+class TestCebraEvents:
+    """CEBRA-Behavior on opponent labels in a window after each onset; the model is a stand-in."""
+
+    def _fit(self, events=None, **kw):
+        kw.setdefault("min_events", 10)
+        return xc.fit_cebra_events_embedding(StubKs(duration=600.0), events or _events_fixture(),
+                                             "rat1", "EC", 0.5, 5.0, 600.0, **kw)
+
+    def test_bin_labels_cover_the_window_after_onset(self):
+        bc = np.arange(0.25, 30.0, 0.5)
+        lab = xc.event_bin_labels(bc, np.array([10.0]), np.array([2]), (0.0, 2.0))
+        # centres 10.25, 10.75, 11.25, 11.75 are inside [10, 12]; 9.75 and 12.25 are not.
+        np.testing.assert_array_equal(np.flatnonzero(lab), [20, 21, 22, 23])
+        assert set(lab[lab > 0]) == {3} and lab[lab == 0].size == len(bc) - 4
+
+    def test_overlapping_windows_later_onset_wins(self):
+        bc = np.arange(0.25, 30.0, 0.5)
+        lab = xc.event_bin_labels(bc, np.array([10.0, 11.0]), np.array([0, 1]), (0.0, 2.0))
+        assert lab[20] == 1 and lab[21] == 1          # 10.25, 10.75: only the first event
+        assert lab[22] == 2 and lab[25] == 2          # 11.25 on: the later event
+        # Same result whatever order the events come in.
+        flipped = xc.event_bin_labels(bc, np.array([11.0, 10.0]), np.array([1, 0]), (0.0, 2.0))
+        np.testing.assert_array_equal(lab, flipped)
+
+    def test_fits_discrete_opponent_labels_on_window_bins_only(self, fake_cebra):
+        events = _events_fixture()
+        fit = self._fit(events)
+        kw, X, y = _FakeCEBRA.last["kwargs"], _FakeCEBRA.last["X"], _FakeCEBRA.last["y"]
+        n_bins = len(fit["bin_centers"])
+        assert fit["scores"].shape == (n_bins, 3)         # every bin embedded ...
+        assert len(X) == len(y) == fit["n_labeled_bins"] == 4 * 24 < n_bins   # ... 24 events fitted
+        assert np.issubdtype(y.dtype, np.integer) and y.ndim == 1
+        assert sorted(set(y)) == [0, 1]                   # contiguous classes: ratC (2 events) dropped
+        assert fit["opponents"] == ["ratA", "ratB"] and fit["n_events"] == 24
+        assert kw["conditional"] is None                  # lets CEBRA pick its discrete sampler
+        assert kw["model_architecture"] == "offset1-model"
+        assert events.calls == [("rat1", "EC", 10)]
+
+    def test_each_event_contributes_the_bins_after_its_onset(self, fake_cebra):
+        fit = self._fit()
+        y = _FakeCEBRA.last["y"]
+        bc = fit["bin_centers"]
+        inside = xc.event_bin_labels(bc, np.array([30.0]), np.array([0]), xc.EVENTS_WINDOW) > 0
+        # The earliest event (ratA at 30 s) is the first four fitted bins, in time order.
+        assert inside.sum() == 4 and np.flatnonzero(inside)[0] == np.flatnonzero(
+            xc.event_bin_labels(bc, np.array([30.0]), np.array([0]), xc.EVENTS_WINDOW))[0]
+        assert set(y[:4]) == {0}
+
+    def test_params_name_mode_behavior_window_and_min_events(self, fake_cebra):
+        fit = self._fit(max_iterations=77, seed=3, min_events=5)
+        assert fit["params"] == xc.cebra_events_params(0.5, 77, 3, "EC", 5)
+        assert fit["params"]["mode"] == "events" and fit["params"]["window"] == (0.0, 2.0)
+        assert xc.cebra_params(0.5, 77, 3) == {"bin": 0.5, "max_iterations": 77, "seed": 3}
+
+    def test_declines_when_there_is_nothing_to_learn(self, fake_cebra):
+        one_opp = _StubEvents(30.0 + 25.0 * np.arange(12), ["ratA"] * 12)
+        assert self._fit(one_opp) is None                            # a single class
+        assert self._fit(min_events=13) is None                      # nobody has enough events
+        assert self._fit(_StubEvents([], [])) is None                # no events at all
+        assert self._fit(_StubEvents([], [], fail=True)) is None     # extract_opponent_labels raised
+        few = _StubEvents([30.0, 60.0], ["ratA", "ratB"])
+        assert self._fit(few, min_events=1) is None                  # 8 labelled bins < MIN_EVENT_BINS
+        assert xc.fit_cebra_events_embedding(StubKs(n_cells=2), _events_fixture(), "rat1", "EC",
+                                             0.5, 5.0, 100.0) is None
+        assert xc.fit_cebra_events_embedding(StubKs(), None, "rat1", "EC", 0.5, 5.0, 100.0) is None
+        assert _FakeCEBRA.last is None
+
+    def test_missing_package_raises_install_hint(self, monkeypatch):
+        monkeypatch.setattr(xc, "cebra_available", lambda: False)
+        with pytest.raises(ImportError, match="pip install cebra"):
+            self._fit()
+
+    def test_cached_in_its_own_slot_and_only_at_defaults(self, fake_cebra):
+        sig = "sig"
+        products = xc.compute_view_products(StubKs(duration=600.0), xc.DEFAULT_RASTER_BIN,
+                                            xc.DEFAULT_PCA_BIN)
+        xc.save_view_cache("c", "s", "rat1", products, None, sig)
+        t_fit = xc.fit_cebra_embedding(StubKs(duration=600.0), xc.DEFAULT_CEBRA_BIN, 5.0, 600.0)
+        not_default = self._fit(min_events=5)                          # not the default min events
+        assert not xc.update_cached_cebra("c", "s", "rat1", not_default, sig)
+        ev_fit = self._fit(min_events=xc.DEFAULT_EVENTS_MIN)           # 12 events each: both qualify
+        assert xc.update_cached_cebra("c", "s", "rat1", t_fit, sig)
+        assert xc.update_cached_cebra("c", "s", "rat1", ev_fit, sig)
+        entry = xc.load_view_cache("c", "s", "rat1")
+        got = xc.cached_cebra(entry, sig, ev_fit["params"])
+        np.testing.assert_array_equal(got["scores"], ev_fit["scores"])
+        assert got["opponents"] == ["ratA", "ratB"]
+        assert xc.cached_cebra(entry, sig, t_fit["params"])["params"] == t_fit["params"]
+        # Another behaviour type or window, or changed event files, is a miss.
+        other = xc.cebra_events_params(xc.DEFAULT_CEBRA_BIN, xc.DEFAULT_CEBRA_ITERATIONS,
+                                       xc.DEFAULT_CEBRA_SEED, "F", xc.DEFAULT_EVENTS_MIN)
+        assert xc.cached_cebra(entry, sig, other) is None
+        assert xc.cached_cebra(entry, "changed", ev_fit["params"]) is None
+        wider = xc.cebra_events_params(xc.DEFAULT_CEBRA_BIN, xc.DEFAULT_CEBRA_ITERATIONS,
+                                       xc.DEFAULT_CEBRA_SEED, "EC", xc.DEFAULT_EVENTS_MIN,
+                                       window=(0.0, 4.0))
+        assert xc.cached_cebra(entry, sig, wider) is None
+
+    def test_non_default_window_is_not_cached(self, fake_cebra):
+        products = xc.compute_view_products(StubKs(duration=600.0), xc.DEFAULT_RASTER_BIN,
+                                            xc.DEFAULT_PCA_BIN)
+        xc.save_view_cache("c", "s", "rat1", products, None, "sig")
+        wide = self._fit(min_events=xc.DEFAULT_EVENTS_MIN, window=(0.0, 4.0))
+        assert not xc.update_cached_cebra("c", "s", "rat1", wide, "sig")
+        assert "cebra_events" not in xc.load_view_cache("c", "s", "rat1")
+
+    @pytest.mark.slow
+    def test_real_cebra_smoke(self):
+        pytest.importorskip("cebra")
+        fit = self._fit(max_iterations=20)
+        assert fit["scores"].shape == (len(fit["bin_centers"]), 3)
+        assert np.isfinite(fit["scores"]).all() and np.isfinite(fit["loss_final"])
+
+
+class TestCebraEventsPosition:
+    """Opponent (discrete) and (x, y) (continuous) together; the model is a stand-in."""
+
+    def _traj(self, t_end=200.0, fmt="apt_tqt"):
+        t = np.arange(5.0, t_end, 0.1)
+        return {"t": t, "x": 1000.0 + 50.0 * np.sin(t / 7), "y": 300.0 + 20.0 * t / 600.0,
+                "format": fmt}
+
+    def _fit(self, events=None, traj=None, **kw):
+        kw.setdefault("min_events", 10)
+        return xc.fit_cebra_events_position_embedding(
+            StubKs(duration=600.0), events or _events_fixture(),
+            traj if traj is not None else self._traj(), "rat1", "EC", 0.5, 5.0, 600.0, **kw)
+
+    def test_fits_zscored_xy_and_opponent_on_tracked_window_bins(self, fake_cebra):
+        fit = self._fit()
+        last = _FakeCEBRA.last
+        kw, X, xy, y = last["kwargs"], last["X"], last["y"], last["z"]
+        n_bins = len(fit["bin_centers"])
+        assert fit["scores"].shape == (n_bins, 3)
+        # Events past the tracked stretch (200 s) contribute nothing: 7 + 7 events x 4 bins.
+        assert len(X) == len(xy) == len(y) == fit["n_labeled_bins"] == 4 * 14
+        assert fit["n_events"] == 14 and fit["opponents"] == ["ratA", "ratB"]
+        assert xy.shape == (len(X), 2) and xy.dtype == np.float32
+        np.testing.assert_allclose(xy.mean(axis=0), 0.0, atol=1e-5)
+        np.testing.assert_allclose(xy.std(axis=0), 1.0, atol=1e-5)
+        assert np.issubdtype(y.dtype, np.integer) and sorted(set(y)) == [0, 1]
+        assert kw["conditional"] == "time_delta" and kw["model_architecture"] == "offset1-model"
+
+    def test_labels_and_xy_stay_aligned_row_by_row(self, fake_cebra):
+        fit = self._fit()
+        xy, y = _FakeCEBRA.last["y"], _FakeCEBRA.last["z"]
+        bc, traj, events = fit["bin_centers"], self._traj(), _events_fixture()
+        keep = np.isin(events.opponents, ["ratA", "ratB"])           # ratC has < 10 events
+        starts, opp = events.starts[keep], events.opponents[keep]
+        classes = np.unique(opp, return_inverse=True)[1]
+        lab = xc.event_bin_labels(bc, starts, classes, xc.EVENTS_WINDOW)
+        tracked = (bc >= traj["t"][0] - 1.0) & (bc <= traj["t"][-1] + 1.0)
+        rows = (lab > 0) & tracked
+        raw = np.column_stack([np.interp(bc[rows], traj["t"], traj[k]) for k in ("x", "y")])
+        np.testing.assert_allclose(xy, (raw - raw.mean(0)) / raw.std(0), atol=1e-4)
+        np.testing.assert_array_equal(y, lab[rows] - 1)              # opponent, same rows
+
+    def test_params_name_mode_behavior_window_and_tracking(self, fake_cebra):
+        fit = self._fit(traj=self._traj(fmt="mask_metrics"), max_iterations=77, seed=3,
+                        min_events=5)
+        assert fit["params"] == xc.cebra_events_position_params(0.5, 77, 3, "EC", 5, "mask_metrics")
+        assert fit["params"]["mode"] == "events_position" and fit["params"]["window"] == (0.0, 2.0)
+        assert fit["params"] != xc.cebra_events_params(0.5, 77, 3, "EC", 5)
+
+    def test_declines_without_tracking_or_enough_tracked_events(self, fake_cebra):
+        short = self._traj(t_end=60.0)                    # one or two events: < MIN_EVENT_BINS
+        assert self._fit(traj=short) is None
+        assert xc.fit_cebra_events_position_embedding(
+            StubKs(duration=600.0), _events_fixture(), None, "rat1", "EC", 0.5, 5.0, 600.0) is None
+        one_opp = _StubEvents(30.0 + 12.0 * np.arange(12), ["ratA"] * 12)
+        assert self._fit(one_opp) is None
+        assert self._fit(_StubEvents([], [])) is None
+        assert xc.fit_cebra_events_position_embedding(
+            StubKs(n_cells=2), _events_fixture(), self._traj(), "rat1", "EC", 0.5, 5.0, 100.0) is None
+        assert _FakeCEBRA.last is None
+
+    def test_missing_package_raises_install_hint(self, monkeypatch):
+        monkeypatch.setattr(xc, "cebra_available", lambda: False)
+        with pytest.raises(ImportError, match="pip install cebra"):
+            self._fit()
+
+    def test_cached_in_its_own_slot_beside_the_events_fit(self, fake_cebra):
+        products = xc.compute_view_products(StubKs(duration=600.0), xc.DEFAULT_RASTER_BIN,
+                                            xc.DEFAULT_PCA_BIN)
+        xc.save_view_cache("c", "s", "rat1", products, None, "sig")
+        ev = xc.fit_cebra_events_embedding(
+            StubKs(duration=600.0), _events_fixture(), "rat1", "EC", xc.DEFAULT_CEBRA_BIN, 5.0, 600.0)
+        evp = self._fit()
+        assert xc.update_cached_cebra("c", "s", "rat1", ev, "sig")
+        assert xc.update_cached_cebra("c", "s", "rat1", evp, "sig|tsig")
+        entry = xc.load_view_cache("c", "s", "rat1")
+        got = xc.cached_cebra(entry, "sig|tsig", evp["params"])
+        np.testing.assert_array_equal(got["scores"], evp["scores"])
+        assert xc.cached_cebra(entry, "sig", ev["params"])["params"] == ev["params"]
+        # Stale tracking, another tracking format and crossing the two slots are misses.
+        assert xc.cached_cebra(entry, "sig|other", evp["params"]) is None
+        other_fmt = xc.cebra_events_position_params(
+            xc.DEFAULT_CEBRA_BIN, xc.DEFAULT_CEBRA_ITERATIONS, xc.DEFAULT_CEBRA_SEED, "EC",
+            xc.DEFAULT_EVENTS_MIN, "mask_metrics")
+        assert xc.cached_cebra(entry, "sig|tsig", other_fmt) is None
+        assert xc.cached_cebra(entry, "sig|tsig", ev["params"]) is None
+
+    def test_only_default_settings_are_cached(self, fake_cebra):
+        products = xc.compute_view_products(StubKs(duration=600.0), xc.DEFAULT_RASTER_BIN,
+                                            xc.DEFAULT_PCA_BIN)
+        xc.save_view_cache("c", "s", "rat1", products, None, "sig")
+        assert not xc.update_cached_cebra("c", "s", "rat1", self._fit(min_events=5), "sig|t")
+        assert not xc.update_cached_cebra("c", "s", "rat1",
+                                          self._fit(window=(0.0, 4.0)), "sig|t")
+        assert "cebra_events_position" not in xc.load_view_cache("c", "s", "rat1")
+
+    @pytest.mark.slow
+    def test_real_cebra_smoke(self):
+        pytest.importorskip("cebra")
+        fit = self._fit(max_iterations=20)
         assert fit["scores"].shape == (len(fit["bin_centers"]), 3)
         assert np.isfinite(fit["scores"]).all() and np.isfinite(fit["loss_final"])
 

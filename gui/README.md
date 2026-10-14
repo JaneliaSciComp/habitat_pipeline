@@ -23,6 +23,22 @@ sidebar button: 3-D UMAP of the same z-scored binned rates, with `n_neighbors` a
 sliders. A fit at the default parameters is cached with the session's explore cache. The seed
 is fixed for reproducibility, which makes UMAP single-threaded.
 
+The **CEBRA (events)** tab is CEBRA-Behavior with the opponent as a discrete label: bins from 0 to
+2 s after each onset of the selected behaviour type (Encounter by default; opponents below
+**Min events / opponent** are left out) take that event's opponent as their class, and only those
+bins supervise the fit. Every bin is then embedded from its neural activity alone. It uses CEBRA's
+one-timestep network (`offset1-model`), since the labelled bins are only a few per event. The
+embedding is trained on the labels, so opponent clusters in it are not evidence of an
+opponent code; test that on held-out events. Fits at the default settings (Encounter, 10 events,
+0-2 s) are cached.
+
+**CEBRA (events + pos)** adds the focal rat's (x, y) as a continuous label next to the opponent
+(CEBRA's mixed continuous + discrete mode): bins of the same opponent that are also close in
+space are pulled together. A bin must have a tracked frame within 1 s to supervise the fit, so
+only events inside the tracked stretch count, and the position labels are z-scored per axis. It
+uses the selected tracking source and needs tracking for the block. Events + time is not offered:
+CEBRA's hybrid (time) training does not support discrete labels.
+
 The CEBRA panel (Explore view, below the PCA panel) is fitted on demand with the
 **Fit CEBRA** sidebar button: CEBRA-Time, unsupervised, on the same z-scored binned
 rates as the PCA. A fit at the default parameters is cached with the session's explore

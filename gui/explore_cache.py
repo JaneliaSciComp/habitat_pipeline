@@ -153,12 +153,15 @@ def _zscored_binned_rates(ks_data, bin_size, t0, t1):
 
 
 def _run_cebra(X, bin_centers, params, *, labels=None, fit_mask=None,
-               output_dim=3) -> Dict[str, Any]:
+               output_dim=3, architecture="offset10-model") -> Dict[str, Any]:
     """Fit CEBRA and embed every bin.
 
-    ``labels is None`` -> CEBRA-Time. Otherwise CEBRA-Behavior (``time_delta``)
-    on the ``fit_mask`` bins, whose rows of ``labels`` are the supervision; the
-    model then embeds *all* bins from neural activity alone.
+    ``labels is None`` -> CEBRA-Time. Otherwise CEBRA-Behavior on the
+    ``fit_mask`` bins, whose rows of ``labels`` are the supervision; the model
+    then embeds *all* bins from neural activity alone. Float labels are
+    continuous (``time_delta``); integer labels are discrete classes, for which
+    CEBRA picks its discrete sampler (no ``conditional``). A ``(continuous,
+    discrete)`` tuple trains on both at once (``time_delta``).
     """
     import cebra
     try:
@@ -168,13 +171,16 @@ def _run_cebra(X, bin_centers, params, *, labels=None, fit_mask=None,
     except ImportError:
         device = "cpu"
     np.random.seed(params["seed"])
+    label_args = () if labels is None else (labels if isinstance(labels, tuple) else (labels,))
+    discrete = len(label_args) == 1 and np.issubdtype(np.asarray(label_args[0]).dtype, np.integer)
+    n_fit = len(X) if fit_mask is None else int(np.sum(fit_mask))
     model = cebra.CEBRA(
-        model_architecture="offset10-model",
+        model_architecture=architecture,
         output_dimension=output_dim,
-        conditional="time" if labels is None else "time_delta",
+        conditional=None if discrete else ("time" if labels is None else "time_delta"),
         temperature_mode="auto",
         max_iterations=params["max_iterations"],
-        batch_size=512,
+        batch_size=min(512, max(32, n_fit)),
         learning_rate=3e-4,
         device=device,
         verbose=False,
@@ -182,7 +188,7 @@ def _run_cebra(X, bin_centers, params, *, labels=None, fit_mask=None,
     if labels is None:
         model.fit(X)
     else:
-        model.fit(X[fit_mask], labels)
+        model.fit(X[fit_mask], *label_args)
     try:                                   # loss history is informational only
         loss = model.state_dict_["loss"]
     except Exception:
@@ -220,6 +226,29 @@ def fit_cebra_embedding(ks_data, bin_size: float, t0: float, t1: float, *,
 MIN_POSITION_BINS = 200
 
 
+def _tracked_xy(traj, bin_centers, max_gap: float):
+    """``(tracked, xy)``: which bins have a tracked frame within ``max_gap`` seconds, and
+    the linearly interpolated (x, y) (pixels) at those bins. ``(None, None)`` if ``traj``
+    has fewer than 2 frames."""
+    if traj is None:
+        return None, None
+    t = np.asarray(traj["t"], dtype=float)
+    if len(t) < 2:
+        return None, None
+    nearest = np.clip(np.searchsorted(t, bin_centers), 1, len(t) - 1)
+    gap = np.minimum(np.abs(t[nearest] - bin_centers), np.abs(t[nearest - 1] - bin_centers))
+    tracked = gap <= max_gap
+    xy = np.column_stack([np.interp(bin_centers[tracked], t, np.asarray(traj[k], dtype=float))
+                          for k in ("x", "y")])
+    return tracked, xy
+
+
+def _zscore_xy(xy):
+    """Per-axis z-score (a constant axis becomes 0), so the pixel scale does not matter."""
+    sd = xy.std(axis=0)
+    return np.nan_to_num((xy - xy.mean(axis=0)) / np.where(sd > 0, sd, 1.0))
+
+
 def fit_cebra_position_embedding(ks_data, traj, bin_size: float, t0: float, t1: float, *,
                                  max_iterations: int = DEFAULT_CEBRA_ITERATIONS,
                                  output_dim: int = 3, seed: int = DEFAULT_CEBRA_SEED,
@@ -239,24 +268,171 @@ def fit_cebra_position_embedding(ks_data, traj, bin_size: float, t0: float, t1: 
     if not cebra_available():
         raise ImportError(CEBRA_INSTALL_HINT)
     X, bin_centers = _zscored_binned_rates(ks_data, bin_size, t0, t1)
-    if X is None or traj is None:
+    if X is None:
         return None
-    t = np.asarray(traj["t"], dtype=float)
-    if len(t) < 2:
+    tracked, xy = _tracked_xy(traj, bin_centers, max_gap)
+    if tracked is None or int(tracked.sum()) < MIN_POSITION_BINS:
         return None
-    nearest = np.clip(np.searchsorted(t, bin_centers), 1, len(t) - 1)
-    gap = np.minimum(np.abs(t[nearest] - bin_centers), np.abs(t[nearest - 1] - bin_centers))
-    tracked = gap <= max_gap
-    if int(tracked.sum()) < MIN_POSITION_BINS:
-        return None
-    xy = np.column_stack([np.interp(bin_centers[tracked], t, np.asarray(traj[k], dtype=float))
-                          for k in ("x", "y")])
-    xy = np.nan_to_num((xy - xy.mean(axis=0)) / np.where(xy.std(axis=0) > 0, xy.std(axis=0), 1.0))
+    xy = _zscore_xy(xy)
     fit = _run_cebra(X, bin_centers,
                      cebra_params(bin_size, max_iterations, seed, "position",
                                   traj.get("format")),
                      labels=xy.astype(np.float32), fit_mask=tracked, output_dim=output_dim)
     fit["n_tracked_bins"] = int(tracked.sum())
+    return fit
+
+
+#: CEBRA-events: bins from ``onset + w0`` to ``onset + w1`` carry the event's opponent.
+DEFAULT_EVENTS_BEHAVIOR = "EC"
+DEFAULT_EVENTS_MIN = 10          # the dashboard's "Min events / opponent" default
+EVENTS_WINDOW = (0.0, 2.0)
+#: Fewest labelled bins (and classes) an events fit is allowed to run on.
+MIN_EVENT_BINS = 40
+
+
+def cebra_events_params(bin_size: float, max_iterations: int, seed: int, behavior: str,
+                        min_events: int, window=EVENTS_WINDOW) -> Dict[str, Any]:
+    """Parameters of a CEBRA fit supervised by opponent labels around event onsets."""
+    params = cebra_params(bin_size, max_iterations, seed)
+    params.update(mode="events", behavior=str(behavior), min_events=int(min_events),
+                  window=(float(window[0]), float(window[1])))
+    return params
+
+
+def event_bin_labels(bin_centers, onsets, classes, window=EVENTS_WINDOW) -> np.ndarray:
+    """Per-bin class for event windows: ``classes[i] + 1`` for bins whose centre lies
+    in ``[onsets[i] + window[0], onsets[i] + window[1]]``, 0 elsewhere. Where windows
+    overlap the later onset wins."""
+    bin_centers = np.asarray(bin_centers, dtype=float)
+    labels = np.zeros(len(bin_centers), dtype=np.int64)
+    for i in np.argsort(onsets, kind="stable"):
+        a = np.searchsorted(bin_centers, onsets[i] + window[0], side="left")
+        b = np.searchsorted(bin_centers, onsets[i] + window[1], side="right")
+        labels[a:b] = int(classes[i]) + 1
+    return labels
+
+
+def _event_window_labels(events, animal_id, behavior_type, min_events, bin_centers, window):
+    """``(labels, opponent_names, onsets)`` for the focal animal's events, or ``None`` if
+    there are none (or ``extract_opponent_labels`` finds nothing). ``labels`` is
+    :func:`event_bin_labels` over ``bin_centers``; class ``c`` is ``names[c - 1]``."""
+    if events is None:
+        return None
+    try:
+        starts, _, opponents = events.extract_opponent_labels(
+            animal_of_interest=animal_id, behavior_type=behavior_type,
+            min_events_per_class=int(min_events))
+    except Exception:
+        return None
+    starts = np.asarray(starts, dtype=float)
+    opponents = np.asarray(opponents)
+    ok = np.isfinite(starts)
+    starts, opponents = starts[ok], opponents[ok]
+    if len(starts) == 0:
+        return None
+    names, classes = np.unique(opponents, return_inverse=True)
+    return event_bin_labels(bin_centers, starts, classes, window), names, starts
+
+
+def fit_cebra_events_embedding(ks_data, events, animal_id: str, behavior_type: str,
+                               bin_size: float, t0: float, t1: float, *,
+                               min_events: int = DEFAULT_EVENTS_MIN,
+                               window=EVENTS_WINDOW,
+                               max_iterations: int = DEFAULT_CEBRA_ITERATIONS,
+                               output_dim: int = 3,
+                               seed: int = DEFAULT_CEBRA_SEED) -> Optional[Dict[str, Any]]:
+    """CEBRA-Behavior with the opponent as a discrete label around each event onset.
+
+    Events are the focal animal's ``behavior_type`` events with at least
+    ``min_events`` per opponent (``extract_opponent_labels``). Bins within
+    ``window`` seconds of an onset take that event's opponent as their class; only
+    those bins supervise the fit, and every bin is then embedded from its neural
+    activity alone. The one-timestep network (``offset1-model``) is used because
+    the labelled bins are a few per event, so a 10-step window over them would
+    span unrelated events. ``None`` for < 3 cells, < 2 opponents or fewer than
+    ``MIN_EVENT_BINS`` labelled bins.
+    """
+    if not cebra_available():
+        raise ImportError(CEBRA_INSTALL_HINT)
+    X, bin_centers = _zscored_binned_rates(ks_data, bin_size, t0, t1)
+    if X is None:
+        return None
+    lab = _event_window_labels(events, animal_id, behavior_type, min_events, bin_centers, window)
+    if lab is None:
+        return None
+    labels, names, starts = lab
+    fit_mask = labels > 0
+    if int(fit_mask.sum()) < MIN_EVENT_BINS:
+        return None
+    present, y = np.unique(labels[fit_mask], return_inverse=True)   # contiguous 0..k-1
+    if len(present) < 2:
+        return None
+    fit = _run_cebra(
+        X, bin_centers,
+        cebra_events_params(bin_size, max_iterations, seed, behavior_type, min_events, window),
+        labels=y.astype(np.int64), fit_mask=fit_mask, output_dim=output_dim,
+        architecture="offset1-model")
+    fit["n_events"] = int(len(starts))
+    fit["n_labeled_bins"] = int(fit_mask.sum())
+    fit["opponents"] = [str(names[c - 1]) for c in present]
+    return fit
+
+
+def cebra_events_position_params(bin_size: float, max_iterations: int, seed: int,
+                                 behavior: str, min_events: int, tracking: Optional[str],
+                                 window=EVENTS_WINDOW) -> Dict[str, Any]:
+    """Parameters of a CEBRA fit on opponent labels *and* (x, y) around event onsets."""
+    params = cebra_events_params(bin_size, max_iterations, seed, behavior, min_events, window)
+    params.update(mode="events_position", tracking=tracking)
+    return params
+
+
+def fit_cebra_events_position_embedding(ks_data, events, traj, animal_id: str,
+                                        behavior_type: str, bin_size: float, t0: float,
+                                        t1: float, *, min_events: int = DEFAULT_EVENTS_MIN,
+                                        window=EVENTS_WINDOW,
+                                        max_iterations: int = DEFAULT_CEBRA_ITERATIONS,
+                                        output_dim: int = 3, seed: int = DEFAULT_CEBRA_SEED,
+                                        max_gap: float = 1.0) -> Optional[Dict[str, Any]]:
+    """CEBRA-Behavior on the opponent (discrete) *and* the focal animal's (x, y) (continuous).
+
+    As :func:`fit_cebra_events_embedding`, but a bin must also have a tracked frame within
+    ``max_gap`` seconds to supervise the fit, and it carries its z-scored (x, y) next to
+    the opponent. CEBRA then pulls together bins of the same opponent that are also close
+    in space. Only events inside the tracked stretch contribute. Every bin is embedded
+    from its neural activity alone. ``None`` for < 3 cells, no tracking, < 2 opponents or
+    fewer than ``MIN_EVENT_BINS`` labelled, tracked bins.
+    """
+    if not cebra_available():
+        raise ImportError(CEBRA_INSTALL_HINT)
+    X, bin_centers = _zscored_binned_rates(ks_data, bin_size, t0, t1)
+    if X is None:
+        return None
+    tracked, xy = _tracked_xy(traj, bin_centers, max_gap)
+    lab = _event_window_labels(events, animal_id, behavior_type, min_events, bin_centers, window)
+    if tracked is None or lab is None:
+        return None
+    labels, names, starts = lab
+    fit_mask = (labels > 0) & tracked
+    if int(fit_mask.sum()) < MIN_EVENT_BINS:
+        return None
+    present, y = np.unique(labels[fit_mask], return_inverse=True)
+    if len(present) < 2:
+        return None
+    xy_fit = _zscore_xy(xy[fit_mask[tracked]]).astype(np.float32)   # xy is on tracked bins only
+    fit = _run_cebra(
+        X, bin_centers,
+        cebra_events_position_params(bin_size, max_iterations, seed, behavior_type, min_events,
+                                     traj.get("format"), window),
+        labels=(xy_fit, y.astype(np.int64)), fit_mask=fit_mask, output_dim=output_dim,
+        architecture="offset1-model")
+    # Events that actually contributed: at least one tracked, labelled bin in their window.
+    csum = np.r_[0, np.cumsum(fit_mask)]
+    lo = np.searchsorted(bin_centers, starts + window[0], side="left")
+    hi = np.searchsorted(bin_centers, starts + window[1], side="right")
+    fit["n_events"] = int(np.sum(csum[hi] - csum[lo] > 0))
+    fit["n_labeled_bins"] = int(fit_mask.sum())
+    fit["opponents"] = [str(names[c - 1]) for c in present]
     return fit
 
 
@@ -464,7 +640,8 @@ def update_cached_trajectory(cohort: str, session_id: str, animal_id: str,
 
 
 #: Cache-entry keys: the time fit keeps its original key, so older entries still load.
-CEBRA_KEYS = {"time": "cebra", "position": "cebra_position"}
+CEBRA_KEYS = {"time": "cebra", "position": "cebra_position", "events": "cebra_events",
+              "events_position": "cebra_events_position"}
 
 
 def _update_entry(cohort: str, session_id: str, animal_id: str, key: str,
@@ -499,6 +676,10 @@ def update_cached_cebra(cohort: str, session_id: str, animal_id: str,
     p = cebra_fit["params"]
     if (p["bin"], p["max_iterations"], p["seed"]) != (
             DEFAULT_CEBRA_BIN, DEFAULT_CEBRA_ITERATIONS, DEFAULT_CEBRA_SEED):
+        return False
+    if p.get("mode") in ("events", "events_position") and (
+            p["behavior"], p["min_events"], tuple(p["window"])) != (
+            DEFAULT_EVENTS_BEHAVIOR, DEFAULT_EVENTS_MIN, EVENTS_WINDOW):
         return False
     return _update_entry(cohort, session_id, animal_id,
                          CEBRA_KEYS[p.get("mode", "time")], cebra_fit, signature)

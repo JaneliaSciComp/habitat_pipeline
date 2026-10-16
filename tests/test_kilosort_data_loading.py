@@ -181,3 +181,45 @@ dat_path = '/path/to/data.dat'
         assert 'n_spikes=' in repr_str
         assert 'n_clusters=' in repr_str
         assert 'duration=' in repr_str
+
+class TestTemplateShiftAtRecordingStart:
+    """The -31 template-centre shift must not wrap early spikes to the end.
+
+    A spike in the first 31 samples gets a negative index; indexing
+    timestamps.dat with it wraps to the last samples, so the spike was timed
+    at the end of the recording (seen on every cohort-9 rat, 1-4 per rat).
+    """
+
+    @staticmethod
+    def _write(tmp_path, spike_times, spike_clusters, n_samples=1000, dtype=np.int64):
+        ks4 = tmp_path / 'kilosort4'
+        ks4.mkdir()
+        np.save(ks4 / 'spike_times.npy', np.asarray(spike_times, dtype=dtype))
+        np.save(ks4 / 'spike_clusters.npy', np.asarray(spike_clusters, dtype=np.int32))
+        pd.DataFrame({'cluster_id': [0, 1], 'KSLabel': ['good', 'good']}).to_csv(
+            ks4 / 'cluster_KSLabel.tsv', sep='\t', index=False)
+        with open(tmp_path / 'x.timestamps.dat', 'wb') as f:
+            for i in range(25):
+                f.write(f"Header line {i}\n".encode())
+            f.write(np.arange(5000, 5000 + n_samples, dtype=np.uint32).tobytes())
+        return ks4
+
+    @pytest.mark.parametrize('dtype', [np.int64, np.uint64])
+    def test_spikes_before_the_first_sample_are_dropped(self, tmp_path, dtype):
+        from ingestion.kilosort_data_import import _group_spikes_by_cluster, _load_spike_data
+        ks4 = self._write(tmp_path, [0, 30, 31, 100, 999 + 31], [0, 1, 0, 1, 0], dtype=dtype)
+        spike_times, spike_clusters, *_ = _load_spike_data(ks4)
+        assert spike_times.tolist() == [0, 69, 999]
+        assert spike_clusters.tolist() == [0, 1, 0]
+
+        by_cell = _group_spikes_by_cluster(ks4, spike_times, spike_clusters, [0, 1])
+        # timestamps.dat counts start at 5000; nothing lands at the end by wrapping.
+        assert by_cell[0].tolist() == [5000 / 30000, 5999 / 30000]
+        assert by_cell[1].tolist() == [5069 / 30000]
+
+    def test_a_clean_recording_is_unchanged(self, tmp_path):
+        from ingestion.kilosort_data_import import _load_spike_data
+        ks4 = self._write(tmp_path, [31, 40, 500], [0, 1, 0])
+        spike_times, spike_clusters, *_ = _load_spike_data(ks4)
+        assert spike_times.tolist() == [0, 9, 469]
+        assert spike_clusters.tolist() == [0, 1, 0]

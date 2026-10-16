@@ -565,8 +565,17 @@ def _load_spike_data(ks_folder: Path):
         raise FileNotFoundError("Spike times or clusters file not found in the specified directory.")
 
     logger.info("Loading spike data...")
-    spike_times = np.load(spike_times_path) - 31  # align with template center
+    # Align with template center. Signed first: an unsigned array would wrap.
+    spike_times = np.load(spike_times_path).astype(np.int64) - 31
     spike_clusters = np.load(spike_clusters_path)
+    # A spike in the first 31 samples now has a negative index, which numpy
+    # would wrap to the end of timestamps.dat — misplacing it at the end of
+    # the recording. Drop those few spikes.
+    valid = spike_times >= 0
+    if not valid.all():
+        logger.info("Dropping %d spike(s) shifted before the first sample", int((~valid).sum()))
+        spike_times = spike_times[valid]
+        spike_clusters = spike_clusters[valid]
     channel_map = np.load(channel_map_path) if channel_map_path.exists() else None
 
     if cluster_info_path.exists():

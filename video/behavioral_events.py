@@ -15,11 +15,12 @@ import numpy as np
 import pandas as pd
 
 from ingestion.ephys_sync import DataSyncManager
-from video.tracking_import import normalize_object_name
+from video.tracking_import import normalize_object_name, uses_name_normalization
 
 logger = logging.getLogger(__name__)
 
-#: Rat identity columns that may carry the APT-style ``rat4635`` naming.
+#: Rat identity columns that may carry the APT-style ``rat4635`` naming
+#: (normalised only before cohort 9; see :func:`uses_name_normalization`).
 _RAT_ID_COLUMNS = ('initiator', 'victim', 'winner', 'loser')
 
 
@@ -567,11 +568,14 @@ def load_behavioral_events(
         if missing:
             logger.warning("Missing columns in %s: %s", fp.name, missing)
 
-        for col in _RAT_ID_COLUMNS:
-            if col in df.columns:
-                df[col] = df[col].map(
-                    lambda v: normalize_object_name(v) if pd.notna(v) else v
-                )
+        # Cohort 9's real ids (rat4678) look like APT's rat4<ddd>, so only
+        # older cohorts get the rat4635 -> rat635 rewrite.
+        if uses_name_normalization(fp):
+            for col in _RAT_ID_COLUMNS:
+                if col in df.columns:
+                    df[col] = df[col].map(
+                        lambda v: normalize_object_name(v) if pd.notna(v) else v
+                    )
 
         if 'type' in df.columns:
             df['behavior_full_name'] = (

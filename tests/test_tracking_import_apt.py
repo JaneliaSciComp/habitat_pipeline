@@ -25,6 +25,7 @@ from video.tracking_import import (
     TRACKING_FORMAT_APT_TQT,
     TRACKING_FORMAT_MASK_METRICS,
     TRACKING_FORMAT_UNKNOWN,
+    cohort_from_path,
     detect_tracking_format,
     load_tracking_data,
     load_timestamps,
@@ -33,7 +34,9 @@ from video.tracking_import import (
     parse_tracking,
     read_tracking_centers,
     read_tracking_header,
+    uses_name_normalization,
 )
+from video.behavioral_events import load_behavioral_events
 
 #: 40 Hz, as the real exports are.
 _FRAME_NS = 25_000_000
@@ -130,6 +133,60 @@ class TestNameNormalisation:
         # Positions distinguish them: the second animal is offset by 1000.
         assert parsed['rat631']['center_x'].iloc[0] == 0.0
         assert [obj['center_x'].iloc[0] for obj in parsed.values()] == [0.0, 1000.0]
+
+
+class TestCohortGatedNormalisation:
+    """Cohort 9's real ids (``rat4678``) match APT's ``rat4<ddd>`` pattern.
+
+    Normalising them shortened ``rat4678`` to ``rat678`` on load, so every
+    event for rat4678/rat4679 vanished from an animal filter without an error.
+    """
+
+    @pytest.mark.parametrize('path,expected', [
+        ('//share/RatCityBehavior/cohort7/20251216/x.csv', 7),
+        ('//share/RatCityBehavior/cohort9/20260929/x.csv', 9),
+        ('//share/RatCityBehavior/cohort1vs2_exp1/x.csv', 1),
+        ('//share/data/RatCity/cohort10/x.csv', 10),
+        ('/tmp/events/20251216/x.csv', None),
+    ])
+    def test_cohort_from_path(self, path, expected):
+        assert cohort_from_path(path) == expected
+
+    @pytest.mark.parametrize('path,expected', [
+        ('/a/cohort5/x.csv', True),
+        ('/a/cohort7/x.csv', True),
+        ('/a/cohort9/x.csv', False),
+        ('/a/cohort10/x.csv', False),
+        ('/a/no_cohort/x.csv', True),
+    ])
+    def test_uses_name_normalization(self, path, expected):
+        assert uses_name_normalization(path) is expected
+
+    @staticmethod
+    def _write_events(directory, names):
+        directory.mkdir(parents=True)
+        path = directory / '20260929_behavior_event_df.csv'
+        pd.DataFrame({
+            'type': ['F'] * len(names),
+            'initiator': names,
+            'victim': ['rat5675'] * len(names),
+            'winner': names,
+            'loser': ['rat5675'] * len(names),
+            'ts_start': [1, 2],
+            'ts_end': [3, 4],
+        }).to_csv(path, index=False)
+        return path
+
+    def test_cohort9_events_keep_their_ids(self, tmp_path):
+        path = self._write_events(tmp_path / 'cohort9' / '20260929', ['rat4678', 'rat4679'])
+        df = load_behavioral_events([path]).events_data
+        assert list(df['initiator']) == ['rat4678', 'rat4679']
+        assert list(df['winner']) == ['rat4678', 'rat4679']
+
+    def test_cohort7_events_still_normalised(self, tmp_path):
+        path = self._write_events(tmp_path / 'cohort7' / '20260929', ['rat4635', 'rat631'])
+        df = load_behavioral_events([path]).events_data
+        assert list(df['initiator']) == ['rat635', 'rat631']
 
 
 class TestFrameNumbering:

@@ -220,6 +220,35 @@ def normalize_object_name(name: str) -> str:
     return f"rat{match.group(1)}" if match else str(name)
 
 
+#: A ``cohort<N>`` path component (``cohort7``, ``cohort1vs2_exp1``, ...).
+_COHORT_DIR_RE = re.compile(r'^cohort(\d+)', re.IGNORECASE)
+
+#: First cohort whose animal ids are four digits starting with 4 (``rat4678``),
+#: which :func:`normalize_object_name` would wrongly shorten to ``rat678``.
+_FIRST_COHORT_WITHOUT_NAME_NORMALIZATION = 9
+
+
+def cohort_from_path(path: Union[str, Path]) -> Optional[int]:
+    """Cohort number from the deepest ``cohort<N>`` directory in ``path``, or None."""
+    cohort = None
+    for part in Path(path).parts:
+        match = _COHORT_DIR_RE.match(part)
+        if match:
+            cohort = int(match.group(1))
+    return cohort
+
+
+def uses_name_normalization(path: Union[str, Path]) -> bool:
+    """Whether names in a file at ``path`` should go through :func:`normalize_object_name`.
+
+    True for cohorts before 9 and for paths naming no cohort (the old
+    behaviour). False from cohort 9 on, whose real ids (``rat4678``) match the
+    APT ``rat4<ddd>`` pattern.
+    """
+    cohort = cohort_from_path(path)
+    return cohort is None or cohort < _FIRST_COHORT_WITHOUT_NAME_NORMALIZATION
+
+
 def detect_tracking_format(columns: Iterable) -> str:
     """Identify a tracking file's layout from its column names alone.
 

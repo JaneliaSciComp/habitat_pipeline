@@ -3,5 +3,7 @@
   "ephys": "//nearline/karpova/TervoLab/data/RatCity/cohort9/ephys/",
   "tracking": "//nearline/karpova/TervoLab/analysis/Tracking/manual_tracking/",
   "events": "//nearline/karpova/TervoLab/analysis/RatCityBehavior/",
-  "pixels_per_cm": null
+  "pixels_per_cm": null,
+  "sync_method": "greyware",
+  "pulse_log": "timekeeper_pulse_log_cohort9only.txt"
 }

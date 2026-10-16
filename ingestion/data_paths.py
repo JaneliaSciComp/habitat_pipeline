@@ -22,7 +22,9 @@ logger = logging.getLogger(__name__)
 # date-named subdirectory instead of the first, and picks up date-less files
 # such as ``solution/TQT_named.csv``. A v2 entry's ``tracking_files`` is a
 # strict subset of what v3 finds, so cached entries must be rebuilt.
-_CACHE_VERSION = 3
+# v3 -> v4: the pulse log name became configurable (``"pulse_log"`` key), so a
+# v3 entry's ``pulse_log_path`` may name the hard-coded ``pulse_log.txt``.
+_CACHE_VERSION = 4
 _DEFAULT_CACHE_DIR = Path(__file__).parent.parent / ".cache" / "data_paths"
 
 #: The timestamp embedded in a recording's on-disk prefix. Trodes writes
@@ -387,19 +389,22 @@ def get_pulse_log_path(config_path: Optional[str] = None, _config: Optional[dict
         _config: Optional pre-loaded config dict to avoid redundant file I/O.
 
     Returns:
-        Path: Complete path to the pulse_log.txt file
+        Path: Complete path to the pulse log. ``<ephys>/pulse_log.txt`` unless
+        the config sets ``"pulse_log"`` (a filename relative to the ephys
+        root, or an absolute path) — cohort 9's log is
+        ``timekeeper_pulse_log_cohort9only.txt``.
     """
     config = _config or _load_config(config_path)
-    
+
     # Get the ephys base path
     if 'ephys' not in config:
         raise KeyError("'ephys' key not found in configuration file")
-    
+
     ephys_base = Path(config['ephys'])
-    
-    # Construct the pulse log path
-    pulse_log_path = ephys_base / "pulse_log.txt"
-    
+
+    # Construct the pulse log path (Path join keeps an absolute override as-is)
+    pulse_log_path = ephys_base / config.get("pulse_log", "pulse_log.txt")
+
     return pulse_log_path
 
 
@@ -1080,6 +1085,21 @@ class DataStorageManager:
         if val is None:
             return None
         return float(val)
+
+    @property
+    def sync_method(self) -> str:
+        """Ephys↔behavior sync method from the cohort config.
+
+        ``'pulses'`` (default): DIO edges matched to the timekeeper pulse log.
+        ``'greyware'``: per-recording SysClock fit from the session ``.rec``
+        (cohort 9; see ``ingestion/greyware_sync.py``).
+        """
+        return self._config.get("sync_method", "pulses")
+
+    @property
+    def greyware_latency_s(self) -> float:
+        """SysClock stamp latency subtracted by the Greyware sync (s)."""
+        return float(self._config.get("greyware_latency_s", 0.1185))
 
     def __repr__(self) -> str:
         return (f"DataStorageManager({self.animal_id}/{self.session_id}, "

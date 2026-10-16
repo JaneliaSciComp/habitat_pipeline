@@ -1,0 +1,6 @@
+{
+ "_comment": "Greyware SysClock fits per recording, fit-file convention: t_ref_unix_s does NOT include the latency constant (greyware_time() subtracts it). Values = README 'Merge day coefficients' table + 0.1185 s. Add a recording with: python ingestion/Sync/greyware_time.py <stamp>.rec --save-fit fit.json",
+ "20260929_095542": {"n_ref": 261075, "t_ref_unix_s": 1790690149.515685, "rate_hz": 29999.77321, "source": "20260929_095542.rec, 1200x10000 blocks"},
+ "20260929_150139": {"n_ref": 165676, "t_ref_unix_s": 1790708503.292997, "rate_hz": 29999.788746, "source": "20260929_150139.rec, 1200x10000 blocks"},
+ "20260929_201052": {"n_ref": 141083, "t_ref_unix_s": 1790727054.734911, "rate_hz": 29999.765906, "source": "20260929_201052.rec, 1200x10000 blocks"}
+}

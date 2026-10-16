@@ -234,21 +234,72 @@ class DataSyncManager:
     Loads sync pulses from the configured DataStorageManager, fits a linear
     mapping between ephys and behavior timestamps, and exposes conversion
     functions in both directions.
+
+    The method follows the cohort config's ``sync_method``: ``'pulses'``
+    (default) matches DIO edges to the timekeeper pulse log; ``'greyware'``
+    uses the recording's saved SysClock fit (:mod:`ingestion.greyware_sync`)
+    and runs the pulse match only as a diagnostic, stored in
+    ``mapping['pulse_check']``. A Greyware mapping has no regression, so
+    ``mapping['r_squared']`` and ``mapping['n_matches']`` are None.
     """
 
     def __init__(self, data_manager: DataStorageManager, dio_channel: int = 1):
         self.data_manager = data_manager
         self.dio_channel = dio_channel
+        self.method = getattr(data_manager, "sync_method", "pulses")
 
-        self.ephys_sync, self.behavior_sync, self.system_time = load_ephys_sync(
-            data_manager, dio_channel
-        )
-        self.mapping = find_sync_mapping(
-            self.ephys_sync, self.behavior_sync, self.system_time
-        )
+        if self.method == "greyware":
+            self._init_greyware()
+        elif self.method == "pulses":
+            self.ephys_sync, self.behavior_sync, self.system_time = load_ephys_sync(
+                data_manager, dio_channel
+            )
+            self.mapping = find_sync_mapping(
+                self.ephys_sync, self.behavior_sync, self.system_time
+            )
+        else:
+            raise ValueError(f"Unknown sync_method {self.method!r} (expected 'pulses' or 'greyware')")
         self.slope = self.mapping['slope']
         self.intercept = self.mapping['intercept']
         logger.info("Sync mapping clock-rate ratio: %.8f", self.slope)
+
+    def _init_greyware(self):
+        from ingestion.greyware_sync import (
+            fit_to_linear, load_greyware_fit, pulse_residuals, windowed_pulse_match,
+        )
+
+        dm = self.data_manager
+        latency_s = getattr(dm, "greyware_latency_s", 0.1185)
+        fit = load_greyware_fit(dm.recording_id)
+        slope, intercept = fit_to_linear(fit, latency_s, SAMPLE_RATE)
+
+        self.ephys_sync = self.behavior_sync = self.system_time = None
+        pulse_mapping = None
+        try:
+            self.ephys_sync, self.behavior_sync, self.system_time = load_ephys_sync(
+                dm, self.dio_channel
+            )
+            pulse_mapping = windowed_pulse_match(
+                slope, intercept, self.ephys_sync, self.behavior_sync
+            )
+            pulse_check = pulse_residuals(slope, intercept, pulse_mapping)
+        except Exception as e:  # diagnostic only; never blocks the Greyware sync
+            logger.info("Pulse cross-check unavailable for %s: %s", dm.recording_id, e)
+            pulse_check = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+        self.mapping = {
+            'source': 'greyware_sysclock',
+            'slope': slope,
+            'intercept': intercept,
+            'rate_hz': float(fit['rate_hz']),
+            'n_ref': int(fit['n_ref']),
+            'latency_s': latency_s,
+            'fit': fit,
+            'r_squared': None,
+            'n_matches': None,
+            'pulse_check': pulse_check,
+            'pulse_mapping': pulse_mapping,
+        }
 
     def convert_ephys_to_behavior(self, ephys_timestamps):
         """Convert ephys timestamps to behavioral timestamps."""
@@ -259,9 +310,21 @@ class DataSyncManager:
         return (behavior_timestamps - self.intercept) / self.slope
 
     def plot_sync_results(self, figsize=(15, 10)):
-        """Plot synchronization residuals and quality metrics."""
-        return plot_sync_results(self.mapping, self.ephys_sync, self.behavior_sync, figsize)
+        """Plot synchronization residuals and quality metrics.
+
+        For a Greyware sync this plots the diagnostic pulse match, which needs
+        the pulse cross-check to have succeeded.
+        """
+        mapping = self.mapping
+        if getattr(self, "method", "pulses") == "greyware":
+            mapping = self.mapping.get('pulse_mapping')
+            if mapping is None:
+                raise ValueError("Greyware sync has no pulse match to plot: "
+                                 f"{self.mapping['pulse_check'].get('error')}")
+        return plot_sync_results(mapping, self.ephys_sync, self.behavior_sync, figsize)
 
     def __repr__(self) -> str:
+        detail = (f"n_matches={self.mapping['n_matches']}" if getattr(self, "method", "pulses") == "pulses"
+                  else f"greyware R={self.mapping['rate_hz']:.5f} Hz")
         return (f"DataSyncManager({self.data_manager.animal_id}/{self.data_manager.session_id}, "
-                f"DIO{self.dio_channel}, n_matches={self.mapping['n_matches']})")
+                f"DIO{self.dio_channel}, {detail})")

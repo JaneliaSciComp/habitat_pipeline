@@ -348,9 +348,10 @@ class MultiAnimalSession:
             slope_dev = abs(s.slope - 1.0)
             slope_diff = abs(s.slope - canonical.slope)
             intercept_diff = abs(s.intercept - canonical.intercept)
+            # A Greyware sync is a saved fit, not a regression: r_squared is None.
             ok = (
                 slope_dev < tol_slope_dev_from_one
-                and r2 > min_r_squared
+                and (r2 is None or r2 > min_r_squared)
                 and slope_diff < tol_slope_dev_from_one
             )
             report[aid] = {
@@ -364,7 +365,7 @@ class MultiAnimalSession:
             }
             if not ok:
                 logger.warning(
-                    "Sync inconsistency for animal %s: slope=%.6g r2=%.6g slope_diff=%.6g",
+                    "Sync inconsistency for animal %s: slope=%.6g r2=%s slope_diff=%.6g",
                     aid, s.slope, r2, slope_diff,
                 )
         return report

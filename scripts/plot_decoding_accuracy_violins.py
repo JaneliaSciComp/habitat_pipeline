@@ -33,7 +33,7 @@ Examples
 --------
 ::
 
-    # the three sessions this script was written for
+    # the sessions this script was written for (cohorts 5, 7 and 9)
     python scripts/plot_decoding_accuracy_violins.py
 
     # explicit, with a significance screen
@@ -42,6 +42,11 @@ Examples
         --behavior_type EC --max_opponents 2 \\
         --n_shuffles 1000 --null_mode pooled \\
         --output results/ec_top2_accuracy_violins.png
+
+    # same-group vs other-group opponent, all opponents pooled
+    python scripts/plot_decoding_accuracy_violins.py --label_mode group \
+        --metric balanced_accuracy \
+        --output results/ec_group_balanced_accuracy_violins.png
 """
 
 from __future__ import annotations
@@ -81,19 +86,26 @@ logger = logging.getLogger(__name__)
 COHORT_CONFIGS = {
     "cohort7": "config/default_paths.json",
     "cohort5": "config/cohort5_paths.json",
+    "cohort9": "config/cohort9_paths.json",
 }
 
-#: The three animal/session pairs this summary was commissioned for.
+#: The animal/session pairs this summary was commissioned for. The cohort-9
+#: trio is the 2026-09-29 merge-day morning recording (20260929_095542), the
+#: only cohort-9 recording with both timestamps.dat and scored events.
 DEFAULT_TARGETS = [
     ("rat650", "20250819"),
     ("rat631", "20251216"),
     ("rat630", "20251216"),
+    ("rat4678", "20260929"),
+    ("rat4679", "20260929"),
+    ("rat5675", "20260929"),
 ]
 
 #: Categorical slots 1-3 of the validated default palette. These three
 #: specifically clear the all-pairs CVD and normal-vision floors in both modes;
 #: a fourth group must not simply take the next hue (yellow beside orange fails
-#: all-pairs) -- facet instead.
+#: all-pairs) -- facet instead. Groups are faceted by cohort (a divider and a
+#: cohort label on each panel), and colours restart within each cohort.
 SERIES_COLORS = ["#2a78d6", "#eb6834", "#1baf7a"]
 INK_PRIMARY = "#0b0b0b"
 INK_SECONDARY = "#52514e"
@@ -128,7 +140,14 @@ def _build_parser() -> argparse.ArgumentParser:
                         "encounter). 'any' for every type.")
     p.add_argument("--max_opponents", type=int, default=2,
                    help="Keep the top-N opponents by surviving event count "
-                        "(default: 2).")
+                        "(default: 2). Ignored with --label_mode group, "
+                        "which pools every opponent.")
+    p.add_argument("--label_mode", choices=("opponent", "group"),
+                   default="opponent",
+                   help="'opponent' decodes which opponent (default); 'group' "
+                        "decodes whether the opponent is in the focal rat's "
+                        "own ID-half ('self') or the other one ('others'), "
+                        "see BehavioralEventsData._assign_id_groups.")
     p.add_argument("--metric", choices=("accuracy", "balanced_accuracy"),
                    default="accuracy",
                    help="Per-cell metric to plot (default: accuracy).")
@@ -215,9 +234,47 @@ def resolve_cohort_config(session_id: str, override: Optional[str]) -> Optional[
                                "in COHORT_CONFIGS; using the default.",
                                session_id, cohort)
             return config
-    logger.warning("Session %s is not in the capability manifest; using the "
-                   "default paths config.", session_id)
+    # Cohorts newer than the last manifest build (cohort 9): find the config
+    # whose ephys root holds a recording directory for this session.
+    for cohort, config in COHORT_CONFIGS.items():
+        try:
+            ephys_root = Path(json.loads((REPO_ROOT / config).read_text())["ephys"])
+            if any(ephys_root.glob(f"{session_id}*.rec")):
+                print(f"  cohort      {cohort} (from {ephys_root}; not in the manifest)")
+                return config
+        except (OSError, ValueError, KeyError):
+            continue
+    logger.warning("Session %s is not in the capability manifest or any cohort's "
+                   "ephys root; using the default paths config.", session_id)
     return None
+
+
+def cohort_of_config(config_path: Optional[str]) -> str:
+    """Inverse of ``COHORT_CONFIGS``; ``None`` is the default (cohort 7) config."""
+    for cohort, config in COHORT_CONFIGS.items():
+        if config_path is not None and Path(config_path).as_posix() == config:
+            return cohort
+    return "cohort7" if config_path is None else str(config_path)
+
+
+def _load_result_pickle(path: Path) -> Dict:
+    """Unpickle a cached result, also when it was written under numpy 2.
+
+    numpy 2 pickles arrays by reference to ``numpy._core``; numpy 1.x only
+    has ``numpy.core``, so alias the module names before retrying.
+    """
+    with open(path, "rb") as fh:
+        try:
+            return pickle.load(fh)
+        except ModuleNotFoundError as exc:
+            if "numpy._core" not in str(exc):
+                raise
+    import importlib
+    for name in ("", ".multiarray", ".numeric", "._multiarray_umath"):
+        sys.modules.setdefault(f"numpy._core{name}",
+                               importlib.import_module(f"numpy.core{name}"))
+    with open(path, "rb") as fh:
+        return pickle.load(fh)
 
 
 def report_feasibility(animal_id: str, session_id: str,
@@ -266,8 +323,7 @@ def run_group(animal_id: str, session_id: str, args, params: Dict,
     cache_file = cache_dir / _cache_key(animal_id, session_id, params)
     if cache_file.exists() and not args.force:
         print(f"  cached      {cache_file.name}")
-        with open(cache_file, "rb") as fh:
-            return pickle.load(fh)
+        return _load_result_pickle(cache_file)
 
     config_path = resolve_cohort_config(session_id, args.config_path)
     print(f"  loading     config={config_path or 'config/default_paths.json'}")
@@ -296,6 +352,7 @@ def run_group(animal_id: str, session_id: str, args, params: Dict,
         cv_folds=params["cv_folds"],
         min_events_per_class=params["min_events_per_class"],
         max_opponents=params["max_opponents"],
+        label_mode=params.get("label_mode", "opponent"),
         n_shuffles=params["n_shuffles"],
         null_mode=params["null_mode"],
         alpha=params["alpha"],
@@ -347,6 +404,7 @@ def summarize(results: Dict, metric: str) -> Dict:
         "animal_id": group.get("animal_id", "?"),
         "session_id": group.get("session_id", "?"),
         "recording_id": group.get("recording_id"),
+        "cohort": cohort_of_config(group.get("config_path")),
         "values": values,
         "n_cells": int(values.size),
         "n_total_cells": int(results.get("n_total_cells", 0)),
@@ -408,6 +466,29 @@ def _draw_violins(ax, groups: List[Dict], series: List[np.ndarray],
     ax.set_xlim(0.4, len(series) + 0.6)
 
 
+def _draw_cohort_facets(ax, groups: List[Dict]) -> None:
+    """Divider between consecutive cohorts plus a cohort label over each run.
+
+    Colours repeat once there are more than three groups, so the facet, not
+    the hue, is what tells a cohort-9 rat from an earlier one.
+    """
+    runs = []  # (cohort, first position, last position)
+    for pos, g in enumerate(groups, start=1):
+        if runs and runs[-1][0] == g["cohort"]:
+            runs[-1][2] = pos
+        else:
+            runs.append([g["cohort"], pos, pos])
+    if len(runs) < 2:
+        return
+    for _, _, last in runs[:-1]:
+        ax.axvline(last + 0.5, color=INK_MUTED, linewidth=0.8,
+                   linestyle=(0, (2, 2)), zorder=1)
+    for cohort, first, last in runs:
+        ax.text((first + last) / 2, 1.0, cohort.replace("cohort", "cohort "),
+                transform=ax.get_xaxis_transform(), ha="center", va="bottom",
+                fontsize=8.5, color=INK_SECONDARY)
+
+
 def make_figure(groups: List[Dict], args) -> plt.Figure:
     metric_label = ("Balanced accuracy" if args.metric == "balanced_accuracy"
                     else "Decoding accuracy")
@@ -416,7 +497,9 @@ def make_figure(groups: List[Dict], args) -> plt.Figure:
     delta = [g["values"] - g["baseline"] for g in groups]
 
     fig, (ax_raw, ax_delta) = plt.subplots(
-        1, 2, figsize=(12.5, 6.4), gridspec_kw={"width_ratios": [1, 1]})
+        1, 2, figsize=(max(12.5, 2.2 * len(groups) + 3.5),
+                       6.4 + 0.2 * max(0, len(groups) - 3)),
+        gridspec_kw={"width_ratios": [1, 1]})
     fig.patch.set_facecolor("#fcfcfb")
     for ax in (ax_raw, ax_delta):
         ax.set_facecolor("#fcfcfb")
@@ -451,7 +534,7 @@ def make_figure(groups: List[Dict], args) -> plt.Figure:
     ax_raw.set_ylabel(f"{metric_label} (per cell, cross-validated)",
                       fontsize=10, color=INK_PRIMARY)
     ax_raw.set_title(f"{metric_label} per cell", fontsize=11,
-                     color=INK_PRIMARY, loc="left", pad=8)
+                     color=INK_PRIMARY, loc="left", pad=20)
 
     # ---- right: baseline-corrected -------------------------------------
     _draw_violins(ax_delta, groups, delta, colors)
@@ -463,7 +546,10 @@ def make_figure(groups: List[Dict], args) -> plt.Figure:
     ax_delta.set_ylabel(f"{metric_label} − {groups[0]['baseline_name']} baseline",
                         fontsize=10, color=INK_PRIMARY)
     ax_delta.set_title("Baseline-corrected (comparable across sessions)",
-                       fontsize=11, color=INK_PRIMARY, loc="left", pad=8)
+                       fontsize=11, color=INK_PRIMARY, loc="left", pad=20)
+
+    for ax in (ax_raw, ax_delta):
+        _draw_cohort_facets(ax, groups)
 
     # ---- direct labels under each violin -------------------------------
     for ax, series in ((ax_raw, raw), (ax_delta, delta)):
@@ -498,9 +584,14 @@ def make_figure(groups: List[Dict], args) -> plt.Figure:
             f"{g['baseline_name']} baseline {g['baseline']:.1%}")
     caption = "\n".join(caption_rows)
 
+    if args.label_mode == "group":
+        title = (f"Group-identity decoding from single cells — {btype} events, "
+                 f"opponent in own vs other ID-half group")
+    else:
+        title = (f"Opponent-identity decoding from single cells — {btype} events, "
+                 f"top {args.max_opponents} opponents")
     fig.suptitle(
-        f"Opponent-identity decoding from single cells — {btype} events, "
-        f"top {args.max_opponents} opponents",
+        title,
         fontsize=13.5, color=INK_PRIMARY, x=0.012, ha="left", y=0.985)
     fig.text(0.012, 0.935,
              f"Per-cell cross-validated LDA ({args.cv_folds}-fold), "
@@ -511,7 +602,10 @@ def make_figure(groups: List[Dict], args) -> plt.Figure:
     fig.text(0.012, 0.012, caption, fontsize=7.8, color=INK_SECONDARY,
              ha="left", va="bottom", linespacing=1.5)
 
-    fig.tight_layout(rect=(0.0, 0.10, 1.0, 0.92))
+    # One caption line per group sits under the tick labels; reserve room
+    # for all of them (0.10 was sized for three groups).
+    caption_frac = 0.10 * (6.4 / fig.get_figheight()) * len(groups) / 3
+    fig.tight_layout(rect=(0.0, max(0.10, caption_frac), 1.0, 0.92))
     return fig
 
 
@@ -584,6 +678,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         "alpha": args.alpha,
         "seed": args.seed,
     }
+    if args.label_mode == "group":
+        # Only added when not the default, so opponent-mode cache keys (and
+        # the pickles behind them) stay valid.
+        params["label_mode"] = "group"
+        params["max_opponents"] = None
+        args.max_opponents = None
 
     print("Gates")
     if args.skip_holdout_check:

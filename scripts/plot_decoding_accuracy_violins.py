@@ -173,6 +173,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--null_mode", choices=("per_cell", "pooled"),
                    default="per_cell")
     p.add_argument("--alpha", type=float, default=0.05)
+    p.add_argument("--select_uncorrected_p", type=float, default=None,
+                   metavar="P",
+                   help="Plot only cells whose own permutation p-value is "
+                        "< P, with no correction across cells. Needs "
+                        "--n_shuffles and --null_mode per_cell. With 100 "
+                        "shuffles, P=0.05 keeps cells whose accuracy beats "
+                        "more than 95 of their own 100 shuffles; expect ~P "
+                        "of cells to pass by chance alone.")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--output", type=str,
                    default="results/decoding_accuracy_violins.png",
@@ -374,13 +382,28 @@ def run_group(animal_id: str, session_id: str, args, params: Dict,
 # Summarising a group for the plot
 # ---------------------------------------------------------------------------
 
-def summarize(results: Dict, metric: str) -> Dict:
-    """Pull the per-cell metric plus the baselines a reader needs."""
+def summarize(results: Dict, metric: str,
+              select_uncorrected_p: Optional[float] = None) -> Dict:
+    """Pull the per-cell metric plus the baselines a reader needs.
+
+    With ``select_uncorrected_p``, only cells whose own (uncorrected)
+    permutation p-value is below it are kept; ``n_tested`` keeps the count
+    they were selected from.
+    """
     cell_results = results["cell_results"]
-    values = np.array([
-        cell_results[cid][metric] for cid in results["successful_cells"]
-        if np.isfinite(cell_results[cid].get(metric, np.nan))
-    ], dtype=float)
+    sig = results.get("significance") or {}
+    cells = [cid for cid in results["successful_cells"]
+             if np.isfinite(cell_results[cid].get(metric, np.nan))]
+    n_tested = len(cells)
+    rejected: List = []
+    if select_uncorrected_p is not None:
+        passed = [cid for cid in cells
+                  if sig.get(cid, {}).get("p_value", 1.0) < select_uncorrected_p]
+        rejected = [cid for cid in cells if cid not in set(passed)]
+        cells = passed
+    values = np.array([cell_results[cid][metric] for cid in cells], dtype=float)
+    values_rejected = np.array([cell_results[cid][metric] for cid in rejected],
+                               dtype=float)
 
     classes = list(results["behavioral_summary"]["unique_classes"])
     counts = results["behavioral_summary"]["class_counts"]
@@ -395,7 +418,6 @@ def summarize(results: Dict, metric: str) -> Dict:
         baseline = float(results.get("population_baseline_accuracy", np.nan))
         baseline_name = "majority class"
 
-    sig = results.get("significance") or {}
     n_sig = sum(1 for cid in results["successful_cells"]
                 if sig.get(cid, {}).get("significant"))
 
@@ -406,7 +428,10 @@ def summarize(results: Dict, metric: str) -> Dict:
         "recording_id": group.get("recording_id"),
         "cohort": cohort_of_config(group.get("config_path")),
         "values": values,
+        "values_rejected": values_rejected,
         "n_cells": int(values.size),
+        "n_tested": n_tested,
+        "selected_p": select_uncorrected_p,
         "n_total_cells": int(results.get("n_total_cells", 0)),
         "n_events": int(results["behavioral_summary"]["n_events"]),
         "classes": [str(c) for c in classes],
@@ -437,11 +462,28 @@ def _style_axes(ax) -> None:
 
 
 def _draw_violins(ax, groups: List[Dict], series: List[np.ndarray],
-                  colors: List[str]) -> None:
+                  colors: List[str],
+                  background: Optional[List[np.ndarray]] = None) -> None:
+    """Violins + points for ``series``; ``background`` (cells that failed a
+    selection) is drawn as grey points behind them, with no violin or
+    summary, so the selected distribution is shown against the whole
+    population it came from."""
     positions = np.arange(1, len(series) + 1)
-    parts = ax.violinplot(series, positions=positions, widths=0.72,
-                          showextrema=False, showmedians=False)
-    for body, color in zip(parts["bodies"], colors):
+    if background is not None:
+        bg_rng = np.random.default_rng(1)
+        for pos, vals in zip(positions, background):
+            if vals.size:
+                ax.scatter(pos + bg_rng.uniform(-0.22, 0.22, size=vals.size), vals,
+                           s=7, color="#b5b4ae", alpha=0.45, linewidths=0,
+                           zorder=2.5)
+    # violinplot rejects empty arrays (a selection can leave a group with no
+    # cells) and a KDE needs at least two points; those get points only.
+    drawable = [i for i, vals in enumerate(series) if vals.size >= 2]
+    parts = (ax.violinplot([series[i] for i in drawable],
+                           positions=positions[drawable], widths=0.72,
+                           showextrema=False, showmedians=False)
+             if drawable else {"bodies": []})
+    for body, color in zip(parts["bodies"], [colors[i] for i in drawable]):
         body.set_facecolor(color)
         body.set_edgecolor(color)
         body.set_alpha(0.22)
@@ -506,7 +548,11 @@ def make_figure(groups: List[Dict], args) -> plt.Figure:
         _style_axes(ax)
 
     # ---- left: raw ------------------------------------------------------
-    _draw_violins(ax_raw, groups, raw, colors)
+    selecting = any(g.get("selected_p") is not None for g in groups)
+    raw_bg = [g["values_rejected"] for g in groups] if selecting else None
+    delta_bg = ([g["values_rejected"] - g["baseline"] for g in groups]
+                if selecting else None)
+    _draw_violins(ax_raw, groups, raw, colors, raw_bg)
     chances = {round(g["chance"], 6) for g in groups}
     if len(chances) == 1:
         chance = chances.pop()
@@ -528,6 +574,9 @@ def make_figure(groups: List[Dict], args) -> plt.Figure:
                 label=f"{groups[0]['baseline_name']} baseline")
     ax_raw.plot([], [], color=INK_MUTED, linestyle=(0, (4, 3)), linewidth=1.2,
                 label=chance_label)
+    if selecting:
+        ax_raw.scatter([], [], s=12, color="#b5b4ae", linewidths=0,
+                       label=f"not selected (p ≥ {groups[0]['selected_p']:g})")
     ax_raw.legend(loc="upper left", frameon=False, fontsize=8,
                   labelcolor=INK_SECONDARY)
 
@@ -537,7 +586,7 @@ def make_figure(groups: List[Dict], args) -> plt.Figure:
                      color=INK_PRIMARY, loc="left", pad=20)
 
     # ---- right: baseline-corrected -------------------------------------
-    _draw_violins(ax_delta, groups, delta, colors)
+    _draw_violins(ax_delta, groups, delta, colors, delta_bg)
     ax_delta.axhline(0.0, color=INK_PRIMARY, linewidth=1.4, zorder=2)
     ax_delta.plot([], [], color=INK_PRIMARY, linewidth=1.4,
                   label=f"zero = {groups[0]['baseline_name']} baseline")
@@ -560,11 +609,16 @@ def make_figure(groups: List[Dict], args) -> plt.Figure:
                           if vals.size else np.nan)
             lines = [
                 f"{g['animal_id']}\n{g['session_id']}",
-                f"n={g['n_cells']}/{g['n_total_cells']} cells",
+                (f"{g['n_cells']}/{g['n_tested']} cells "
+                 f"({g['n_cells'] / max(g['n_tested'], 1):.0%})"
+                 if g["selected_p"] is not None
+                 else f"n={g['n_cells']}/{g['n_total_cells']} cells"),
                 f"mean {mean:+.1%}" if ax is ax_delta else f"mean {mean:.1%}",
-                f"{frac_above:.0%} above",
             ]
-            if g["n_significant"] is not None:
+            # Selected cells are above baseline by construction.
+            if g["selected_p"] is None:
+                lines.append(f"{frac_above:.0%} above")
+            if g["n_significant"] is not None and g["selected_p"] is None:
                 lines.append(f"{g['n_significant']} sig.")
             labels.append("\n".join(lines))
         ax.set_xticklabels(labels, fontsize=8.5, color=INK_SECONDARY)
@@ -597,7 +651,12 @@ def make_figure(groups: List[Dict], args) -> plt.Figure:
              f"Per-cell cross-validated LDA ({args.cv_folds}-fold), "
              f"window {args.time_window[0]:+.1f} to {args.time_window[1]:+.1f} s "
              f"around event {args.alignment}, {args.time_bin_size:g} s bins, "
-             f"{'quality-filtered' if args.use_quality_cells else 'all'} cells",
+             f"{'quality-filtered' if args.use_quality_cells else 'all'} cells"
+             + (f"; only cells beating their own label-shuffle null at "
+                f"uncorrected p<{args.select_uncorrected_p:g} "
+                f"({args.n_shuffles} shuffles; ~{args.select_uncorrected_p:.0%} "
+                f"expected by chance)"
+                if args.select_uncorrected_p is not None else ""),
              fontsize=9, color=INK_SECONDARY, ha="left")
     fig.text(0.012, 0.012, caption, fontsize=7.8, color=INK_SECONDARY,
              ha="left", va="bottom", linespacing=1.5)
@@ -616,7 +675,7 @@ def make_figure(groups: List[Dict], args) -> plt.Figure:
 def print_table(groups: List[Dict], metric: str) -> None:
     header = (f"{'animal/session':<24}{'cells':>8}{'events':>8}"
               f"{'mean':>9}{'median':>9}{'best':>9}{'baseline':>10}"
-              f"{'>base':>8}{'sig':>6}")
+              f"{'>base':>8}{'sig/sel':>10}")
     if metric == "balanced_accuracy":
         note = "'baseline' is 1/n_classes, which balanced accuracy genuinely has"
     else:
@@ -629,11 +688,17 @@ def print_table(groups: List[Dict], metric: str) -> None:
         vals = g["values"]
         above = np.sum(vals > g["baseline"]) if vals.size else 0
         sig = "-" if g["n_significant"] is None else str(g["n_significant"])
+        if g["selected_p"] is not None:
+            sig = f"{g['n_cells']}/{g['n_tested']}"
+        if vals.size == 0:
+            print(f"{g['animal_id'] + '/' + g['session_id']:<24}"
+                  f"{0:>8}{g['n_events']:>8}  no cells selected{sig:>30}")
+            continue
         print(f"{g['animal_id'] + '/' + g['session_id']:<24}"
               f"{g['n_cells']:>8}{g['n_events']:>8}"
               f"{np.mean(vals):>9.1%}{np.median(vals):>9.1%}"
               f"{np.max(vals):>9.1%}{g['baseline']:>10.1%}"
-              f"{above:>8}{sig:>6}")
+              f"{above:>8}{sig:>10}")
     print()
     for g in groups:
         res = g["resolution"]
@@ -648,7 +713,7 @@ def print_table(groups: List[Dict], metric: str) -> None:
         if pop is not None:
             print(f"  {g['animal_id']}/{g['session_id']}: population-level "
                   f"p={pop.get('p_value'):.4g} "
-                  f"(observed mean {pop.get('observed'):.1%})")
+                  f"(observed mean {pop.get('observed_mean_accuracy'):.1%})")
 
 
 # ---------------------------------------------------------------------------
@@ -685,6 +750,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         params["max_opponents"] = None
         args.max_opponents = None
 
+    if args.select_uncorrected_p is not None and (
+            args.n_shuffles <= 0 or args.null_mode != "per_cell"):
+        print("--select_uncorrected_p needs --n_shuffles > 0 and "
+              "--null_mode per_cell")
+        return 2
+
     print("Gates")
     if args.skip_holdout_check:
         print("  holdout     SKIPPED by --skip_holdout_check")
@@ -710,7 +781,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             reason = (results or {}).get("error", "unknown error")
             print(f"  FAILED: {reason}")
             continue
-        groups.append(summarize(results, args.metric))
+        groups.append(summarize(results, args.metric, args.select_uncorrected_p))
 
     if not groups:
         print("\nNo group produced a successful result; nothing to plot.")

@@ -71,7 +71,10 @@ for p in (REPO_ROOT, REPO_ROOT / "scripts"):
 
 from ephys._lda_decoding import _prepare_lda_features  # noqa: E402
 from ingestion.data_paths import DataStorageManager  # noqa: E402
+from ephys.decode_event_outcome import decode_event_outcome_population  # noqa: E402
+from ingestion.ephys_sync import DataSyncManager  # noqa: E402
 from ingestion.kilosort_data_import import load_kilosort_data  # noqa: E402
+from video.behavioral_events import load_behavioral_events  # noqa: E402
 import plot_decoding_accuracy_violins as violins  # noqa: E402
 
 SIG_COLOR = "#d1352b"
@@ -90,6 +93,16 @@ def _build_parser() -> argparse.ArgumentParser:
                    select_uncorrected_p=0.05)
     p.add_argument("--auroc_cache_dir", type=str,
                    default=".gui_cache/auroc_histograms")
+    p.add_argument("--decoder", choices=("identity", "outcome"),
+                   default="identity",
+                   help="'identity' reads the violins script's opponent/group "
+                        "cache; 'outcome' decodes winner vs loser and caches "
+                        "it here first (needs --n_shuffles for significance).")
+    p.add_argument("--outcome_behavior_type", default="any",
+                   help="Outcome mode only: behaviour type to restrict to "
+                        "(default any = every event with a winner and a loser).")
+    p.add_argument("--outcome_alignment", choices=("start", "end"),
+                   default="end", help="Outcome mode only (default end).")
     p.add_argument("--hist_metric",
                    choices=("auroc", "accuracy", "balanced_accuracy"),
                    default="auroc",
@@ -129,6 +142,52 @@ def cell_aurocs(results: Dict, ks_data, params: Dict) -> Dict:
         out[cid] = {"auroc": float(roc_auc_score(y, scores)),
                     "pooled_accuracy": float(np.mean(preds == labels))}
     return out
+
+
+def run_outcome(animal_id: str, session_id: str, args, params: Dict) -> bool:
+    """Make sure an outcome decode with significance is cached for this rat.
+
+    Writes to the same cache directory and key scheme as the violins script
+    (``params`` carries ``decoder='outcome'``, so keys never collide with
+    the identity runs), after which ``collect`` reads it like any other.
+    Returns False when the decoder refuses (e.g. too few winner/loser events).
+    """
+    cache_file = Path(args.cache_dir) / violins._cache_key(animal_id, session_id, params)
+    if not cache_file.is_absolute():
+        cache_file = REPO_ROOT / cache_file
+    if cache_file.exists() and not args.force:
+        return True
+
+    config_path = violins.resolve_cohort_config(session_id, args.config_path)
+    dm = DataStorageManager(animal_id, session_id, config_path=config_path)
+    ks_data = load_kilosort_data(dm.get_kilosort_path())
+    behavior_data = load_behavioral_events(dm.get_behavioral_event_files(),
+                                           session_id=dm.session_id)
+    sync = DataSyncManager(dm, dio_channel=1)
+    behavior_data.synchronize_with_ephys(sync, create_new_columns=True)
+    results = decode_event_outcome_population(
+        ks_data=ks_data, behavior_data=behavior_data,
+        animal_of_interest=animal_id,
+        behavior_type=params["behavior_type"],
+        use_quality_cells=params["use_quality_cells"],
+        alignment=params["alignment"],
+        time_window=tuple(params["time_window"]),
+        time_bin_size=params["time_bin_size"],
+        cv_folds=params["cv_folds"],
+        min_events_per_class=params["min_events_per_class"],
+        n_shuffles=params["n_shuffles"], null_mode=params["null_mode"],
+        alpha=params["alpha"], seed=params["seed"])
+    if results.get("status") != "success":
+        print(f"  outcome decode FAILED: {results.get('error', 'unknown error')}")
+        return False
+    results["_group"] = {"animal_id": animal_id, "session_id": session_id,
+                         "recording_id": dm.recording_id,
+                         "config_path": config_path}
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(cache_file, "wb") as fh:
+        pickle.dump(results, fh)
+    print(f"  cached ->   {cache_file.name}")
+    return True
 
 
 def collect(animal_id: str, session_id: str, args, params: Dict) -> Optional[Dict]:
@@ -341,14 +400,32 @@ def main(argv: Optional[List[str]] = None) -> int:
         # mode, which pools every opponent into self/others.
         params["label_mode"] = "group"
         params["max_opponents"] = None
+    if args.decoder == "outcome":
+        # Winner vs loser of the focal rat's own events. The --behavior_type
+        # default (EC) is the identity runs' choice; outcome uses every event
+        # with a winner and a loser unless --outcome_behavior_type says
+        # otherwise. Aligned to event end by default, like the decoder.
+        params.update(decoder="outcome", max_opponents=None,
+                      behavior_type=(None if args.outcome_behavior_type == "any"
+                                     else args.outcome_behavior_type),
+                      alignment=args.outcome_alignment)
+        params.pop("label_mode", None)
     metric_name = {"auroc": "auROC", "accuracy": "Accuracy",
                    "balanced_accuracy": "Balanced accuracy"}[args.hist_metric]
-    xlabel = (f"{metric_name}\n(group identity)" if args.label_mode == "group"
-              else f"{metric_name}\n(opponent identity)")
+    what = {"outcome": "win / loss outcome"}.get(
+        args.decoder, "group identity" if args.label_mode == "group"
+        else "opponent identity")
+    xlabel = f"{metric_name}\n({what})"
+
+    if args.decoder == "outcome" and not args.skip_holdout_check:
+        violins.assert_targets_not_held_out(targets)
 
     groups = []
     for animal_id, session_id in targets:
         print(f"\n=== {animal_id} / {session_id}")
+        if args.decoder == "outcome" and not run_outcome(
+                animal_id, session_id, args, params):
+            continue
         g = collect(animal_id, session_id, args, params)
         if g is not None:
             groups.append(g)

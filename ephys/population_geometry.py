@@ -973,13 +973,21 @@ class PopulationGeometryAnalyzer:
             gridspec_kw={'width_ratios': [3, 1]},
         )
 
+        # All text in this figure is 1.5x the ambient default.
+        fs = plt.rcParams['font.size'] * 1.5
+        fs_title = fs * 1.2
+
         sns.heatmap(
             sim, ax=ax_hm,
             xticklabels=list(opponents), yticklabels=list(opponents),
             cmap=cmap, vmin=vmin, vmax=vmax,
             annot=annotate, fmt='.2f', square=True,
+            annot_kws={'size': fs},
             cbar_kws={'label': 'Pearson r'},
         )
+        cbar = ax_hm.collections[0].colorbar
+        cbar.set_label('Pearson r', fontsize=fs)
+        cbar.ax.tick_params(labelsize=fs)
 
         windows_str = ', '.join(f'({s:g}, {e:g})s' for s, e in params['windows'])
         title_main = params.get('analysis_title', 'Opponent Representation Similarity')
@@ -987,10 +995,13 @@ class PopulationGeometryAnalyzer:
             f"{params['animal_of_interest']} | {params['behavior_type']} events | "
             f"{params['n_cells']} cells | windows: {windows_str}"
         )
-        ax_hm.set_title(f"{title_main}\n{title_sub}", fontsize=12)
-        ax_hm.set_xlabel('Opponent')
-        ax_hm.set_ylabel('Opponent')
+        ax_hm.set_title(f"{title_main}\n{title_sub}", fontsize=fs_title)
+        ax_hm.set_xlabel('Opponent', fontsize=fs)
+        # labelpad keeps 'Opponent' clear of the now-horizontal y tick labels.
+        ax_hm.set_ylabel('Opponent', fontsize=fs, labelpad=12)
+        ax_hm.tick_params(labelsize=fs)
         plt.setp(ax_hm.get_xticklabels(), rotation=45, ha='right')
+        plt.setp(ax_hm.get_yticklabels(), rotation=0, va='center')
 
         categories = ['Within own', 'Within other', 'Between']
         pools = [within_own, within_other, between]
@@ -1015,17 +1026,18 @@ class PopulationGeometryAnalyzer:
         ax_bar.set_xticks(x)
         ax_bar.set_xticklabels(
             [f'{c}\n(n={n})' for c, n in zip(categories, n_pairs)],
-            fontsize=10,
+            fontsize=fs, rotation=45, ha='right',
         )
-        ax_bar.set_ylabel('Pearson r')
+        ax_bar.set_ylabel('Pearson r', fontsize=fs)
+        ax_bar.tick_params(axis='y', labelsize=fs)
         ax_bar.axhline(0, color='gray', linewidth=0.6)
-        ax_bar.set_title('Within- vs between-group', fontsize=12)
+        ax_bar.set_title('Within- vs\nbetween-group', fontsize=fs_title)
         ax_bar.grid(True, axis='y', alpha=0.3)
 
         if grouping_error is not None:
             ax_bar.text(0.5, 0.5, f'Grouping unavailable:\n{grouping_error}',
                         transform=ax_bar.transAxes,
-                        ha='center', va='center', fontsize=10, color='gray')
+                        ha='center', va='center', fontsize=fs, color='gray')
 
         plt.tight_layout(rect=[0, 0.03, 1, 1])
         return fig

@@ -60,6 +60,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter, MaxNLocator
 import numpy as np
+import pandas as pd
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold, cross_val_predict
@@ -79,6 +80,7 @@ import plot_decoding_accuracy_violins as violins  # noqa: E402
 
 SIG_COLOR = "#d1352b"
 NONSIG_COLOR = "#8db4e2"
+MID_COLOR = "#1f4e9c"  # uncorrected p only, between the two above
 INK = "#0b0b0b"
 BINS = np.linspace(0.0, 1.0, 41)
 plt.rcParams["font.family"] = "Arial"
@@ -103,6 +105,17 @@ def _build_parser() -> argparse.ArgumentParser:
                         "(default any = every event with a winner and a loser).")
     p.add_argument("--outcome_alignment", choices=("start", "end"),
                    default="end", help="Outcome mode only (default end).")
+    p.add_argument("--refined_fdr", type=str, default=None, metavar="CSV",
+                   help="Mark cells significant by BH q < --alpha from "
+                        "scripts/refine_permutation_fdr.py's CSV instead of "
+                        "the uncorrected cached p < --select_uncorrected_p.")
+    p.add_argument("--mid_p", type=float, default=None, metavar="P",
+                   help="With --refined_fdr: also mark, in dark blue, cells "
+                        "with that file's (uncorrected) p < P that are not "
+                        "BH-significant.")
+    p.add_argument("--legend_at_peak", action="store_true",
+                   help="Combined figure: put the legend's top edge level "
+                        "with the tallest bar, right of the axes.")
     p.add_argument("--hist_metric",
                    choices=("auroc", "accuracy", "balanced_accuracy"),
                    default="auroc",
@@ -233,15 +246,27 @@ def collect(animal_id: str, session_id: str, args, params: Dict) -> Optional[Dic
 
     cids = list(aucs)
     p_thr = args.select_uncorrected_p
+    mid = None
     if args.hist_metric == "auroc":
         vals = np.array([aucs[c]["auroc"] for c in cids])
     else:
         vals = np.array([cr[c][args.hist_metric] for c in cids], dtype=float)
-    passed = np.array([sig.get(c, {}).get("p_value", 1.0) < p_thr for c in cids])
+    if args.refined_fdr:
+        fdr = pd.read_csv(args.refined_fdr)
+        fdr = fdr[fdr["animal_id"] == animal_id].set_index("cluster_id")
+        missing = [c for c in cids if c not in fdr.index]
+        if missing:
+            raise SystemExit(f"{animal_id}: {len(missing)} cells missing from "
+                             f"{args.refined_fdr}")
+        passed = np.array([bool(fdr.loc[c, "q_value"] < args.alpha) for c in cids])
+        if args.mid_p is not None:
+            mid = np.array([bool(fdr.loc[c, "p_value"] < args.mid_p) for c in cids])
+    else:
+        passed = np.array([sig.get(c, {}).get("p_value", 1.0) < p_thr for c in cids])
     bs = results["behavioral_summary"]
     return {"animal_id": animal_id, "session_id": session_id,
             "cohort": violins.cohort_of_config(results.get("_group", {}).get("config_path")),
-            "auroc": vals, "significant": passed,
+            "auroc": vals, "significant": passed, "mid": mid,
             "baseline": float(results.get("population_baseline_accuracy", np.nan)),
             "class_counts": {str(k): int(v) for k, v in bs["class_counts"].items()}}
 
@@ -265,9 +290,15 @@ def _style(ax, xlim: tuple, labelsize: float) -> None:
 
 
 def draw_hist(ax, auc: np.ndarray, significant: np.ndarray, title: str,
-              p_thr: float, xlim: tuple, big: bool = False,
-              baseline: Optional[float] = None) -> None:
-    n_ns, _ = np.histogram(auc[~significant], bins=BINS)
+              p_thr: str, xlim: tuple, big: bool = False,
+              baseline: Optional[float] = None,
+              mid: Optional[np.ndarray] = None, mid_text: str = "") -> None:
+    # `mid` (optional): cells passing a looser test, drawn dark blue between
+    # the significant base and the rest. Significant cells are never counted
+    # in it.
+    mid = np.zeros_like(significant) if mid is None else (mid & ~significant)
+    n_ns, _ = np.histogram(auc[~significant & ~mid], bins=BINS)
+    n_m, _ = np.histogram(auc[mid], bins=BINS)
     n_s, _ = np.histogram(auc[significant], bins=BINS)
     width = np.diff(BINS)
     frac = significant.mean() if auc.size else 0.0
@@ -276,15 +307,20 @@ def draw_hist(ax, auc: np.ndarray, significant: np.ndarray, title: str,
     # is the significant part of it.
     ax.bar(BINS[:-1], n_s, width=width, align="edge", color=SIG_COLOR,
            edgecolor="white", linewidth=0.6,
-           label=f"Significant cells\n(p < {p_thr:g}, {frac:.0%})")
-    ax.bar(BINS[:-1], n_ns, width=width, align="edge", bottom=n_s,
+           label=f"Significant cells\n({p_thr}, {frac:.0%})")
+    if mid.any():
+        ax.bar(BINS[:-1], n_m, width=width, align="edge", bottom=n_s,
+               color=MID_COLOR, edgecolor="white", linewidth=0.6,
+               label=f"Uncorrected significant\n({mid_text}, "
+                     f"{(mid | significant).mean():.0%})")
+    ax.bar(BINS[:-1], n_ns, width=width, align="edge", bottom=n_s + n_m,
            color=NONSIG_COLOR, edgecolor="white", linewidth=0.6,
            label="All cells")
     ax.axvline(0.5, color=INK, linewidth=0.8, linestyle=(0, (2, 2)), zorder=0)
     if baseline is not None and np.isfinite(baseline):
         ax.axvline(baseline, color=INK, linewidth=1.1, zorder=3,
                    label="Majority class")
-    ax._bar_tops = n_ns + n_s  # read back by _fit_legends
+    ax._bar_tops = n_ns + n_m + n_s  # read back by _fit_legends
     ax.set_ylim(0, int(ax._bar_tops.max()) * 1.05)
     ax.yaxis.set_major_locator(MaxNLocator(nbins=5, integer=True,
                                            steps=[1, 2, 2.5, 5, 10]))
@@ -292,6 +328,7 @@ def draw_hist(ax, auc: np.ndarray, significant: np.ndarray, title: str,
     ax.set_box_aspect(1)  # square plotting area
     handles, labels = ax.get_legend_handles_labels()
     order = ([labels.index("All cells")]
+             + [i for i, l in enumerate(labels) if l.startswith("Uncorrected")]
              + [i for i, l in enumerate(labels) if l.startswith("Significant")]
              + [i for i, l in enumerate(labels) if l == "Majority class"])
     # Opaque so the 0.5 / majority guide lines don't run through the text.
@@ -336,8 +373,8 @@ def _fit_legends(fig: plt.Figure, axes) -> None:
                 line.set_ydata([0, bb.y0 - 0.01])
 
 
-def figure_by_rat(groups: List[Dict], p_thr: float, xlabel: str,
-                  show_baseline: bool = False) -> plt.Figure:
+def figure_by_rat(groups: List[Dict], p_thr: str, xlabel: str,
+                  show_baseline: bool = False, mid_text: str = "") -> plt.Figure:
     ncol = min(3, len(groups))
     nrow = int(np.ceil(len(groups) / ncol))
     fig, axes = plt.subplots(nrow, ncol, figsize=(3.1 * ncol, 3.1 * nrow),
@@ -349,7 +386,8 @@ def figure_by_rat(groups: List[Dict], p_thr: float, xlabel: str,
     for ax, g in zip(axes.flat, groups):
         draw_hist(ax, g["auroc"], g["significant"],
                   f"{g['animal_id']} ({g['cohort'].replace('cohort', 'cohort ')})",
-                  p_thr, xlim, baseline=g["baseline"] if show_baseline else None)
+                  p_thr, xlim, baseline=g["baseline"] if show_baseline else None,
+                  mid=g.get("mid"), mid_text=mid_text)
     for ax in axes.flat[len(groups):]:
         ax.set_visible(False)
     for ax in axes[:, 0]:
@@ -362,14 +400,31 @@ def figure_by_rat(groups: List[Dict], p_thr: float, xlabel: str,
     return fig
 
 
-def figure_combined(groups: List[Dict], p_thr: float, xlabel: str) -> plt.Figure:
+def figure_combined(groups: List[Dict], p_thr: str, xlabel: str,
+                    mid_text: str = "", legend_at_peak: bool = False) -> plt.Figure:
     auc = np.concatenate([g["auroc"] for g in groups])
     sig = np.concatenate([g["significant"] for g in groups])
+    mid = (np.concatenate([g["mid"] for g in groups])
+           if all(g.get("mid") is not None for g in groups) else None)
     fig, ax = plt.subplots(figsize=(4.2, 4.2))
-    draw_hist(ax, auc, sig, f"{len(groups)} rats pooled", p_thr, _xlim(auc),
-              big=True)
+    title = (f"{len(groups)} rats pooled" if len(groups) > 1 else
+             f"{groups[0]['animal_id']} "
+             f"({groups[0]['cohort'].replace('cohort', 'cohort ')})")
+    draw_hist(ax, auc, sig, title, p_thr, _xlim(auc),
+              big=True, mid=mid, mid_text=mid_text)
     ax.set_ylabel("Cell count", fontsize=12)
     ax.set_xlabel(xlabel, fontsize=12)
+    if legend_at_peak:
+        # Legend top level with the tallest bar, pushed out past the right
+        # edge of the axes (there is no right spine), so the y range only
+        # needs to fit the bars.
+        leg = ax.get_legend()
+        leg.borderaxespad = 0.0
+        leg.borderpad = 0.0
+        frac = ax._bar_tops.max() / ax.get_ylim()[1]
+        leg.set_bbox_to_anchor((1.12, frac), transform=ax.transAxes)
+        fig.tight_layout()
+        return fig
     for _ in range(2):
         fig.tight_layout()
         _fit_legends(fig, [ax])
@@ -432,7 +487,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not groups:
         return 1
 
-    p_thr = args.select_uncorrected_p
+    # Legend text for the red bars.
+    p_thr = (f"q < {args.alpha:g}, BH" if args.refined_fdr
+             else f"p < {args.select_uncorrected_p:g}")
+    mid_text = f"p < {args.mid_p:g}" if args.mid_p is not None else ""
     print(f"\n{'rat':<9}{'cells':>6}{'sig':>5}{'%sig':>7}{'median':>8}"
           f"{'median sig':>12}  classes   [{args.hist_metric}]")
     for g in groups:
@@ -448,8 +506,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     for suffix, fig in (("_by_rat", figure_by_rat(
                             groups, p_thr, xlabel,
-                            show_baseline=args.hist_metric == "accuracy")),
-                        ("_combined", figure_combined(groups, p_thr, xlabel))):
+                            show_baseline=args.hist_metric == "accuracy",
+                            mid_text=mid_text)),
+                        ("_combined", figure_combined(
+                            groups, p_thr, xlabel, mid_text,
+                            legend_at_peak=args.legend_at_peak))):
         base = out.with_name(out.stem + suffix)
         fig.savefig(base.with_suffix(".png"), dpi=300, bbox_inches="tight")
         fig.savefig(base.with_suffix(".pdf"), bbox_inches="tight")

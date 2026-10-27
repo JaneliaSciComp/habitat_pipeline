@@ -17,7 +17,7 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-SAMPLE_RATE = 30000.0
+from ingestion._conventions import SAMPLE_RATE, SPIKE_TEMPLATE_OFFSET
 
 # Default firing-pattern thresholds used by downstream decoders (LDA, etc.)
 # when none are supplied. Stricter than the defaults of
@@ -566,7 +566,7 @@ def _load_spike_data(ks_folder: Path):
 
     logger.info("Loading spike data...")
     # Align with template center. Signed first: an unsigned array would wrap.
-    spike_times = np.load(spike_times_path).astype(np.int64) - 31
+    spike_times = np.load(spike_times_path).astype(np.int64) - SPIKE_TEMPLATE_OFFSET
     spike_clusters = np.load(spike_clusters_path)
     # A spike in the first 31 samples now has a negative index, which numpy
     # would wrap to the end of timestamps.dat — misplacing it at the end of

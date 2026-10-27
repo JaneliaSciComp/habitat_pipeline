@@ -13,6 +13,12 @@ from pathlib import Path
 from typing import NamedTuple, Optional, List, Dict
 import pandas as pd
 
+from ingestion._conventions import (
+    FULL_RECORDING_ID_RE as _FULL_RECORDING_ID_RE,
+    RECORDING_STAMP_RE as _RECORDING_STAMP_RE,
+    parse_session_date as _parse_session_date,
+)
+
 logger = logging.getLogger(__name__)
 
 # Bumped to 2 when recording-level resolution landed: a v1 cache holds a
@@ -26,15 +32,6 @@ logger = logging.getLogger(__name__)
 # v3 entry's ``pulse_log_path`` may name the hard-coded ``pulse_log.txt``.
 _CACHE_VERSION = 4
 _DEFAULT_CACHE_DIR = Path(__file__).parent.parent / ".cache" / "data_paths"
-
-#: The timestamp embedded in a recording's on-disk prefix. Trodes writes
-#: ``<YYYYmmdd>_<HHMMSS>`` and every artifact for one recording shares it.
-_RECORDING_STAMP_RE = re.compile(r'(20\d{6}_\d{6})')
-
-#: A query that is exactly a recording stamp names one recording and nothing
-#: else, so failing to find it must raise rather than fall back to the day's
-#: primary recording.
-_FULL_RECORDING_ID_RE = re.compile(r'20\d{6}_\d{6}')
 
 #: Prefix assumed when an animal directory holds no ``*.kilosort`` directory at
 #: all. Preserves the pre-recording-discovery behaviour of returning a path
@@ -78,27 +75,6 @@ def _load_config(config_path: Optional[str] = None) -> dict:
         raise ValueError(f"Invalid JSON in configuration file: {e}")
     
     return config
-
-
-def _parse_session_date(session_id: str) -> str:
-    """
-    Extract the 8-digit date prefix from a session_id.
-
-    Args:
-        session_id: Session identifier (e.g., "20251210" or "20251210_110059")
-
-    Returns:
-        str: 8-character date string (YYYYMMDD)
-
-    Raises:
-        ValueError: If session_id is too short or doesn't start with 8 digits
-    """
-    if len(session_id) < 8:
-        raise ValueError(f"Session ID too short to extract date: {session_id}")
-    session_date = session_id[:8]
-    if not session_date.isdigit():
-        raise ValueError(f"Could not extract valid date from session_id: {session_id}")
-    return session_date
 
 
 class Recording(NamedTuple):

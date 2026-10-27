@@ -29,6 +29,8 @@ from typing import Optional
 
 import numpy as np
 
+from ingestion._conventions import SAMPLE_RATE
+
 logger = logging.getLogger(__name__)
 
 FITS_PATH = Path(__file__).parent / "Sync" / "greyware_fits.json"
@@ -58,7 +60,7 @@ def load_greyware_fit(recording_id: str, fits_path: Optional[Path] = None) -> di
 
 
 def fit_to_linear(fit: dict, latency_s: float = DEFAULT_LATENCY_S,
-                  sample_rate: float = 30000.0):
+                  sample_rate: float = SAMPLE_RATE):
     """Express a SysClock fit as ``(slope, intercept)`` on ephys seconds.
 
     ``behavior_s = slope * ephys_s + intercept`` with ``ephys_s = count / sample_rate``.

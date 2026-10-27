@@ -3,12 +3,12 @@ import logging
 import numpy as np
 from scipy import stats
 
+from ingestion._conventions import SAMPLE_RATE
 from ingestion.data_paths import DataStorageManager
 from ingestion.trodes_to_python import read_trodes_dat
 
 logger = logging.getLogger(__name__)
 
-SAMPLE_RATE = 30000.0  # Hz
 
 
 def load_ephys_sync(data_manager, dio_channel=1):

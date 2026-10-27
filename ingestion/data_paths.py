@@ -32,6 +32,7 @@ from ingestion._conventions import (
     RECORDING_STAMP_RE as _RECORDING_STAMP_RE,
     parse_session_date as _parse_session_date,
 )
+from ingestion.errors import DataRootUnavailable, RecordingNotFound
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +222,7 @@ def _select_recording(recordings: List[Recording], session_id: str,
         return exact[0]
 
     if not exact and _FULL_RECORDING_ID_RE.fullmatch(session_id):
-        raise FileNotFoundError(
+        raise RecordingNotFound(
             f"No recording '{session_id}' in {session_dir.name}; it holds "
             f"{', '.join(sorted(r.recording_id for r in recordings))}")
 
@@ -294,7 +295,9 @@ def _resolve_session_animal(animal_id: str, session_id: str, config: dict) -> Li
     ephys_base = _root(config, 'ephys')
     session_matches = _matching_session_dirs(ephys_base, session_id)
     if not session_matches:
-        raise FileNotFoundError(f"No session directory found matching '{session_id}' in {ephys_base}")
+        if not ephys_base.exists():
+            raise DataRootUnavailable(f"Ephys directory not found: {ephys_base}")
+        raise RecordingNotFound(f"No session directory found matching '{session_id}' in {ephys_base}")
     only_one_day_dir = len(session_matches) == 1
 
     results: List[_ResolvedRecording] = []
@@ -303,7 +306,7 @@ def _resolve_session_animal(animal_id: str, session_id: str, config: dict) -> Li
         animal_matches = _find_matching_directories(session_dir, animal_id)
         if not animal_matches:
             if only_one_day_dir:
-                raise FileNotFoundError(f"No animal directory found matching '{animal_id}' in {session_dir}")
+                raise RecordingNotFound(f"No animal directory found matching '{animal_id}' in {session_dir}")
             continue
         if len(animal_matches) > 1:
             raise ValueError(f"Multiple animal directories found matching '{animal_id}': {animal_matches}")
@@ -315,7 +318,7 @@ def _resolve_session_animal(animal_id: str, session_id: str, config: dict) -> Li
             continue
         try:
             selected = _select_recording(recordings, session_id, session_dir)
-        except (ValueError, FileNotFoundError):
+        except (ValueError, RecordingNotFound):
             # With several candidate .rec directories the recording may live
             # in one of the others; with only one there is nowhere left to
             # look and the caller needs the reason.
@@ -325,7 +328,7 @@ def _resolve_session_animal(animal_id: str, session_id: str, config: dict) -> Li
         results.append(_ResolvedRecording(selected, recordings))
 
     if not results:
-        raise FileNotFoundError(f"No animal directory found matching '{animal_id}' in any of the matched sessions")
+        raise RecordingNotFound(f"No animal directory found matching '{animal_id}' in any of the matched sessions")
     return results
 
 
@@ -415,7 +418,7 @@ def get_animals_and_sessions(config_path: Optional[str] = None,
     config = _config or load_config(config_path)
     ephys_base = _root(config, 'ephys')
     if not ephys_base.exists():
-        raise FileNotFoundError(f"Ephys directory not found: {ephys_base}")
+        raise DataRootUnavailable(f"Ephys directory not found: {ephys_base}")
 
     rows = []
     try:
@@ -447,12 +450,15 @@ def get_animals_and_sessions(config_path: Optional[str] = None,
     return df
 
 
-def verify_kilosort_path(kilosort_path: Path, check_files: bool = True) -> bool:
+def verify_kilosort_path(kilosort_path: Path, check_files: bool = True,
+                         check_loadable: bool = False) -> bool:
     """True if *kilosort_path* exists and (with *check_files*) holds the spike files.
 
-    Only ``spike_times.npy`` / ``spike_clusters.npy`` are checked, so True
-    does not guarantee :func:`ingestion.kilosort_data_import.load_kilosort_data`
-    succeeds: it also needs a ``*.timestamps.dat`` beside ``kilosort4/``.
+    ``check_files`` looks only for ``spike_times.npy`` / ``spike_clusters.npy``,
+    which does not mean :func:`ingestion.kilosort_data_import.load_kilosort_data`
+    will succeed: it also needs a ``*.timestamps.dat`` beside ``kilosort4/``,
+    missing for 31 of the 94 recordings with spike files. ``check_loadable``
+    adds that check.
     """
     if not kilosort_path.exists():
         logger.error("Kilosort directory does not exist: %s", kilosort_path)
@@ -464,6 +470,10 @@ def verify_kilosort_path(kilosort_path: Path, check_files: bool = True) -> bool:
         if missing_files:
             logger.error("Missing required Kilosort files in %s: %s", kilosort_path, ', '.join(missing_files))
             return False
+
+    if check_loadable and not any(kilosort_path.parent.glob("*.timestamps.dat")):
+        logger.error("No '*.timestamps.dat' beside %s; spikes cannot be placed on the clock", kilosort_path)
+        return False
 
     logger.info("Kilosort path verified: %s", kilosort_path)
     return True
@@ -483,7 +493,7 @@ def get_video_files_by_date(session_id: str, config_path: Optional[str] = None,
     config = _config or load_config(config_path)
     video_base = _root(config, 'video')
     if not video_base.exists():
-        raise FileNotFoundError(f"Video directory not found: {video_base}")
+        raise DataRootUnavailable(f"Video directory not found: {video_base}")
 
     search_directory = video_base if subfolder is None else video_base / subfolder
     if not search_directory.exists():
@@ -565,7 +575,7 @@ def get_tracking_files_by_date(session_id: str, config_path: Optional[str] = Non
     roots = _tracking_roots(config)
     existing_roots = [root for root in roots if root.exists()]
     if not existing_roots:
-        raise FileNotFoundError(
+        raise DataRootUnavailable(
             "Tracking directory not found: " + ", ".join(str(root) for root in roots))
     for root in roots:
         if root not in existing_roots:
@@ -624,7 +634,7 @@ def get_event_files_by_date(session_id: str, config_path: Optional[str] = None,
     config = _config or load_config(config_path)
     events_base = _root(config, 'events')
     if not events_base.exists():
-        raise FileNotFoundError(f"Events directory not found: {events_base}")
+        raise DataRootUnavailable(f"Events directory not found: {events_base}")
 
     session_date = _parse_session_date(session_id)
     patterns = (f"*{session_id}*.csv", f"*{session_date}*.csv")

@@ -31,6 +31,7 @@ import numpy as np
 import pandas as pd
 
 from ingestion._conventions import SAMPLE_RATE, SPIKE_TEMPLATE_OFFSET
+from ingestion.errors import MissingCompanionFile
 from ingestion.trodes_to_python import read_trodes_header
 
 logger = logging.getLogger(__name__)
@@ -458,7 +459,7 @@ def _sample_counts_at(ks_folder: Path, indices: np.ndarray) -> np.ndarray:
     try:
         fpath = next(parent.glob("*.timestamps.dat"))
     except StopIteration:
-        raise FileNotFoundError(f"No '*.timestamps.dat' found in {parent}")
+        raise MissingCompanionFile(f"No '*.timestamps.dat' found in {parent}")
 
     offset = _timestamps_payload_offset(fpath)
     n_bytes = fpath.stat().st_size - offset

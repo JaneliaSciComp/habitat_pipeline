@@ -1,32 +1,72 @@
 """
-Kilosort Data Import Module
+Kilosort 4 import: :class:`KilosortData` and :func:`load_kilosort_data`.
 
-Provides KilosortData (a dataclass holding spike-sorted electrophysiology data)
-and load_kilosort_data() to load it from disk or a DataStorageManager.
+On disk, one recording's spike sorting is ``<stem>.kilosort/kilosort4/`` plus a
+``<stem>.timestamps.dat`` beside it (see ``ingestion/KILOSORT_README.md``).
+``load_kilosort_data`` turns that into a :class:`KilosortData` in five steps:
+
+1. **locate** the ``kilosort4`` folder and read animal/session ids off the path;
+2. **read** ``spike_times.npy`` / ``spike_clusters.npy`` (shifted to the
+   template centre) and the cluster label tables;
+3. **select** the clusters labelled ``good`` — curated ``cluster_info.tsv``
+   when it exists, else Kilosort's own ``cluster_KSLabel.tsv``;
+4. **describe** each selected cluster (peak channel, depth, amplitude, ...);
+5. **convert** spike indices to seconds: ``spike_times.npy`` holds indices into
+   ``timestamps.dat``, whose entries are the day's absolute sample counts, so
+   ``seconds = timestamps[index] / SAMPLE_RATE``.
+
+A pickled copy (``kilosort_*.pkl`` inside ``kilosort4/``) short-circuits all of
+this unless ``force_reload=True``.
 """
 
 import datetime
 import logging
+import mmap
 import pickle
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
 
-logger = logging.getLogger(__name__)
-
 from ingestion._conventions import SAMPLE_RATE, SPIKE_TEMPLATE_OFFSET
+from ingestion.trodes_to_python import read_trodes_header
+
+logger = logging.getLogger(__name__)
 
 # Default firing-pattern thresholds used by downstream decoders (LDA, etc.)
 # when none are supplied. Stricter than the defaults of
 # ``filter_cells_by_firing_patterns`` itself (lower ``max_cv_isi``).
-_DEFAULT_QUALITY_THRESHOLDS: Dict[str, float] = {
+DEFAULT_QUALITY_THRESHOLDS: Dict[str, float] = {
     'min_firing_rate': 0.5,
     'min_presence_ratio': 0.8,
     'max_cv_isi': 5.0,
 }
+
+
+def bin_spike_trains(
+    spike_times_list: List[np.ndarray],
+    bin_size_sec: float,
+    t_start: float,
+    t_end: float,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Bin spike-time arrays into a ``(n_cells, n_bins)`` firing-rate matrix (Hz).
+
+    Bin edges are ``np.arange(t_start, t_end + bin_size_sec, bin_size_sec)``,
+    so the same arguments give the same grid for every caller — which is what
+    lets several animals be binned onto one shared time axis.
+
+    Returns ``(matrix, bin_centers)``.
+    """
+    bin_edges = np.arange(t_start, t_end + bin_size_sec, bin_size_sec)
+    matrix = np.zeros((len(spike_times_list), len(bin_edges) - 1), dtype=np.float64)
+    for i, st in enumerate(spike_times_list):
+        if len(st) > 0:
+            counts, _ = np.histogram(st, bins=bin_edges)
+            matrix[i] = counts / bin_size_sec
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    return matrix, bin_centers
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +153,7 @@ class KilosortData:
 
         Same idea as ``ephys_window``, but computed only over clusters that
         pass ``filter_cells_by_firing_patterns`` (default
-        ``_DEFAULT_QUALITY_THRESHOLDS`` unless overridden via
+        ``DEFAULT_QUALITY_THRESHOLDS`` unless overridden via
         ``filter_kwargs`` — the same defaults ``use_quality_cells=True``
         uses in the decoders). ``ephys_window`` alone can be misleading: a
         single noise-like cluster with pathological ISI statistics (that
@@ -125,7 +165,7 @@ class KilosortData:
         the analysis itself uses quality-filtered cells. Returns
         ``(0.0, 0.0)`` if no cluster passes.
         """
-        thresholds = dict(_DEFAULT_QUALITY_THRESHOLDS)
+        thresholds = dict(DEFAULT_QUALITY_THRESHOLDS)
         thresholds.update(filter_kwargs)
         _, spike_times_list = self.get_filtered_cells_spike_times(**thresholds)
         valid = [st for st in spike_times_list if len(st) > 0]
@@ -302,19 +342,7 @@ class KilosortData:
             t_end = max(
                 (st[-1] for st in spike_times_list if len(st) > 0), default=t_start + 1.0
             )
-
-        bin_edges = np.arange(t_start, t_end + bin_size_sec, bin_size_sec)
-        n_bins = len(bin_edges) - 1
-        n_cells = len(spike_times_list)
-
-        matrix = np.zeros((n_cells, n_bins), dtype=np.float64)
-        for i, st in enumerate(spike_times_list):
-            if len(st) > 0:
-                counts, _ = np.histogram(st, bins=bin_edges)
-                matrix[i] = counts / bin_size_sec
-
-        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-        return matrix, bin_centers
+        return bin_spike_trains(spike_times_list, bin_size_sec, t_start, t_end)
 
     def print_firing_pattern_summary(self, filter_results: Optional[Dict] = None, **filter_kwargs):
         """Print a human-readable summary of quality metrics."""
@@ -399,36 +427,57 @@ def _extract_ids_from_path(ks_folder: Path) -> tuple:
     return animal_id, session_id
 
 
-def _read_timestamps(ks_folder: Path) -> np.ndarray:
-    """Read sample indices from the first ``*.timestamps.dat`` in the parent directory."""
+#: Hand-made timestamps files (the test fixtures) carry 25 plain-text header
+#: lines rather than a Trodes ``<Start settings>`` block. For real Trodes
+#: files the two rules agree: the settings block is exactly 25 lines.
+_PLAIN_HEADER_LINES = 25
+
+
+def _timestamps_payload_offset(fpath: Path) -> int:
+    """Byte offset where a ``*.timestamps.dat``'s uint32 sample counts start."""
+    if fpath.name == "sd_in_env.timestamps.dat":
+        return 0                      # written without a header
+    try:
+        return read_trodes_header(fpath)[1]
+    except ValueError:
+        with open(fpath, "rb") as fid:
+            for _ in range(_PLAIN_HEADER_LINES):
+                fid.readline()
+            return fid.tell()
+
+
+def _sample_counts_at(ks_folder: Path, indices: np.ndarray) -> np.ndarray:
+    """Entries *indices* of the ``*.timestamps.dat`` beside *ks_folder* (uint32 sample counts).
+
+    The file is ~2 GB for a day's recording and only the entries spikes point
+    at are needed, so it is memory-mapped and indexed rather than read. The
+    mapping is closed before returning — on Windows an open map would keep
+    the file locked.
+    """
     parent = ks_folder.parent
     try:
         fpath = next(parent.glob("*.timestamps.dat"))
     except StopIteration:
         raise FileNotFoundError(f"No '*.timestamps.dat' found in {parent}")
 
-    n_header = 25
-    with open(fpath, "rb") as fid:
-        if fpath.name != "sd_in_env.timestamps.dat":
-            for _ in range(n_header):
-                fid.readline()
-        rest = fid.read()
-
-    if len(rest) % 4 != 0:
+    offset = _timestamps_payload_offset(fpath)
+    n_bytes = fpath.stat().st_size - offset
+    if n_bytes % 4 != 0:
         raise ValueError("Timestamps file length (after header) is not a multiple of 4 bytes")
-
-    return np.frombuffer(rest, dtype="<u4").astype(np.uint64)
+    if n_bytes == 0:
+        return np.empty(0, dtype="<u4")[indices]
+    with open(fpath, "rb") as fid, mmap.mmap(fid.fileno(), 0, access=mmap.ACCESS_READ) as mapped:
+        counts = np.frombuffer(mapped, dtype="<u4", offset=offset)
+        try:
+            return counts[indices]          # fancy indexing copies out of the map
+        finally:
+            del counts                      # the map cannot close while viewed
 
 
 def _waveform_to_channel(ks_folder: Path) -> np.ndarray:
-    """Find the channel with the largest peak-to-peak amplitude for each template."""
-    templates = np.load(ks_folder / "templates.npy")
-    n_templates = templates.shape[0]
-    channels = np.empty(n_templates, dtype=int)
-    for i in range(n_templates):
-        ptp = templates[i].max(axis=0) - templates[i].min(axis=0)
-        channels[i] = int(np.argmax(ptp))
-    return channels
+    """Probe site with the largest peak-to-peak template amplitude, per template."""
+    templates = np.load(ks_folder / "templates.npy")      # (n_templates, n_time, n_sites)
+    return np.ptp(templates, axis=1).argmax(axis=1)
 
 
 # ---------------------------------------------------------------------------
@@ -568,7 +617,7 @@ def _load_spike_data(ks_folder: Path):
     # Align with template center. Signed first: an unsigned array would wrap.
     spike_times = np.load(spike_times_path).astype(np.int64) - SPIKE_TEMPLATE_OFFSET
     spike_clusters = np.load(spike_clusters_path)
-    # A spike in the first 31 samples now has a negative index, which numpy
+    # A spike in the first few samples now has a negative index, which numpy
     # would wrap to the end of timestamps.dat — misplacing it at the end of
     # the recording. Drop those few spikes.
     valid = spike_times >= 0
@@ -593,61 +642,71 @@ def _load_spike_data(ks_folder: Path):
 
 
 def _select_clusters(cluster_info, ks_labels):
-    """Return (to_load, curated_cells) boolean arrays selecting 'good' clusters."""
-    ci = cluster_info if cluster_info is not None else ks_labels
-    mask = pd.Series(False, index=ci.index)
-    curated_cells = None
+    """Return ``(to_load, curated_cells)`` for the clusters labelled ``good``.
 
-    if "group" in ci.columns:
-        mask = mask | (ci["group"].astype(str).str.lower() == "good")
-        ci2 = ci.loc[mask, ["group"]]
-        curated_cells = (ci2["group"].astype(str).str.lower() == "good").to_numpy(dtype=bool)
-
-    elif "KSLabel" in ci.columns:
-        mask = mask | (ci["KSLabel"].astype(str).str.lower() == "good")
-    
-
-    return mask.to_numpy(dtype=bool), curated_cells
+    ``to_load`` is a boolean mask over the rows of the label table in use:
+    curated ``cluster_info`` (column ``group``) when present, else Kilosort's
+    ``cluster_KSLabel`` (column ``KSLabel``); the match is case-insensitive.
+    ``curated_cells`` is all-True with one entry per selected cluster when the
+    selection came from a curated ``group`` column, else ``None``.
+    """
+    table = cluster_info if cluster_info is not None else ks_labels
+    for column in ("group", "KSLabel"):
+        if column in table.columns:
+            to_load = (table[column].astype(str).str.lower() == "good").to_numpy(dtype=bool)
+            curated_cells = np.ones(int(to_load.sum()), dtype=bool) if column == "group" else None
+            return to_load, curated_cells
+    return np.zeros(len(table), dtype=bool), None
 
 
 def _extract_cluster_properties(ks_folder, to_load, cluster_info, ks_labels, channel_map):
-    """Extract per-cluster properties (channel, amplitude, position, etc.)."""
+    """Per-cluster properties of the selected clusters, in label-table order.
+
+    Two kinds of channel number are in play: a hardware *channel* id (what
+    ``cluster_info.tsv``'s ``ch`` column and ``channel_map.npy`` hold, and what
+    is returned as ``channel``) and a probe *site* index (the row in
+    ``channel_positions.npy``, i.e. the position in ``channel_map``).
+
+    - Curated sessions read channel, ``Amplitude``, ``amp`` and ``fr`` straight
+      from ``cluster_info.tsv``; the site is found by looking the channel up
+      in ``channel_map``.
+    - Uncurated sessions find the site from the template waveforms (assuming
+      template *i* is row *i* of ``cluster_KSLabel.tsv``), map it to a channel
+      through ``channel_map``, and read amplitude from ``cluster_Amplitude.tsv``;
+      ``fr`` and ``amp`` are left empty.
+    """
     logger.info("Extracting cluster properties...")
     if cluster_info is None:
-        ci = ks_labels
-        ks_ids = ci["cluster_id"].tolist()
-        ks_ids = [ks_ids[i] for i, load in enumerate(to_load) if load]
-        channel = _waveform_to_channel(ks_folder)
-        channel = np.array([channel[i] for i, load in enumerate(to_load) if load])
-        ks_channel = channel_map[channel]
+        ks_ids = ks_labels["cluster_id"].to_numpy()[to_load].tolist()
+        site = _waveform_to_channel(ks_folder)[np.flatnonzero(to_load)]
+        channel = channel_map[site]
         amplitude_df = pd.read_csv(ks_folder / 'cluster_Amplitude.tsv', sep='\t')
-        amplitude = amplitude_df.loc[amplitude_df["cluster_id"].isin(ks_ids), ["Amplitude"]]
-        fr, amp = [], []
+        amplitude = amplitude_df.loc[amplitude_df["cluster_id"].isin(ks_ids), "Amplitude"].to_numpy()
+        fr = amp = np.array([])
     else:
-        ci = cluster_info
-        ks_ids = ci["cluster_id"].tolist()
-        ks_ids = [ks_ids[i] for i, load in enumerate(to_load) if load]
-        ks_channel = ci.loc[ci["cluster_id"].isin(ks_ids), ["ch"]]
-        amplitude = ci.loc[ci["cluster_id"].isin(ks_ids), ["Amplitude"]]
-        amp = ci.loc[ci["cluster_id"].isin(ks_ids), ["amp"]]
-        fr = ci.loc[ci["cluster_id"].isin(ks_ids), ["fr"]]
-        channel_map_arr = np.array(channel_map)
-        ks_channel = np.array(ks_channel)
-        channel = np.array([np.where(channel_map_arr == a)[0][0] for a in ks_channel])
+        selected = cluster_info[to_load]
+        ks_ids = selected["cluster_id"].tolist()
+        channel = selected["ch"].to_numpy()
+        amplitude = selected["Amplitude"].to_numpy()
+        amp = selected["amp"].to_numpy()
+        fr = selected["fr"].to_numpy()
+        site_of_channel: Dict[int, int] = {}
+        for i, ch in enumerate(np.asarray(channel_map).ravel()):
+            site_of_channel.setdefault(int(ch), i)          # first occurrence wins
+        site = np.array([site_of_channel[int(ch)] for ch in channel], dtype=int)
 
-    channel_positions = np.load(ks_folder / 'channel_positions.npy')
-    DV = channel_positions[tuple(channel), 1]
-    XX = channel_positions[tuple(channel), 0]
-    nn = len(ks_ids)
+    channel_positions = np.load(ks_folder / 'channel_positions.npy')   # (n_sites, 2): x, depth
+    DV = channel_positions[site, 1]
+    XX = channel_positions[site, 0]
     i_shank = np.round(XX / 100.0).astype(int)
-    cell_numbers = np.column_stack((i_shank, np.arange(nn, dtype=int)))
+    cell_numbers = np.column_stack((i_shank, np.arange(len(ks_ids), dtype=int)))
 
     return dict(
         ks_ids=ks_ids,
-        channel=np.array(ks_channel).squeeze(),
-        amplitude=np.array(amplitude).squeeze(),
-        fr=np.array(fr).squeeze(),
-        amp=np.array(amp).squeeze(),
+        channel=channel,
+        amplitude=amplitude,
+        fr=fr,
+        amp=amp,
         DV=DV,
         XX=XX,
         cell_numbers=cell_numbers,
@@ -655,21 +714,23 @@ def _extract_cluster_properties(ks_folder, to_load, cluster_info, ks_labels, cha
 
 
 def _group_spikes_by_cluster(ks_folder, spike_times, spike_clusters, ks_ids):
-    """Group spikes by cluster and convert to seconds."""
+    """Spike times in seconds for each cluster in *ks_ids*, each sorted ascending.
+
+    Only spikes of the requested clusters are converted, so the timestamps
+    file is read only where those spikes point.
+    """
     logger.info("Grouping spikes by cluster...")
-    sample_indices = _read_timestamps(ks_folder)
-    spike_sec = sample_indices[spike_times].astype(float) / SAMPLE_RATE
+    keep = np.isin(spike_clusters, ks_ids)
+    clusters = spike_clusters[keep]
+    spike_sec = _sample_counts_at(ks_folder, spike_times[keep]).astype(float) / SAMPLE_RATE
 
-    order = np.argsort(spike_clusters)
-    sorted_clusters = spike_clusters[order]
-    sorted_times = spike_sec[order]
+    order = np.lexsort((spike_sec, clusters))            # by cluster, then time
+    clusters, spike_sec = clusters[order], spike_sec[order]
+    unique_ids, starts = np.unique(clusters, return_index=True)
+    grouped = {int(uid): times for uid, times in zip(unique_ids, np.split(spike_sec, starts[1:]))}
 
-    unique_ids, start_idx, counts = np.unique(sorted_clusters, return_index=True, return_counts=True)
-    grouped = {}
-    for uid, s, cnt in zip(unique_ids, start_idx, counts):
-        grouped[int(uid)] = np.sort(sorted_times[s : s + cnt])
-
-    return [grouped.get(int(c), np.array([], dtype=spike_sec.dtype)) for c in ks_ids]
+    return [grouped[int(c)] if int(c) in grouped else np.array([], dtype=spike_sec.dtype)
+            for c in ks_ids]
 
 
 # ---------------------------------------------------------------------------

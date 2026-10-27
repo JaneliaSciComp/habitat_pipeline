@@ -1144,7 +1144,7 @@ def compute_social_place_fields(
     ``progress`` reports completed cell-target fits: ``True`` for a bar, or a
     ``fn(done, total, label)`` callable to drive your own widget. Off by default.
     """
-    from ingestion.kilosort_data_import import _DEFAULT_QUALITY_THRESHOLDS
+    from ingestion.kilosort_data_import import DEFAULT_QUALITY_THRESHOLDS
     from video.tracking_import import resolve_tracking_on_ephys_clock
 
     session_id = tracking.session_id
@@ -1182,7 +1182,7 @@ def compute_social_place_fields(
 
     # Focal cells and their spike trains.
     if use_quality_cells:
-        thresholds = quality_thresholds or dict(_DEFAULT_QUALITY_THRESHOLDS)
+        thresholds = quality_thresholds or dict(DEFAULT_QUALITY_THRESHOLDS)
         cluster_ids, spike_lists = ks.get_filtered_cells_spike_times(**thresholds)
     else:
         thresholds = None

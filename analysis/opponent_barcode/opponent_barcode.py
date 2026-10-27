@@ -100,7 +100,7 @@ def load_events_and_responses(animal: str, session: str, mode: str, response: st
     from analysis.event_decoding.decode_opponent_identity import decode_opponent_identity_population
     from ingestion.data_paths import DataStorageManager
     from ingestion.ephys_sync import DataSyncManager
-    from ingestion.kilosort_data_import import (_DEFAULT_QUALITY_THRESHOLDS,
+    from ingestion.kilosort_data_import import (DEFAULT_QUALITY_THRESHOLDS,
                                                 load_kilosort_data)
     from video.behavioral_events import load_behavioral_events
 
@@ -122,7 +122,7 @@ def load_events_and_responses(animal: str, session: str, mode: str, response: st
         n_shuffles=0)
     if res.get("status") == "failed":
         raise RuntimeError(f"{animal}/{session}: {res.get('error')}")
-    cids, spikes = ks.get_filtered_cells_spike_times(**_DEFAULT_QUALITY_THRESHOLDS)
+    cids, spikes = ks.get_filtered_cells_spike_times(**DEFAULT_QUALITY_THRESHOLDS)
     t = np.asarray(res["event_times"], float)
     labels = np.asarray(res["labels"]).astype(str)
     first = min(float(np.min(st)) for st in spikes if len(st))

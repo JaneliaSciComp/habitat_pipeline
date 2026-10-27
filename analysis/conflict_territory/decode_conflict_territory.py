@@ -412,7 +412,7 @@ def build_territory_binned_data(ks, tracking_df: pd.DataFrame, conflicts: pd.Dat
                                 quality_thresholds: Optional[dict] = None) -> Dict:
     """Bin quality-cell rates and focal position; drop untracked and near-conflict bins.
 
-    Spikes come from ``ks.get_filtered_cells_spike_times(**_DEFAULT_QUALITY_THRESHOLDS)``
+    Spikes come from ``ks.get_filtered_cells_spike_times(**DEFAULT_QUALITY_THRESHOLDS)``
     binned with :func:`analysis.territory.run_territory.bin_counts` (not
     ``KilosortData.bin_spike_times``, which ignores the filter thresholds).
     Position is :func:`analysis.territory.run_territory.interp_on_grid` of ``tracking_df``
@@ -427,9 +427,9 @@ def build_territory_binned_data(ks, tracking_df: pd.DataFrame, conflicts: pd.Dat
     wrapper passes *all* scored conflicts here, including those dropped for
     lacking a position, since they still happened.
     """
-    from ingestion.kilosort_data_import import _DEFAULT_QUALITY_THRESHOLDS
+    from ingestion.kilosort_data_import import DEFAULT_QUALITY_THRESHOLDS
 
-    thresholds = dict(_DEFAULT_QUALITY_THRESHOLDS) if quality_thresholds is None else dict(quality_thresholds)
+    thresholds = dict(DEFAULT_QUALITY_THRESHOLDS) if quality_thresholds is None else dict(quality_thresholds)
     cluster_ids, spike_times = ks.get_filtered_cells_spike_times(**thresholds)
     df = tracking_df.sort_values("t")
     if "speed" not in df.columns:
@@ -578,13 +578,13 @@ def decode_conflict_territory(session_id: str, animal_id: str, *, config_path: O
         from discovery.detectors import resolved_from_dated_directory
         from ingestion.data_paths import DataStorageManager
         from ingestion.ephys_sync import DataSyncManager
-        from ingestion.kilosort_data_import import _DEFAULT_QUALITY_THRESHOLDS, load_kilosort_data
+        from ingestion.kilosort_data_import import DEFAULT_QUALITY_THRESHOLDS, load_kilosort_data
         from video.behavioral_events import load_behavioral_events
         from video.conflict_territory import localize_events
         from video.tracking_import import (TRACKING_FORMAT_MASK_METRICS, load_tracking_data,
                                            resolve_tracking_on_ephys_clock)
 
-        thresholds = dict(_DEFAULT_QUALITY_THRESHOLDS) if quality_thresholds is None else dict(quality_thresholds)
+        thresholds = dict(DEFAULT_QUALITY_THRESHOLDS) if quality_thresholds is None else dict(quality_thresholds)
         dsm = DataStorageManager(num_id, session_id, config_path=config_path)
         ks_path = dsm.get_kilosort_path()
         if ks_path is None:

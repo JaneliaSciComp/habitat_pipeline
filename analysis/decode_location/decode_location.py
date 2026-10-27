@@ -33,7 +33,7 @@ Statistical notes
 import numpy as np
 from typing import Optional, Tuple, Dict, TYPE_CHECKING
 
-from ingestion.kilosort_data_import import _DEFAULT_QUALITY_THRESHOLDS
+from ingestion.kilosort_data_import import DEFAULT_QUALITY_THRESHOLDS
 
 if TYPE_CHECKING:
     from ingestion.kilosort_data_import import KilosortData
@@ -74,7 +74,7 @@ def build_binned_data(ks_data: "KilosortData",
         Use only quality-filtered cells.
     quality_thresholds : dict, optional
         Forwarded to ``filter_cells_by_firing_patterns``; defaults to
-        ``_DEFAULT_QUALITY_THRESHOLDS`` when ``use_quality_cells`` is True.
+        ``DEFAULT_QUALITY_THRESHOLDS`` when ``use_quality_cells`` is True.
     verbose : bool
         Print the inferred neural/tracking time ranges.
 
@@ -88,7 +88,7 @@ def build_binned_data(ks_data: "KilosortData",
         ``bin_size``     : float
     """
     if use_quality_cells:
-        thresholds = dict(_DEFAULT_QUALITY_THRESHOLDS) if quality_thresholds is None else quality_thresholds
+        thresholds = dict(DEFAULT_QUALITY_THRESHOLDS) if quality_thresholds is None else quality_thresholds
         _, spike_times_list = ks_data.get_filtered_cells_spike_times(**thresholds)
     else:
         spike_times_list = list(ks_data.spike_times_by_cell)

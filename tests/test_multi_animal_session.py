@@ -10,7 +10,8 @@ import numpy as np
 import pytest
 
 from ingestion.kilosort_data_import import KilosortData
-from ingestion.multi_animal_session import MultiAnimalSession, _bin_spike_lists
+from ingestion.kilosort_data_import import bin_spike_trains
+from ingestion.multi_animal_session import MultiAnimalSession
 
 SAMPLE_RATE = 30000.0
 
@@ -86,13 +87,13 @@ def _make_session(animals, sync_from_animal=None) -> MultiAnimalSession:
 
 
 # ---------------------------------------------------------------------------
-# _bin_spike_lists
+# bin_spike_trains
 # ---------------------------------------------------------------------------
 
 class TestBinSpikeLists:
     def test_basic_counts_and_centers(self):
         spike_times = [np.array([0.05, 0.15, 0.35]), np.array([0.25])]
-        rates, centers = _bin_spike_lists(
+        rates, centers = bin_spike_trains(
             spike_times, bin_size_sec=0.1, t_start=0.0, t_end=0.4,
         )
         assert rates.shape == (2, 4)
@@ -103,13 +104,13 @@ class TestBinSpikeLists:
         np.testing.assert_allclose(rates[1], [0.0, 0.0, 10.0, 0.0])
 
     def test_empty_cell(self):
-        rates, _ = _bin_spike_lists([np.array([])], 0.1, 0.0, 1.0)
+        rates, _ = bin_spike_trains([np.array([])], 0.1, 0.0, 1.0)
         assert rates.shape == (1, 10)
         assert (rates == 0).all()
 
     def test_identical_grid_across_calls(self):
-        _, c1 = _bin_spike_lists([np.array([0.1])], 0.5, 0.0, 10.0)
-        _, c2 = _bin_spike_lists([np.array([])], 0.5, 0.0, 10.0)
+        _, c1 = bin_spike_trains([np.array([0.1])], 0.5, 0.0, 10.0)
+        _, c2 = bin_spike_trains([np.array([])], 0.5, 0.0, 10.0)
         np.testing.assert_array_equal(c1, c2)
 
 

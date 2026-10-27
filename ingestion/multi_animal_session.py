@@ -27,7 +27,7 @@ import pandas as pd
 
 from ingestion.data_paths import DataStorageManager
 from ingestion.ephys_sync import DataSyncManager
-from ingestion.kilosort_data_import import KilosortData, load_kilosort_data
+from ingestion.kilosort_data_import import KilosortData, bin_spike_trains, load_kilosort_data
 from video.behavioral_events import BehavioralEventsData, load_behavioral_events
 from video.tracking_import import load_tracking_data, resolve_tracking_on_ephys_clock
 
@@ -43,30 +43,6 @@ _CACHE_DIR = Path(".gui_cache") / "multi_animal"
 def _hash_params(payload: dict) -> str:
     blob = json.dumps(payload, sort_keys=True, default=str).encode()
     return hashlib.sha256(blob).hexdigest()[:16]
-
-
-def _bin_spike_lists(
-    spike_times_list: List[np.ndarray],
-    bin_size_sec: float,
-    t_start: float,
-    t_end: float,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Bin a list of spike-time arrays into a (n_cells, n_bins) rate matrix.
-
-    Mirrors :meth:`KilosortData.bin_spike_times` but takes the spike lists
-    directly so that all animals share identical bin edges, regardless of
-    which clusters pass per-animal quality filters.
-    """
-    bin_edges = np.arange(t_start, t_end + bin_size_sec, bin_size_sec)
-    n_bins = len(bin_edges) - 1
-    n_cells = len(spike_times_list)
-    matrix = np.zeros((n_cells, n_bins), dtype=np.float64)
-    for i, st in enumerate(spike_times_list):
-        if len(st) > 0:
-            counts, _ = np.histogram(st, bins=bin_edges)
-            matrix[i] = counts / bin_size_sec
-    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-    return matrix, bin_centers
 
 
 def _gaussian_smooth(matrix: np.ndarray, sigma_bins: float) -> np.ndarray:
@@ -249,7 +225,7 @@ class MultiAnimalSession:
         for aid in self.animal_ids:
             ks = self.get_ks(aid)
             _, spike_times_list = ks.get_filtered_cells_spike_times(**kwargs)
-            rates, bin_centers = _bin_spike_lists(
+            rates, bin_centers = bin_spike_trains(
                 spike_times_list, bin_size_sec, t_start_ephys, t_end_ephys,
             )
             if smoothing_sigma_sec is not None and smoothing_sigma_sec > 0:

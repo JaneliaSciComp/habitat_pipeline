@@ -47,7 +47,7 @@ from analysis.event_decoding._lda_decoding import (
     single_cell_lda_decode,
 )
 from analysis._common._stats_utils import majority_class_baseline
-from ingestion.kilosort_data_import import _DEFAULT_QUALITY_THRESHOLDS
+from ingestion.kilosort_data_import import DEFAULT_QUALITY_THRESHOLDS
 from analysis.event_decoding.decoding_plots import (
     plot_best_cells_decoding,
     plot_decoding_accuracy_distribution,
@@ -143,7 +143,7 @@ def decode_event_outcome_population(ks_data,
     # Cell selection happens first so the ephys window it implies can be
     # passed into label extraction below.
     if use_quality_cells:
-        quality_thresholds = dict(_DEFAULT_QUALITY_THRESHOLDS) if quality_thresholds is None else quality_thresholds
+        quality_thresholds = dict(DEFAULT_QUALITY_THRESHOLDS) if quality_thresholds is None else quality_thresholds
         selected_cluster_ids, spike_times_list = ks_data.get_filtered_cells_spike_times(**quality_thresholds)
         print(f"Using {len(selected_cluster_ids)} quality-filtered cells")
     else:
@@ -343,7 +343,7 @@ def decode_event_outcome_time_resolved(ks_data,
         raise ValueError("alignment must be 'start' or 'end'")
 
     if use_quality_cells:
-        thresholds = dict(_DEFAULT_QUALITY_THRESHOLDS) if quality_thresholds is None else quality_thresholds
+        thresholds = dict(DEFAULT_QUALITY_THRESHOLDS) if quality_thresholds is None else quality_thresholds
         selected_cluster_ids, spike_times_list = ks_data.get_filtered_cells_spike_times(**thresholds)
     else:
         selected_cluster_ids = list(ks_data.ks_ids)

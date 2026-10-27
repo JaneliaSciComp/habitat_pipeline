@@ -24,7 +24,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Add parent directory to path for imports
-sys.path.append(str(Path(__file__).parent.parent))
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from ingestion.kilosort_data_import import load_kilosort_data
 from ingestion.data_paths import get_kilosort_path

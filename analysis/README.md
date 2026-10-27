@@ -1,15 +1,33 @@
-# ephys/ — Neural analysis
+# analysis/ — Analysis code, one folder per analysis
+
+Each subfolder holds an analysis's core module(s), plotting modules, CLIs (`python -m analysis.<folder>.<module>`) and demo notebooks. Outputs go to `results/<folder>/` (see [_paths.py](_paths.py): `results_dir(name)`). Shared helpers live in `_common/`.
+
+| Folder | Contents |
+|---|---|
+| `_common/` | `_stats_utils` (BH-FDR, `fdr_resolution`, baselines), `_rate_tensor` |
+| `event_decoding/` | LDA opponent-identity / event-outcome decoders, shared core, plots, FDR refinement + summary plot scripts |
+| `opponent_barcode/` | per-opponent barcode, characterisation, connectivity, slide plots |
+| `inter_brain_dynamics/` | shared-subspace CCA, plots, `run_inter_brain` |
+| `social_spatial_fields/` | social place fields, plots, `run_social_spatial` |
+| `partner_distance/` | partner-distance decoding, plots, `run_partner_distance` |
+| `decode_location/` | Bayesian (x, y) decoder |
+| `territory/`, `territory_behavior/`, `rest_distance/`, `conflict_territory/` | territory encoding/behaviour screens, rest-distance coding, conflict-territory decoding |
+| `population_geometry/`, `rastermap_viz/`, `ephys_qa/` | population geometry, rastermap plots, ephys QA stats |
+| `trajectory_exports/` | trajectory / embedding / sync video and figure exports |
+
+Lab-notebook and discovery tooling stays in [`scripts/`](../scripts/). `analysis_module` ids stored in the lab notebook (e.g. `ephys.decode_opponent_identity`) are logical ids, not import paths; `database/lab_notebook.py::_ANALYSIS_ENTRY_POINTS` maps them to modules.
+
 
 Analysis modules over the spike-sorted Kilosort 4 outputs. Three groups
 of tooling live here:
 
 | Group | Modules | Result-dict pattern |
 |---|---|---|
-| **LDA decoding** | [_lda_decoding.py](_lda_decoding.py), [decode_opponent_identity.py](decode_opponent_identity.py), [decode_event_outcome.py](decode_event_outcome.py), [decoding_plots.py](decoding_plots.py) | `results['parameters']['class_label']` + `['analysis_title']` drive plot titles. |
-| **Location / population** | [decode_location.py](decode_location.py), [population_geometry.py](population_geometry.py), [rastermap_viz.py](rastermap_viz.py) | Stand-alone per-module dicts. |
-| **Inter-brain dynamics** ↓ | [inter_brain_dynamics.py](inter_brain_dynamics.py), [inter_brain_plots.py](inter_brain_plots.py), [run_inter_brain.py](run_inter_brain.py) | `SharedSubspaceFit` dataclass with the same `class_label` / `analysis_title` convention. |
+| **LDA decoding** | [_lda_decoding.py](event_decoding/_lda_decoding.py), [decode_opponent_identity.py](event_decoding/decode_opponent_identity.py), [decode_event_outcome.py](event_decoding/decode_event_outcome.py), [decoding_plots.py](event_decoding/decoding_plots.py) | `results['parameters']['class_label']` + `['analysis_title']` drive plot titles. |
+| **Location / population** | [decode_location.py](decode_location/decode_location.py), [population_geometry.py](population_geometry/population_geometry.py), [rastermap_viz.py](rastermap_viz/rastermap_viz.py) | Stand-alone per-module dicts. |
+| **Inter-brain dynamics** ↓ | [inter_brain_dynamics.py](inter_brain_dynamics/inter_brain_dynamics.py), [inter_brain_plots.py](inter_brain_dynamics/inter_brain_plots.py), [run_inter_brain.py](inter_brain_dynamics/run_inter_brain.py) | `SharedSubspaceFit` dataclass with the same `class_label` / `analysis_title` convention. |
 
-Plus QA: [plot_ephys_qa_stats.py](plot_ephys_qa_stats.py).
+Plus QA: [plot_ephys_qa_stats.py](ephys_qa/plot_ephys_qa_stats.py).
 
 ---
 
@@ -43,9 +61,9 @@ MARL agent analyses are out of scope.
 
 ```
 ingestion/multi_animal_session.py    ← multi-animal orchestrator
-ephys/inter_brain_dynamics.py        ← CCA + nulls + helpers + regression
-ephys/inter_brain_plots.py           ← seven plot functions
-ephys/run_inter_brain.py             ← CLI
+analysis/inter_brain_dynamics/inter_brain_dynamics.py        ← CCA + nulls + helpers + regression
+analysis/inter_brain_dynamics/inter_brain_plots.py           ← seven plot functions
+analysis/inter_brain_dynamics/run_inter_brain.py             ← CLI
 video/behavior_features.py           ← per-bin behavior feature matrix
 gui/tabs/inter_brain.py              ← Streamlit tab
 gui/state.py                         ← InterBrainParams dataclass
@@ -96,10 +114,10 @@ bin_centers, rates_by_animal = session.get_common_binned_rates(
 
 ### 2. `SharedSubspaceFit` + `fit_shared_subspace`
 
-[`ephys/inter_brain_dynamics.py`](inter_brain_dynamics.py)
+[`analysis/inter_brain_dynamics/inter_brain_dynamics.py`](inter_brain_dynamics/inter_brain_dynamics.py)
 
 ```python
-from ephys.inter_brain_dynamics import fit_shared_subspace
+from analysis.inter_brain_dynamics.inter_brain_dynamics import fit_shared_subspace
 
 fit = fit_shared_subspace(
     X_A,                              # (T, N_A) firing rates
@@ -115,7 +133,7 @@ fit = fit_shared_subspace(
 )
 ```
 
-Returns a [`SharedSubspaceFit`](inter_brain_dynamics.py) dataclass:
+Returns a [`SharedSubspaceFit`](inter_brain_dynamics/inter_brain_dynamics.py) dataclass:
 
 | Field | Shape | Meaning |
 |---|---|---|
@@ -167,7 +185,7 @@ Bins with any NaN in either `X_A` or `X_B` are dropped before fitting;
 ### 3. Shuffle null + K selection
 
 ```python
-from ephys.inter_brain_dynamics import shuffle_null_subspace, choose_n_components
+from analysis.inter_brain_dynamics.inter_brain_dynamics import shuffle_null_subspace, choose_n_components
 
 null = shuffle_null_subspace(
     X_A, X_B,
@@ -206,7 +224,7 @@ sharper because held-out R² ≈ 0 for noise dims.
 ### 4. Time-lagged CCA, cross-animal correlation matrix, helpers
 
 ```python
-from ephys.inter_brain_dynamics import (
+from analysis.inter_brain_dynamics.inter_brain_dynamics import (
     project_onto_shared,
     time_lagged_cca,
     cross_animal_correlation_matrix,
@@ -232,7 +250,7 @@ C = cross_animal_correlation_matrix(X_A, X_B)
 ### 5. Behavior regression
 
 ```python
-from ephys.inter_brain_dynamics import regress_shared_on_behavior
+from analysis.inter_brain_dynamics.inter_brain_dynamics import regress_shared_on_behavior
 
 result = regress_shared_on_behavior(
     fit,
@@ -306,14 +324,14 @@ outside the tracked range.
 
 ### 6. Plots
 
-[`ephys/inter_brain_plots.py`](inter_brain_plots.py) — seven functions,
+[`analysis/inter_brain_dynamics/inter_brain_plots.py`](inter_brain_dynamics/inter_brain_plots.py) — seven functions,
 all returning `matplotlib.figure.Figure`. Titles and class labels are
 pulled from `fit.parameters['analysis_title']` /
 `fit.parameters['class_label']`, mirroring the convention in
-[`decoding_plots.py`](decoding_plots.py).
+[`decoding_plots.py`](event_decoding/decoding_plots.py).
 
 ```python
-from ephys.inter_brain_plots import (
+from analysis.inter_brain_dynamics.inter_brain_plots import (
     plot_canonical_correlations,      # train + CV bars + p95 null line
     plot_variance_partition,          # stacked bars per animal
     plot_shared_dimensions,           # overlaid time courses A vs B
@@ -332,14 +350,14 @@ instead of failing.
 
 ### 7. CLI
 
-[`ephys/run_inter_brain.py`](run_inter_brain.py)
+[`analysis/inter_brain_dynamics/run_inter_brain.py`](inter_brain_dynamics/run_inter_brain.py)
 
 ```bash
-python -m ephys.run_inter_brain \
+python -m analysis.inter_brain_dynamics.run_inter_brain \
     --session_id 20251216 --animal_ids 631 632 \
     --bin_size 0.5 --smoothing 0.25 \
     --max_K 20 --n_shuffles 200 \
-    --behavior_type EC --output_dir ./results
+    --behavior_type EC --output_dir ./results/inter_brain_dynamics
 ```
 
 Loads via `MultiAnimalSession`, builds common binned rates, fits the
@@ -359,7 +377,7 @@ Internally factored into `_analyze(...)` (pure compute) and
 `_analyze_and_save(...)` (pure compute + I/O) so the GUI can call the
 former directly.
 
-All CLI flags are documented under `python -m ephys.run_inter_brain
+All CLI flags are documented under `python -m analysis.inter_brain_dynamics.run_inter_brain
 --help`; key ones beyond the prompt's example: `--method`, `--reg`,
 `--cv_folds`, `--max_lag_bins`, `--alpha`, `--event_window`, `--t_start`,
 `--t_end`, `--skip_regression`, `--seed`, `--config_path`,

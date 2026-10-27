@@ -1,4 +1,4 @@
-"""Calibration and power for ephys.territory_population (three population tests).
+"""Calibration and power for analysis.territory.territory_population (three population tests).
 
 Each test must (a) hold its false-positive rate under scenarios that fool naive
 versions - slow drift, place-field density that peaks at the boundary, neural
@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from scipy import stats
 
-from ephys import territory_population as tp
+from analysis.territory import territory_population as tp
 from tests._territory_sim import make_session, simulate_population
 
 N_CELLS = 40

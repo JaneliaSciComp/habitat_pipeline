@@ -3,7 +3,7 @@
 Single-bar summary of the BH-significant cells' balanced accuracy.
 
 For each decode (EC top-2 opponent, EC group), pools every rat's cells with
-BH q < ``--alpha`` from ``scripts/refine_permutation_fdr.py``'s CSV. It draws one
+BH q < ``--alpha`` from ``analysis/event_decoding/refine_permutation_fdr.py``'s CSV. It draws one
 red bar at their mean balanced accuracy with a mean +- SD error bar.
 Balanced accuracy is read from the cached decode (the same values as the
 histograms), and nothing is recomputed.
@@ -12,7 +12,7 @@ Example
 -------
 ::
 
-    python scripts/plot_bh_significant_bar.py
+    python analysis/event_decoding/plot_bh_significant_bar.py
 """
 
 from __future__ import annotations
@@ -28,14 +28,14 @@ import numpy as np
 import pandas as pd
 from matplotlib.ticker import MultipleLocator
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-for p in (REPO_ROOT, REPO_ROOT / "scripts"):
-    if str(p) not in sys.path:
-        sys.path.insert(0, str(p))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from analysis._paths import results_dir  # noqa: E402
 
-import plot_decoding_accuracy_violins as violins  # noqa: E402
-from plot_decoding_auroc_histograms import INK, SIG_COLOR  # noqa: E402
-from refine_permutation_fdr import decode_params  # noqa: E402
+from analysis.event_decoding import plot_decoding_accuracy_violins as violins  # noqa: E402
+from analysis.event_decoding.plot_decoding_auroc_histograms import INK, SIG_COLOR  # noqa: E402
+from analysis.event_decoding.refine_permutation_fdr import decode_params  # noqa: E402
 
 plt.rcParams["font.family"] = "Arial"
 plt.rcParams["pdf.fonttype"] = 42
@@ -45,7 +45,7 @@ STEM = {"opponent": "ec_top2", "group": "ec_group"}
 
 
 def significant_values(mode: str, alpha: float, cache_dir: Path) -> np.ndarray:
-    fdr = pd.read_csv(REPO_ROOT / f"results/refined_fdr_{mode}.csv")
+    fdr = pd.read_csv(results_dir("event_decoding") / f"refined_fdr_{mode}.csv")
     params = decode_params(mode)
     vals = []
     for (animal, session), rows in fdr[fdr["q_value"] < alpha].groupby(
@@ -92,7 +92,7 @@ def main(argv=None) -> int:
               f"mean {vals.mean():.3f} +- SD {vals.std(ddof=1):.3f} "
               f"(range {vals.min():.3f}-{vals.max():.3f})")
         fig = figure(vals, mode, args.alpha)
-        base = REPO_ROOT / f"results/{STEM[mode]}_balanced_accuracy_bh_bar"
+        base = results_dir("event_decoding") / f"{STEM[mode]}_balanced_accuracy_bh_bar"
         fig.savefig(base.with_suffix(".png"), dpi=300, bbox_inches="tight")
         fig.savefig(base.with_suffix(".pdf"), bbox_inches="tight")
         plt.close(fig)

@@ -69,7 +69,7 @@ from database.lab_notebook import (  # noqa: E402
     LabNotebook,
     TestFamily,
 )
-from ephys._stats_utils import benjamini_hochberg, fdr_resolution  # noqa: E402
+from analysis._common._stats_utils import benjamini_hochberg, fdr_resolution  # noqa: E402
 
 FAMILY_A_NAME = 'exploratory: EC opponent identity, 631/20251216 (reconstructed)'
 FAMILY_B_NAME = 'exploratory: decode_location partner position, 631/20251210 (reconstructed)'

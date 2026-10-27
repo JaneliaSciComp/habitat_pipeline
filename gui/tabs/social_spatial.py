@@ -2,7 +2,7 @@
 
 Occupancy-normalized rate maps of a focal animal's cells over each (self and
 partner) animal's allocentric position. Calls ``ephys.social_spatial_fields``
-for the math and ``ephys.social_spatial_plots`` for the figures; the heavy run
+for the math and ``analysis.social_spatial_fields.social_spatial_plots`` for the figures; the heavy run
 is wrapped by :func:`gui.runners.cached_step` so the disk cache invalidates on
 any parameter, focal, or target-set change.
 """
@@ -13,8 +13,8 @@ import logging
 import numpy as np
 import streamlit as st
 
-from ephys.social_spatial_fields import compute_social_place_fields
-from ephys.social_spatial_plots import (
+from analysis.social_spatial_fields.social_spatial_fields import compute_social_place_fields
+from analysis.social_spatial_fields.social_spatial_plots import (
     plot_cell_classification_summary,
     plot_field_stability,
     plot_rate_maps_grid,

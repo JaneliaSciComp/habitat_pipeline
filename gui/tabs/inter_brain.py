@@ -2,8 +2,8 @@
 
 Multi-animal shared-subspace analysis between the loaded *focal* animal
 and one (or more) simultaneously-recorded *partners*. Calls into
-``ephys.inter_brain_dynamics`` for the math and
-``ephys.inter_brain_plots`` for the plots; the heavy run is wrapped by
+``analysis.inter_brain_dynamics.inter_brain_dynamics`` for the math and
+``analysis.inter_brain_dynamics.inter_brain_plots`` for the plots; the heavy run is wrapped by
 :func:`gui.runners.cached_step` so the disk cache invalidates on any
 parameter change.
 """
@@ -14,7 +14,7 @@ import logging
 import numpy as np
 import streamlit as st
 
-from ephys.inter_brain_plots import (
+from analysis.inter_brain_dynamics.inter_brain_plots import (
     plot_canonical_correlations,
     plot_cross_animal_correlation,
     plot_inter_brain_summary,
@@ -23,7 +23,7 @@ from ephys.inter_brain_plots import (
     plot_time_lagged_cca,
     plot_variance_partition,
 )
-from ephys.run_inter_brain import _analyze
+from analysis.inter_brain_dynamics.run_inter_brain import _analyze
 from gui.plotting import show_fig
 from gui.runners import cached_step
 from gui.state import InterBrainParams, SessionKey

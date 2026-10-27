@@ -1,6 +1,6 @@
 """Per-partner hub co-occupancy minutes and arrival/departure events for a focal rat (tracking only).
 
-    python scripts/hub_event_counts.py --animal 630
+    python analysis/territory_behavior/hub_event_counts.py --animal 630
 
 Uses chunks with full ephys overlap from results/territory_behavior/coverage_<animal>.csv. 1 Hz grid.
 Arrival of partner P: P outside the hub for the previous ``pre`` s, then inside for ``post`` s, with the focal

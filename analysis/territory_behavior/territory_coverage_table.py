@@ -3,7 +3,7 @@
 Metadata only (spike-window extent + sync); no neural analysis is run. Writes
 ``results/territory_behavior/coverage_<animal>.csv``.
 
-    python scripts/territory_coverage_table.py --animal 630
+    python analysis/territory_behavior/territory_coverage_table.py --animal 630
 """
 
 import argparse
@@ -16,7 +16,7 @@ import sys
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from video.territory_behavior import arena_bounds, speed_px_s  # noqa: E402
 
 ROOT = "//nearline/karpova/TervoLab/analysis/Tracking/APT/cohort7"

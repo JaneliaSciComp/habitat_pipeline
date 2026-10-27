@@ -15,8 +15,8 @@ import warnings
 import numpy as np
 import pytest
 
-from ephys._lda_decoding import compute_population_significance, run_population_per_cell_decode
-from ephys._stats_utils import fdr_resolution
+from analysis.event_decoding._lda_decoding import compute_population_significance, run_population_per_cell_decode
+from analysis._common._stats_utils import fdr_resolution
 
 
 def _synthetic_opponent_scenario(seed=0, dur=200.0, n_cells=24, n_tuned=6):
@@ -188,7 +188,7 @@ class TestPopulationLevelTest:
 
 class TestBaselineKeys:
     def test_imbalanced_labels_expose_below_baseline_accuracy(self):
-        from ephys._lda_decoding import single_cell_lda_decode
+        from analysis.event_decoding._lda_decoding import single_cell_lda_decode
 
         rng = np.random.default_rng(0)
         # 12/7 split, mirroring the real 631/20251216 winner/loser imbalance.
@@ -206,7 +206,7 @@ class TestBaselineKeys:
         assert np.isfinite(res['balanced_accuracy'])
 
     def test_baseline_present_on_insufficient_data_path(self):
-        from ephys._lda_decoding import single_cell_lda_decode
+        from analysis.event_decoding._lda_decoding import single_cell_lda_decode
 
         labels = np.array(['a'] * 10 + ['b'] * 2)
         res = single_cell_lda_decode(

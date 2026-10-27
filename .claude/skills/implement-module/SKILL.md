@@ -41,9 +41,9 @@ need, so the scientist is approving a specific, inspectable plan rather than a b
 check:
 
 - **New module path** (`ephys/<name>.py`) and the wrapper function signature.
-- **Which existing core it reuses**: classification-shaped → `ephys/_lda_decoding.py`'s
+- **Which existing core it reuses**: classification-shaped → `analysis/event_decoding/_lda_decoding.py`'s
   `run_population_per_cell_decode`/`single_cell_lda_decode`; regression/custom-shaped →
-  `ephys/decode_partner_distance.py`'s I/O-free-core + thin-wrapper split. Say which,
+  `analysis/partner_distance/decode_partner_distance.py`'s I/O-free-core + thin-wrapper split. Say which,
   and why.
 - **Result-dict fields** it must carry (`status`, `parameters` with
   `class_label`/`analysis_title`, a `behavioral_summary`-equivalent block, and
@@ -75,7 +75,7 @@ The build plan in step 2 must name:
 Two specific things are off-limits to `coder` and must be raised with the scientist
 instead if the plan seems to need them:
 
-1. **Changing `ephys/_lda_decoding.py`'s cross-validation.** Its three
+1. **Changing `analysis/event_decoding/_lda_decoding.py`'s cross-validation.** Its three
    `StratifiedKFold(shuffle=True, random_state=42)` sites are *allowlisted, not
    cleared* (`HZ-STAT-005`). They split one row per behavioural event, so this is not
    the adjacent-bin leakage fixed in `decode_location`, and the fixed `random_state`

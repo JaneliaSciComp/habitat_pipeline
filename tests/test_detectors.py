@@ -364,18 +364,18 @@ class TestResolvedFromDatedDirectory:
 
 class TestMethodImplemented:
     def test_pairwise_subspace_exists(self):
-        out = method_implemented('ephys.inter_brain_dynamics', 'fit_shared_subspace')
+        out = method_implemented('analysis.inter_brain_dynamics.inter_brain_dynamics', 'fit_shared_subspace')
         assert out['implemented'] is True
 
     def test_multiset_cca_does_not(self):
         """N>2 is blocked on missing math, not missing data."""
-        out = method_implemented('ephys.inter_brain_dynamics', 'fit_multiset_subspace')
+        out = method_implemented('analysis.inter_brain_dynamics.inter_brain_dynamics', 'fit_multiset_subspace')
         assert out['implemented'] is False
 
     def test_unimportable_module_is_missing_not_false(self):
         """Distinguish 'not implemented' from 'could not look'."""
         with pytest.raises(MissingValue):
-            method_implemented('ephys.no_such_module_at_all', 'anything')
+            method_implemented('analysis.no_such_module_at_all', 'anything')
 
 
 class TestRepoPatternAbsent:
@@ -409,7 +409,7 @@ class TestKfoldShuffleAudit:
     def test_the_lda_decoding_sites_are_found_and_allowlisted(self):
         """Allowlisted means reviewed, not cleared - see the hazard's known_gaps."""
         out = kfold_shuffle_audit()
-        assert 'ephys/_lda_decoding.py' in out['reviewed_sites']
+        assert 'analysis/event_decoding/_lda_decoding.py' in out['reviewed_sites']
 
     def test_allowlist_has_no_stale_entries(self):
         """A stale entry means the allowlist stopped guarding what it names."""
@@ -423,42 +423,42 @@ class TestKfoldShuffleAudit:
     def test_decode_location_is_not_a_site_anymore(self):
         """The leaky splitter was fixed to contiguous folds on 2026-08-19."""
         out = kfold_shuffle_audit()
-        assert 'ephys/decode_location.py' not in out['reviewed_sites']
-        assert 'ephys/decode_location.py' not in out['unapproved_sites']
+        assert 'analysis/decode_location/decode_location.py' not in out['reviewed_sites']
+        assert 'analysis/decode_location/decode_location.py' not in out['unapproved_sites']
 
     def test_a_new_unapproved_site_is_flagged(self, tmp_path):
         """The ratchet fires on new code, which is its whole purpose."""
-        (tmp_path / 'ephys').mkdir()
-        (tmp_path / 'ephys' / 'brand_new.py').write_text(
+        (tmp_path / 'analysis' / 'x').mkdir(parents=True)
+        (tmp_path / 'analysis' / 'x' / 'brand_new.py').write_text(
             "from sklearn.model_selection import KFold\n"
             "kf = KFold(n_splits=5, shuffle=True, random_state=0)\n",
             encoding='utf-8',
         )
         out = kfold_shuffle_audit(repo_root=tmp_path)
-        assert out['unapproved_sites'] == ['ephys/brand_new.py']
+        assert out['unapproved_sites'] == ['analysis/x/brand_new.py']
         assert out['no_unapproved_sites'] is False
 
     def test_contiguous_folds_are_not_flagged(self, tmp_path):
-        (tmp_path / 'ephys').mkdir()
-        (tmp_path / 'ephys' / 'good.py').write_text(
+        (tmp_path / 'analysis' / 'x').mkdir(parents=True)
+        (tmp_path / 'analysis' / 'x' / 'good.py').write_text(
             "kf = KFold(n_splits=5, shuffle=False)\n", encoding='utf-8')
         out = kfold_shuffle_audit(repo_root=tmp_path)
         assert out['unapproved_sites'] == []
 
     def test_multiline_splitter_construction_is_found(self, tmp_path):
         """The real _lda_decoding site spans two lines."""
-        (tmp_path / 'ephys').mkdir()
-        (tmp_path / 'ephys' / 'wrapped.py').write_text(
+        (tmp_path / 'analysis' / 'x').mkdir(parents=True)
+        (tmp_path / 'analysis' / 'x' / 'wrapped.py').write_text(
             "cv = StratifiedKFold(n_splits=5,\n"
             "                     shuffle=True, random_state=42)\n",
             encoding='utf-8',
         )
-        assert kfold_shuffle_audit(repo_root=tmp_path)['unapproved_sites'] == ['ephys/wrapped.py']
+        assert kfold_shuffle_audit(repo_root=tmp_path)['unapproved_sites'] == ['analysis/x/wrapped.py']
 
     def test_explicit_allow_files_suppresses(self, tmp_path):
-        (tmp_path / 'ephys').mkdir()
-        (tmp_path / 'ephys' / 'ok.py').write_text(
+        (tmp_path / 'analysis' / 'x').mkdir(parents=True)
+        (tmp_path / 'analysis' / 'x' / 'ok.py').write_text(
             "kf = KFold(n_splits=5, shuffle=True)\n", encoding='utf-8')
-        out = kfold_shuffle_audit(repo_root=tmp_path, allow_files=['ephys/ok.py'])
+        out = kfold_shuffle_audit(repo_root=tmp_path, allow_files=['analysis/x/ok.py'])
         assert out['unapproved_sites'] == []
-        assert out['reviewed_sites'] == ['ephys/ok.py']
+        assert out['reviewed_sites'] == ['analysis/x/ok.py']

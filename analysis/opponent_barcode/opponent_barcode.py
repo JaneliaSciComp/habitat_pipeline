@@ -36,9 +36,9 @@ Example
 -------
 ::
 
-    python scripts/opponent_barcode.py
-    python scripts/opponent_barcode.py --label_mode group
-    python scripts/opponent_barcode.py --response raw
+    python analysis/opponent_barcode/opponent_barcode.py
+    python analysis/opponent_barcode/opponent_barcode.py --label_mode group
+    python analysis/opponent_barcode/opponent_barcode.py --response raw
 """
 
 from __future__ import annotations
@@ -58,14 +58,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-for p in (REPO_ROOT, REPO_ROOT / "scripts"):
-    if str(p) not in sys.path:
-        sys.path.insert(0, str(p))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from analysis._paths import results_dir  # noqa: E402
 
-import plot_decoding_accuracy_violins as violins  # noqa: E402
-from plot_decoding_auroc_histograms import INK, NONSIG_COLOR, SIG_COLOR  # noqa: E402
-from refine_permutation_fdr import decode_params  # noqa: E402
+from analysis.event_decoding import plot_decoding_accuracy_violins as violins  # noqa: E402
+from analysis.event_decoding.plot_decoding_auroc_histograms import INK, NONSIG_COLOR, SIG_COLOR  # noqa: E402
+from analysis.event_decoding.refine_permutation_fdr import decode_params  # noqa: E402
 
 plt.rcParams["font.family"] = "Arial"
 plt.rcParams["pdf.fonttype"] = 42
@@ -97,7 +97,7 @@ def load_events_and_responses(animal: str, session: str, mode: str, response: st
         with open(cache, "rb") as fh:
             return pickle.load(fh)
 
-    from ephys.decode_opponent_identity import decode_opponent_identity_population
+    from analysis.event_decoding.decode_opponent_identity import decode_opponent_identity_population
     from ingestion.data_paths import DataStorageManager
     from ingestion.ephys_sync import DataSyncManager
     from ingestion.kilosort_data_import import (_DEFAULT_QUALITY_THRESHOLDS,
@@ -439,13 +439,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                       f"mean Jaccard {np.nanmean(jac):.3f} vs {np.nanmean(nj):.3f}")
 
     tag = f"barcode_{args.label_mode}" + ("" if args.response == "evoked" else "_raw")
-    pd.DataFrame(rows).to_csv(REPO_ROOT / "results" / f"{tag}.csv", index=False)
+    pd.DataFrame(rows).to_csv(results_dir("opponent_barcode") / f"{tag}.csv", index=False)
     cells = []
     for rat, a in results.items():
         for i, cid in enumerate(a["cluster_ids"]):
             cells.append({"animal_id": rat, "cluster_id": cid,
                           **{f"d_{n}": a["d"][i, k] for k, n in enumerate(a["names"])}})
-    pd.DataFrame(cells).to_csv(REPO_ROOT / "results" / f"{tag}_cells.csv", index=False)
+    pd.DataFrame(cells).to_csv(results_dir("opponent_barcode") / f"{tag}_cells.csv", index=False)
     figs = {f"{tag}_fraction_vs_threshold_by_rat": fig_fraction(results, "free", what),
             f"{tag}_fraction_vs_threshold_block_by_rat": fig_fraction(results, "block", what),
             f"{tag}_specificity": fig_specificity(results, "free"),
@@ -453,7 +453,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     for name, fig in figs.items():
         if fig is None:
             continue
-        base = REPO_ROOT / "results" / name
+        base = results_dir("opponent_barcode") / name
         fig.savefig(base.with_suffix(".png"), dpi=300, bbox_inches="tight")
         fig.savefig(base.with_suffix(".pdf"), bbox_inches="tight")
         plt.close(fig)

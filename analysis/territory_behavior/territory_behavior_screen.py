@@ -1,6 +1,6 @@
 """Behavioural territory screen over every APT day (tracking only; see video/territory_behavior.py).
 
-    python scripts/territory_behavior_screen.py [--dates 20251216 20251217] [--out results/territory_behavior]
+    python analysis/territory_behavior/territory_behavior_screen.py [--dates 20251216 20251217] [--out results/territory_behavior]
 
 Per-chunk centre positions are cached as pickles so reruns are cheap.
 """
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from video.territory_behavior import arena_bounds, chunk_summary, day_screen, tracks_from_centers  # noqa: E402
 from video.tracking_import import (_APT_COLUMN_RE, _read_tracking_csv, parse_apt_tracking,  # noqa: E402
                                    read_tracking_header)

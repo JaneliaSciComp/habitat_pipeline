@@ -19,7 +19,7 @@ from bokeh.models import (
 from bokeh.palettes import Category10, Inferno256
 from bokeh.plotting import figure
 
-from ephys.decode_opponent_identity import align_spikes_to_events, extract_firing_rate_features
+from analysis.event_decoding.decode_opponent_identity import align_spikes_to_events, extract_firing_rate_features
 from ingestion.data_paths import (
     DataStorageManager, get_animals_and_sessions, get_tracking_files_by_date,
 )

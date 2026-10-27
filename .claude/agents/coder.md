@@ -17,12 +17,12 @@ made by the scientist before you were dispatched.
 
 - Never modify or delete anything under `config/`.
 - Never delete `.gui_cache/`.
-- Never touch `ephys/_lda_decoding.py`'s existing result-dict schema, function
+- Never touch `analysis/event_decoding/_lda_decoding.py`'s existing result-dict schema, function
   signatures, or `class_label`/`analysis_title` contract — you are *adding* a new
   module that follows the pattern, not editing the shared core those decoders depend on.
 - Never commit. Leave the working tree diff for the scientist to review.
 - Never change any cross-validation splitter in an existing module. In particular
-  `ephys/_lda_decoding.py`'s `StratifiedKFold(shuffle=True, random_state=42)` sites
+  `analysis/event_decoding/_lda_decoding.py`'s `StratifiedKFold(shuffle=True, random_state=42)` sites
   are allowlisted for a documented reason (see `HZ-STAT-005` in
   `discovery/hazards.json`) and changing them would move a published result. If your
   plan seems to require it, say so in your final report and stop.
@@ -52,12 +52,12 @@ Two established patterns in this repo — use whichever fits the analysis, don't
 a third:
 
 1. **Classification-shaped** (an animal/opponent/outcome identity to decode): reuse
-   the existing shared core directly — `ephys/_lda_decoding.py`'s
+   the existing shared core directly — `analysis/event_decoding/_lda_decoding.py`'s
    `run_population_per_cell_decode` / `single_cell_lda_decode` /
-   `compute_population_significance` — the way `ephys/decode_opponent_identity.py`
+   `compute_population_significance` — the way `analysis/event_decoding/decode_opponent_identity.py`
    does. Do not reimplement LDA or cross-validation.
 2. **Regression/custom-shaped** (a continuous variable, a distance, a rate): follow
-   `ephys/decode_partner_distance.py`'s **I/O-free-core + thin-wrapper** split — a
+   `analysis/partner_distance/decode_partner_distance.py`'s **I/O-free-core + thin-wrapper** split — a
    pure-compute function (arrays in, result-dict out, no data loading) plus a thin
    wrapper that does the loading/sync and calls it. This is what lets both the GUI
    and a test exercise the same core on synthetic data.
@@ -69,12 +69,12 @@ Whatever shape you pick, the returned dict must carry:
   `{'error': str(e), 'status': 'failed'}`, same as every existing wrapper).
 - `parameters`: every knob the function took, **plus** `'class_label'` and
   `'analysis_title'` — these drive plot titles/axis labels elsewhere in the repo
-  (`ephys/decoding_plots.py`), so get them right even if you're not writing plots yet.
+  (`analysis/event_decoding/decoding_plots.py`), so get them right even if you're not writing plots yet.
 - A `behavioral_summary`-equivalent block (event/sample counts, unique classes/values)
   — whatever a scientist or the `interpret-results` skill would need to sanity-check
   the run without re-deriving it from raw data.
 - If a rigor layer applies (classification-shaped, or any permutation-null design):
-  wire `ephys/_stats_utils.py`'s `fdr_resolution`, `empirical_p_value`,
+  wire `analysis/_common/_stats_utils.py`'s `fdr_resolution`, `empirical_p_value`,
   `benjamini_hochberg`, `majority_class_baseline` the same way
   `decode_opponent_identity.py`/`_lda_decoding.py` do — opt-in via `n_shuffles=0`
   default, never a silent always-on cost.
@@ -85,11 +85,11 @@ Every existing analysis module states its statistical assumptions in the docstri
 not just in a comment buried in the math. Match this exactly:
 
 - A module-level **"Statistical notes"** section, modeled on
-  `ephys/decode_partner_distance.py`'s module docstring (CV scheme, what the null
+  `analysis/partner_distance/decode_partner_distance.py`'s module docstring (CV scheme, what the null
   breaks/preserves, units) — e.g. why folds are contiguous, not shuffled, when the
   signal is autocorrelated.
 - Function-level **"Assumptions:"** paragraphs inside any function that runs a
-  statistical test, modeled on `ephys/_lda_decoding.py::compute_population_significance`'s
+  statistical test, modeled on `analysis/event_decoding/_lda_decoding.py::compute_population_significance`'s
   docstring — state what exchangeability/independence assumption the null relies on.
 
 If you can't articulate the assumption, that's a sign the test itself needs more

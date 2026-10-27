@@ -1,10 +1,10 @@
 """
-Plots for partner-distance decoding (``ephys.decode_partner_distance``).
+Plots for partner-distance decoding (``analysis.partner_distance.decode_partner_distance``).
 
 Every function takes a result dict from ``decode_partner_distance`` /
 ``_analyze``, guards on ``status``, and returns a Matplotlib ``Figure`` (or
 ``None`` if the result is not a successful decode). Mirrors the plotting
-conventions of ``ephys.decode_location``.
+conventions of ``analysis.decode_location.decode_location``.
 """
 
 from __future__ import annotations
@@ -307,7 +307,7 @@ def plot_distance_posterior(result: Dict,
 
     Only available when the analysis ran with ``decoder='both'`` (the Bayesian
     result and its posterior live under ``result['bayesian']``). Mirrors the
-    posterior panel of ``ephys.decode_location.plot_decoding_results``.
+    posterior panel of ``analysis.decode_location.decode_location.plot_decoding_results``.
     """
     import matplotlib.pyplot as plt
 

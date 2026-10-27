@@ -1,5 +1,5 @@
 """
-Tests for ephys/run_inter_brain.py.
+Tests for analysis/inter_brain_dynamics/run_inter_brain.py.
 
 Covers:
 * argparse contract (the example invocation from the prompt parses)
@@ -19,8 +19,8 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import pytest  # noqa: E402
 
-from ephys.inter_brain_dynamics import SharedSubspaceFit  # noqa: E402
-from ephys.run_inter_brain import _analyze_and_save, _build_parser  # noqa: E402
+from analysis.inter_brain_dynamics.inter_brain_dynamics import SharedSubspaceFit  # noqa: E402
+from analysis.inter_brain_dynamics.run_inter_brain import _analyze_and_save, _build_parser  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

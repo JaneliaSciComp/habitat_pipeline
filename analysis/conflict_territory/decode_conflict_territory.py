@@ -11,10 +11,10 @@ the same conflict locations with the outcomes reassigned.
 
 Shape: regression/custom (pattern 2 in the coder brief) - an I/O-free core
 :func:`_analyze` (arrays in, result dict out) plus a thin loading wrapper
-:func:`decode_conflict_territory`, mirroring :mod:`ephys.decode_partner_distance`.
+:func:`decode_conflict_territory`, mirroring :mod:`analysis.partner_distance.decode_partner_distance`.
 It is *not* a per-event classification, so it does not go through
-``ephys._lda_decoding``; the decoder is the shrinkage LDA of
-:func:`ephys.territory_population._cv_balanced_accuracy`.
+``analysis.event_decoding._lda_decoding``; the decoder is the shrinkage LDA of
+:func:`analysis.territory.territory_population._cv_balanced_accuracy`.
 
 Statistical notes
 ------------------
@@ -64,12 +64,12 @@ Statistical notes
 * **Secondary time-shift null.** The real label sequence is circularly shifted
   relative to the rates, independently within each contiguous segment of
   analysed bins (shifts in ``[0.1 n, 0.9 n)`` of the segment length, as
-  ``ephys.rest_distance_coding._shifted``). It preserves the label's
+  ``analysis.rest_distance.rest_distance_coding._shifted``). It preserves the label's
   autocorrelation and bout structure and breaks its link to the rates. It is
   the place-coding-sensitive test: expected to be significant for a pure place
   population.
 * **Cross-validation is blocked, not shuffled** (``HZ-STAT-005``): contiguous
-  folds from :func:`ephys.territory_encoding.blocked_folds`, with ``purge_bins``
+  folds from :func:`analysis.territory.territory_encoding.blocked_folds`, with ``purge_bins``
   training bins dropped either side of every test block, because positions,
   labels and rates are strongly autocorrelated at 0.5 s. Long ``own``/``other``
   bouts make this close to cross-bout generalisation - conservative, possibly
@@ -78,7 +78,7 @@ Statistical notes
   imbalance; ``baseline_accuracy`` (majority-class rate, ``HZ-STAT-002``) is
   reported alongside for anyone reading plain accuracy (``accuracy``).
 * **p-values are add-one** ``(1+k)/(n+1)`` via
-  :func:`ephys._stats_utils.empirical_p_value` (``HZ-STAT-003``); non-finite
+  :func:`analysis._common._stats_utils.empirical_p_value` (``HZ-STAT-003``); non-finite
   draws are excluded from both numerator and denominator (``HZ-STAT-004``).
   ``p_floor`` is reported; with ``k`` W and ``m`` L points the map null has only
   ``C(k+m, k)`` distinct maps (``n_possible_maps``) and the number actually
@@ -114,10 +114,10 @@ from typing import Dict, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-from ephys._stats_utils import empirical_p_value, fdr_resolution, majority_class_baseline
-from ephys.run_territory import bin_counts, interp_on_grid
-from ephys.territory_encoding import blocked_folds
-from ephys.territory_population import (_balanced_accuracy, _cv_balanced_accuracy, _position_features,
+from analysis._common._stats_utils import empirical_p_value, fdr_resolution, majority_class_baseline
+from analysis.territory.run_territory import bin_counts, interp_on_grid
+from analysis.territory.territory_encoding import blocked_folds
+from analysis.territory.territory_population import (_balanced_accuracy, _cv_balanced_accuracy, _position_features,
                                         preprocess_rates)
 from video.conflict_territory import OTHER, OWN, nearest_conflict, outcome_is_win, voronoi_labels
 
@@ -177,7 +177,7 @@ def _map_ok(lab: np.ndarray, *, min_class_frac: float, n_folds: int, purge_bins:
 def _cv_predict(X: np.ndarray, y: np.ndarray, *, n_folds: int, purge: int, shrinkage: float = 0.3):
     """Out-of-fold predictions + per-fold balanced accuracy.
 
-    Same model and folds as :func:`ephys.territory_population._cv_balanced_accuracy`
+    Same model and folds as :func:`analysis.territory.territory_population._cv_balanced_accuracy`
     (shrinkage LDA, in-fold z-score, equal priors), which is what every null draw
     uses; this variant also returns the predictions. Pinned equal to it by a test.
     """
@@ -197,7 +197,7 @@ def _cv_predict(X: np.ndarray, y: np.ndarray, *, n_folds: int, purge: int, shrin
 
 
 def _shifted_labels(lab: np.ndarray, seg: np.ndarray, n: int, rng: np.random.Generator) -> np.ndarray:
-    from ephys.rest_distance_coding import _shifted
+    from analysis.rest_distance.rest_distance_coding import _shifted
     return _shifted(lab.astype(float), seg, n, rng).astype(int)
 
 
@@ -262,7 +262,7 @@ def _analyze(rates: np.ndarray, x: np.ndarray, y: np.ndarray, segment_id: np.nda
         a draw from the label's own autocorrelation structure, independent of
         the rates; this holds for stationary data and is violated by slow drift
         shared by rates and position (mitigated by the 120 s detrend in
-        :func:`ephys.territory_population.preprocess_rates`). Because the label
+        :func:`analysis.territory.territory_population.preprocess_rates`). Because the label
         is a function of position, this null is rejected by place coding alone.
         Both - folds are contiguous with a ``purge_bins`` gap; bins are not
         assumed independent, only blocks separated by the purge are.
@@ -413,9 +413,9 @@ def build_territory_binned_data(ks, tracking_df: pd.DataFrame, conflicts: pd.Dat
     """Bin quality-cell rates and focal position; drop untracked and near-conflict bins.
 
     Spikes come from ``ks.get_filtered_cells_spike_times(**_DEFAULT_QUALITY_THRESHOLDS)``
-    binned with :func:`ephys.run_territory.bin_counts` (not
+    binned with :func:`analysis.territory.run_territory.bin_counts` (not
     ``KilosortData.bin_spike_times``, which ignores the filter thresholds).
-    Position is :func:`ephys.run_territory.interp_on_grid` of ``tracking_df``
+    Position is :func:`analysis.territory.run_territory.interp_on_grid` of ``tracking_df``
     (``t, x, y[, speed]`` on the ephys clock), NaN beyond ``max_gap`` seconds
     from a tracked sample.
 

@@ -243,7 +243,7 @@ def _family_block(nb, family_id: int, iterations) -> Dict[str, Any]:
     # about zero tests would raise.
     resolution = None
     if n_shuffles and denom['n_tests_for_correction'] >= 1:
-        from ephys._stats_utils import fdr_resolution
+        from analysis._common._stats_utils import fdr_resolution
         resolution = fdr_resolution(n_tests=denom['n_tests_for_correction'],
                                     n_shuffles=int(n_shuffles),
                                     alpha=fdr['alpha'])
@@ -356,7 +356,7 @@ def _threats(nb, iterations, families, tier, figures) -> Tuple[str, ...]:
                     f"is q={row['q_at_declared']:.4f} at the declared denominator.")
 
     if any(f.exists and 'decoding' in Path(f.path).name for f in figures):
-        out.append("Figures from ephys/decoding_plots.py draw their chance line at "
+        out.append("Figures from analysis/event_decoding/decoding_plots.py draw their chance line at "
                    "1/n_classes, which is not the majority-class baseline. Read the "
                    "'above chance' marks accordingly.")
 

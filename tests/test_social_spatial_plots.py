@@ -1,5 +1,5 @@
 """
-Smoke tests for ephys/social_spatial_plots.py.
+Smoke tests for analysis/social_spatial_fields/social_spatial_plots.py.
 
 Builds a small synthetic SocialFieldResults and asserts each plot function
 returns a matplotlib Figure without error (Agg backend, no display).
@@ -13,8 +13,8 @@ import pandas as pd
 import pytest
 from types import SimpleNamespace
 
-from ephys.social_spatial_fields import compute_social_place_fields
-from ephys import social_spatial_plots as sp
+from analysis.social_spatial_fields.social_spatial_fields import compute_social_place_fields
+from analysis.social_spatial_fields import social_spatial_plots as sp
 from video.tracking_import import VideoTrackingData
 
 ARENA = ((0.0, 80.0), (0.0, 80.0))

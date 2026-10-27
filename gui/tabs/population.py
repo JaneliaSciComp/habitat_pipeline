@@ -1,6 +1,6 @@
 import streamlit as st
 
-from ephys.population_geometry import PopulationGeometryAnalyzer
+from analysis.population_geometry.population_geometry import PopulationGeometryAnalyzer
 from gui.loaders import (
     get_ks_data,
     get_rastermap_events,

@@ -8,7 +8,7 @@ You have all-animal allocentric tracking plus sorted spikes. The most direct nov
 - **Conjunctive (self × partner) cells** — Sarel-style: cells whose firing depends on the joint position of two animals. With several rats, you can ask whether conjunction is partner-specific (rat 6 vs rat 7) or partner-general.
 - **Topology-aware representations** — if the arena has corridors/junctions, build a graph and compare allocentric Euclidean maps with graph-geodesic maps; places that *share a corridor* with the partner may share more representation than equidistant places. This is the rodent analog of Babichev/Dabaghian topological-coding work.
 
-Drops in as `ephys/social_spatial_fields.py` alongside `decode_location.py`. The unifying API is a `compute_rate_map(spikes, target_xy, occupancy, smoothing)` that doesn't care whose `(x, y)` it gets.
+Drops in as `analysis/social_spatial_fields/social_spatial_fields.py` alongside `decode_location.py`. The unifying API is a `compute_rate_map(spikes, target_xy, occupancy, smoothing)` that doesn't care whose `(x, y)` it gets.
 
 ## 2. Decoding the partner from the self-brain
 
@@ -84,7 +84,7 @@ This is the modern shape of the shared-subspace idea and is uniquely well-suited
 - Extend to N brains and to conditioning on dyad identity — the embedding "remembers" which pair is which.
 - Use the embedding for downstream decoding instead of raw rates; near-state-of-the-art on social datasets in recent work.
 
-Wires into `ephys/inter_brain_dynamics.py` as an alternative `method="cebra"` branch.
+Wires into `analysis/inter_brain_dynamics/inter_brain_dynamics.py` as an alternative `method="cebra"` branch.
 
 ## 9. Behavioral and neural anticipation
 

@@ -2,7 +2,7 @@
 """
 Characterise one rat's opponent barcode: which cells, how many, how sparse.
 
-Builds on ``scripts/opponent_barcode.py`` (same encounters, same evoked
+Builds on ``analysis/opponent_barcode/opponent_barcode.py`` (same encounters, same evoked
 response: 0-2 s minus the [-2, -1] s baseline, same opponent-vs-rest d):
 
 1. Per-cell test. For every cell x opponent, d is compared with a
@@ -30,8 +30,8 @@ Example
 -------
 ::
 
-    python scripts/barcode_characterize.py                 # rat631 / 20251216
-    python scripts/barcode_characterize.py --target rat4679:20260929
+    python analysis/opponent_barcode/barcode_characterize.py                 # rat631 / 20251216
+    python analysis/opponent_barcode/barcode_characterize.py --target rat4679:20260929
 """
 
 from __future__ import annotations
@@ -47,16 +47,16 @@ import numpy as np
 import pandas as pd
 from scipy.stats import kurtosis
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-for p in (REPO_ROOT, REPO_ROOT / "scripts"):
-    if str(p) not in sys.path:
-        sys.path.insert(0, str(p))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from analysis._paths import results_dir  # noqa: E402
 
-from ephys._stats_utils import benjamini_hochberg, fdr_resolution  # noqa: E402
-import opponent_barcode as ob  # noqa: E402
-import plot_decoding_accuracy_violins as violins  # noqa: E402
-from plot_decoding_auroc_histograms import INK, NONSIG_COLOR, SIG_COLOR  # noqa: E402
-from plot_opponent_barcode_slide import NULL_COLOR, _order, _short, _style  # noqa: E402
+from analysis._common._stats_utils import benjamini_hochberg, fdr_resolution  # noqa: E402
+from analysis.opponent_barcode import opponent_barcode as ob  # noqa: E402
+from analysis.event_decoding import plot_decoding_accuracy_violins as violins  # noqa: E402
+from analysis.event_decoding.plot_decoding_auroc_histograms import INK, NONSIG_COLOR, SIG_COLOR  # noqa: E402
+from analysis.opponent_barcode.plot_opponent_barcode_slide import NULL_COLOR, _order, _short, _style  # noqa: E402
 
 plt.rcParams["font.family"] = "Arial"
 plt.rcParams["pdf.fonttype"] = 42
@@ -350,7 +350,7 @@ def main(argv=None) -> int:
                   f"(null {C_null[:, i, j].mean():+.3f} [{lo[i, j]:+.3f},{hi[i, j]:+.3f}])")
 
     # --- link to decoding + depth
-    fdr = pd.read_csv(REPO_ROOT / "results/refined_fdr_opponent.csv")
+    fdr = pd.read_csv(results_dir("event_decoding") / "refined_fdr_opponent.csv")
     dec = set(fdr[(fdr.animal_id == animal) & (fdr.q_value < args.alpha)].cluster_id)
     from ingestion.data_paths import DataStorageManager
     from ingestion.kilosort_data_import import load_kilosort_data
@@ -381,8 +381,8 @@ def main(argv=None) -> int:
             row[f"q_sup_{names[k]}"] = q["block"]["lo"][i, k]
         cell_rows.append(row)
     stem = f"barcode_{animal}"
-    pd.DataFrame(cell_rows).to_csv(REPO_ROOT / "results" / f"{stem}_cells.csv", index=False)
-    pd.DataFrame(rows).to_csv(REPO_ROOT / "results" / f"{stem}_summary.csv", index=False)
+    pd.DataFrame(cell_rows).to_csv(results_dir("opponent_barcode") / f"{stem}_cells.csv", index=False)
+    pd.DataFrame(rows).to_csv(results_dir("opponent_barcode") / f"{stem}_summary.csv", index=False)
 
     figs = {f"{stem}_bh_heatmap": fig_bh_heatmap(animal, names, col, d, sig, cids),
             f"{stem}_pi1": fig_pi1(animal, names, col, counts, est, ci,
@@ -393,7 +393,7 @@ def main(argv=None) -> int:
     for name, fig in figs.items():
         if fig is None:
             continue
-        base = REPO_ROOT / "results" / name
+        base = results_dir("opponent_barcode") / name
         fig.savefig(base.with_suffix(".png"), dpi=300, bbox_inches="tight")
         fig.savefig(base.with_suffix(".pdf"), bbox_inches="tight")
         plt.close(fig)

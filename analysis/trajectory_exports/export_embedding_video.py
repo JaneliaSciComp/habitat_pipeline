@@ -4,8 +4,8 @@ Reads the fit the Panel dashboard already cached (``.gui_cache/explore/``), so n
 refitted. Frames are drawn with matplotlib (trajectory coloured by time, Viridis, like the
 dashboard) and written with OpenCV, so no ffmpeg/kaleido is needed.
 
-    python scripts/export_embedding_video.py --animal rat631 --session 20251216_094334
-    python scripts/export_embedding_video.py --animal rat631 --session 20251216_094334 \
+    python analysis/trajectory_exports/export_embedding_video.py --animal rat631 --session 20251216_094334
+    python analysis/trajectory_exports/export_embedding_video.py --animal rat631 --session 20251216_094334 \
         --seconds-per-rev 60 --fps 30 --out cebra_pos.mp4
 """
 from __future__ import annotations
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from gui import explore_cache as xc  # noqa: E402
@@ -187,7 +187,7 @@ def main(argv=None) -> None:
     events = None if a.events.lower() == "none" else load_events(
         xc.cache_path(a.cohort, a.session, a.animal), a.animal, a.events, a.min_events)
     tag = "" if events is None else f"_{a.events}"
-    out = a.out or ROOT / "results" / f"{a.animal}_{a.session}_{a.embedding}{tag}_rotation.mp4"
+    out = a.out or ROOT / "results" / "trajectory_exports" / f"{a.animal}_{a.session}_{a.embedding}{tag}_rotation.mp4"
     title = f"{TITLES[key]} — {a.animal} {a.session}"
     n = render(fit, out, title=title, axis=AXES[key], events=events, fps=a.fps, seconds_per_rev=a.seconds_per_rev, revs=a.revs,
                elev=a.elev, stride=a.stride, t_range=t_range, size=a.size, dark=a.dark,

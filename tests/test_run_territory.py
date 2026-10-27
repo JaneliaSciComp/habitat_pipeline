@@ -1,9 +1,9 @@
-"""Mock-data tests for the binning/alignment helpers in ephys.run_territory."""
+"""Mock-data tests for the binning/alignment helpers in analysis.territory.run_territory."""
 
 import numpy as np
 import pandas as pd
 
-from ephys import run_territory as rt
+from analysis.territory import run_territory as rt
 
 
 def _track(t, x, y):

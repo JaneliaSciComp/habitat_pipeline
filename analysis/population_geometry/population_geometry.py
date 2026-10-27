@@ -24,7 +24,7 @@ import seaborn as sns
 from scipy.stats import zscore
 from sklearn.decomposition import PCA
 
-from ephys._rate_tensor import event_aligned_rates
+from analysis._common._rate_tensor import event_aligned_rates
 from video.behavioral_events import BehavioralEventsData
 
 try:

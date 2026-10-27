@@ -39,7 +39,7 @@ underlying statistics say. Concretely:
 
 ## The chance line in these figures is drawn at the wrong level, deliberately
 
-`ephys/decoding_plots.py` draws its chance lines — and computes its "Cells > Chance"
+`analysis/event_decoding/decoding_plots.py` draws its chance lines — and computes its "Cells > Chance"
 counts — at `1/n_classes`. That is prevalence-blind. The honest bar for the plain
 accuracy these plots show is the **majority-class baseline**, which is higher whenever
 classes are imbalanced.

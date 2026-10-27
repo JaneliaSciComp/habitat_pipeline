@@ -20,8 +20,8 @@ inhibition with the Stark & Abeles (2012) hollowed-Gaussian predictor:
   are flagged and dropped in the ``_far`` variants.
 
 Barcode cells and their preferred opponent come from
-``results/barcode_<rat>_cells.csv`` (BH q_exc < alpha, block null, written by
-``scripts/barcode_characterize.py``). Pair classes (unordered):
+``results/opponent_barcode/barcode_<rat>_cells.csv`` (BH q_exc < alpha, block null, written by
+``analysis/opponent_barcode/barcode_characterize.py``). Pair classes (unordered):
 co-tuned (same preferred opponent), competing (different), barcode x
 non-barcode, non x non.
 
@@ -42,7 +42,7 @@ Example
 -------
 ::
 
-    python scripts/barcode_connectivity.py                  # rat631 / 20251216
+    python analysis/opponent_barcode/barcode_connectivity.py                  # rat631 / 20251216
 """
 
 from __future__ import annotations
@@ -60,16 +60,16 @@ import numpy as np
 import pandas as pd
 from scipy.stats import fisher_exact, poisson, spearmanr
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-for p in (REPO_ROOT, REPO_ROOT / "scripts"):
-    if str(p) not in sys.path:
-        sys.path.insert(0, str(p))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from analysis._paths import results_dir  # noqa: E402
 
-from ephys._stats_utils import benjamini_hochberg  # noqa: E402
-import opponent_barcode as ob  # noqa: E402
-import plot_decoding_accuracy_violins as violins  # noqa: E402
-from plot_decoding_auroc_histograms import INK, NONSIG_COLOR, SIG_COLOR  # noqa: E402
-from plot_opponent_barcode_slide import NULL_COLOR, _short, _style  # noqa: E402
+from analysis._common._stats_utils import benjamini_hochberg  # noqa: E402
+from analysis.opponent_barcode import opponent_barcode as ob  # noqa: E402
+from analysis.event_decoding import plot_decoding_accuracy_violins as violins  # noqa: E402
+from analysis.event_decoding.plot_decoding_auroc_histograms import INK, NONSIG_COLOR, SIG_COLOR  # noqa: E402
+from analysis.opponent_barcode.plot_opponent_barcode_slide import NULL_COLOR, _short, _style  # noqa: E402
 
 plt.rcParams["font.family"] = "Arial"
 plt.rcParams["pdf.fonttype"] = 42
@@ -275,7 +275,7 @@ def main(argv=None) -> int:
     cids = np.asarray(data["cluster_ids"])[valid]
     R = data["R"][valid]
     d = d_all[valid]
-    cells_csv = pd.read_csv(REPO_ROOT / "results" / f"barcode_{animal}_cells.csv")
+    cells_csv = pd.read_csv(results_dir("opponent_barcode") / f"barcode_{animal}_cells.csv")
     cells_csv = cells_csv.set_index("cluster_id").loc[cids]
     qcols = [f"q_exc_{n}" for n in names]
     sigm = cells_csv[qcols].to_numpy() < args.alpha
@@ -400,8 +400,8 @@ def main(argv=None) -> int:
 
     summ = pd.DataFrame(rows)
     stem = f"barcode_connectivity_{animal}"
-    op.to_csv(REPO_ROOT / "results" / f"{stem}_pairs.csv", index=False)
-    summ.to_csv(REPO_ROOT / "results" / f"{stem}_summary.csv", index=False)
+    op.to_csv(results_dir("opponent_barcode") / f"{stem}_pairs.csv", index=False)
+    summ.to_csv(results_dir("opponent_barcode") / f"{stem}_summary.csv", index=False)
     with pd.option_context("display.width", 200, "display.max_columns", 20):
         print(summ.to_string(index=False, float_format=lambda v: f"{v:.4g}"))
     conn = op[op.conn != "none"]
@@ -414,7 +414,7 @@ def main(argv=None) -> int:
             f"{stem}_by_class": fig_by_class(op, summ),
             f"{stem}_signal_corr": fig_signal_corr(op, summ)}
     for name, fig in figs.items():
-        base = REPO_ROOT / "results" / name
+        base = results_dir("opponent_barcode") / name
         fig.savefig(base.with_suffix(".png"), dpi=300, bbox_inches="tight")
         fig.savefig(base.with_suffix(".pdf"), bbox_inches="tight")
         plt.close(fig)

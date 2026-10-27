@@ -10,18 +10,18 @@ conspecific(s) they encode, and writes a results pickle, a six-panel summary PNG
 and a multi-page PDF with the per-cluster rate-map grids for the top-N cells by
 Skaggs information. Only the focal animal needs ephys.
 
-Mirrors the CLI structure of ``ephys/run_inter_brain.py``.
+Mirrors the CLI structure of ``analysis/inter_brain_dynamics/run_inter_brain.py``.
 
 Example
 -------
 ::
 
-    python -m ephys.run_social_spatial \\
+    python -m analysis.social_spatial_fields.run_social_spatial \\
         --session_id 20251216 --animal_ids 631 632 633 \\
         --focal 631 \\
         --bin_size 5 --smoothing 5 --speed_threshold 5 \\
         --speed_filter_subject target \\
-        --n_shuffles 500 --output_dir ./results
+        --n_shuffles 500 --output_dir ./results/social_spatial_fields
 """
 
 from __future__ import annotations
@@ -112,7 +112,7 @@ def _max_skaggs_by_cluster(results) -> List[tuple]:
 
 
 def _write_outputs(results, output_dir: Path, top_n: int) -> None:
-    from ephys.social_spatial_plots import (
+    from analysis.social_spatial_fields.social_spatial_plots import (
         plot_rate_maps_grid,
         plot_social_place_summary,
     )
@@ -160,10 +160,10 @@ def main(argv: Optional[list] = None) -> int:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
-    sys.path.append(str(Path(__file__).parent.parent))
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
     try:
         from ingestion.focal_session import load_focal_session_inputs
-        from ephys.social_spatial_fields import compute_social_place_fields
+        from analysis.social_spatial_fields.social_spatial_fields import compute_social_place_fields
     except ImportError as e:
         logger.error("Import error: %s", e)
         return 1

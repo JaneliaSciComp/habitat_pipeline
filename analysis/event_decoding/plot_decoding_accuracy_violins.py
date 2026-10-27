@@ -2,7 +2,7 @@
 """
 Cross-session summary of per-cell opponent-decoding accuracy, as violin plots.
 
-Runs ``ephys.decode_opponent_identity.decode_opponent_identity_population`` once
+Runs ``analysis.event_decoding.decode_opponent_identity.decode_opponent_identity_population`` once
 per requested animal/recording, restricted to a single behaviour type
 (``EC`` = encounter by default) and to the top-N opponents by surviving event
 count (``--max_opponents 2`` by default, i.e. "top 2 animals"), then draws one
@@ -34,19 +34,19 @@ Examples
 ::
 
     # the sessions this script was written for (cohorts 5, 7 and 9)
-    python scripts/plot_decoding_accuracy_violins.py
+    python analysis/event_decoding/plot_decoding_accuracy_violins.py
 
     # explicit, with a significance screen
-    python scripts/plot_decoding_accuracy_violins.py \\
+    python analysis/event_decoding/plot_decoding_accuracy_violins.py \\
         --target rat650:20250819 --target rat631:20251216 --target rat630:20251216 \\
         --behavior_type EC --max_opponents 2 \\
         --n_shuffles 1000 --null_mode pooled \\
-        --output results/ec_top2_accuracy_violins.png
+        --output results/event_decoding/ec_top2_accuracy_violins.png
 
     # same-group vs other-group opponent, all opponents pooled
-    python scripts/plot_decoding_accuracy_violins.py --label_mode group \
+    python analysis/event_decoding/plot_decoding_accuracy_violins.py --label_mode group \
         --metric balanced_accuracy \
-        --output results/ec_group_balanced_accuracy_violins.png
+        --output results/event_decoding/ec_group_balanced_accuracy_violins.png
 """
 
 from __future__ import annotations
@@ -65,12 +65,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from discovery.capability_manifest import ManifestStale, check_testable  # noqa: E402
-from ephys.decode_opponent_identity import (  # noqa: E402
+from analysis.event_decoding.decode_opponent_identity import (  # noqa: E402
     decode_opponent_identity_population,
 )
 from ingestion.data_paths import DataStorageManager  # noqa: E402
@@ -183,7 +183,7 @@ def _build_parser() -> argparse.ArgumentParser:
                         "of cells to pass by chance alone.")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--output", type=str,
-                   default="results/decoding_accuracy_violins.png",
+                   default="results/event_decoding/decoding_accuracy_violins.png",
                    help="Figure path (.png). A .pdf sibling is written too.")
     p.add_argument("--cache_dir", type=str, default=".gui_cache/accuracy_violins",
                    help="Where per-group result pickles live.")

@@ -23,7 +23,7 @@ from database.lab_notebook import (
     canonical_params,
     compute_run_key,
 )
-from ephys._stats_utils import benjamini_hochberg, fdr_resolution
+from analysis._common._stats_utils import benjamini_hochberg, fdr_resolution
 
 
 # Iteration 12: animal 631 / session 20251210, contiguous folds +

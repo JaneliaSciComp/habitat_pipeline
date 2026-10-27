@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Slide figures for the per-opponent barcode test (``scripts/opponent_barcode.py``).
+Slide figures for the per-opponent barcode test (``analysis/opponent_barcode/opponent_barcode.py``).
 
 * ``<tag>_slide_fraction``: one panel per rat. Each opponent (sorted by
   number of encounters) shows the observed fraction of cells with
@@ -14,14 +14,14 @@ Slide figures for the per-opponent barcode test (``scripts/opponent_barcode.py``
   when its best opponent has d > 0.5 on odd encounters; rows are sorted by
   that opponent and show d on the held-out even encounters.
 
-Reads ``results/<tag>.csv`` and the cached response matrices; nothing is
+Reads ``results/opponent_barcode/<tag>.csv`` and the cached response matrices; nothing is
 recomputed except the odd/even d.
 
 Example
 -------
 ::
 
-    python scripts/plot_opponent_barcode_slide.py
+    python analysis/opponent_barcode/plot_opponent_barcode_slide.py
 """
 
 from __future__ import annotations
@@ -36,14 +36,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-for p in (REPO_ROOT, REPO_ROOT / "scripts"):
-    if str(p) not in sys.path:
-        sys.path.insert(0, str(p))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from analysis._paths import results_dir  # noqa: E402
 
-import opponent_barcode as ob  # noqa: E402
-import plot_decoding_accuracy_violins as violins  # noqa: E402
-from plot_decoding_auroc_histograms import INK, NONSIG_COLOR, SIG_COLOR  # noqa: E402
+from analysis.opponent_barcode import opponent_barcode as ob  # noqa: E402
+from analysis.event_decoding import plot_decoding_accuracy_violins as violins  # noqa: E402
+from analysis.event_decoding.plot_decoding_auroc_histograms import INK, NONSIG_COLOR, SIG_COLOR  # noqa: E402
 
 plt.rcParams["font.family"] = "Arial"
 plt.rcParams["pdf.fonttype"] = 42
@@ -186,7 +186,7 @@ def main(argv=None) -> int:
     p.add_argument("--out_dir", default=".gui_cache/opponent_barcode")
     args = p.parse_args(argv)
     tag = f"barcode_{args.label_mode}" + ("" if args.response == "evoked" else "_raw")
-    df = pd.read_csv(REPO_ROOT / "results" / f"{tag}.csv")
+    df = pd.read_csv(results_dir("opponent_barcode") / f"{tag}.csv")
     datas = {a: ob.load_events_and_responses(a, s, args.label_mode, args.response,
                                              REPO_ROOT / args.out_dir)
              for a, s in violins.DEFAULT_TARGETS}
@@ -205,7 +205,7 @@ def main(argv=None) -> int:
                       (f"{tag}_slide_heatmap_all_events_{args.example}",
                        fig_heatmap({args.example: datas[args.example]}, df, ob.HEADLINE,
                                    xl_heat, all_events=True))):
-        base = REPO_ROOT / "results" / name
+        base = results_dir("opponent_barcode") / name
         fig.savefig(base.with_suffix(".png"), dpi=300, bbox_inches="tight")
         fig.savefig(base.with_suffix(".pdf"), bbox_inches="tight")
         plt.close(fig)

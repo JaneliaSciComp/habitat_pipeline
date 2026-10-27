@@ -12,7 +12,7 @@ two levels:
 * **population** — a multivariate ridge regression predicting distance from
   all cells' binned rates, reported as cross-validated R² and RMSE.
 
-This is the *regression* analogue of :mod:`ephys.decode_location` (which does
+This is the *regression* analogue of :mod:`analysis.decode_location.decode_location` (which does
 continuous 2-D position decoding with a Bayesian decoder). Distance is a
 continuous variable defined over the whole session, so the analysis is
 **whole-session, time-binned**: firing rates and distance are binned onto the
@@ -38,11 +38,11 @@ Statistical notes
 * Distance and firing rates are strongly autocorrelated, so cross-validation
   uses **contiguous** ``KFold(shuffle=False)`` folds (shuffled folds would
   leak adjacent bins between train and test). This mirrors
-  ``ephys.inter_brain_dynamics._fit_r2``.
+  ``analysis.inter_brain_dynamics.inter_brain_dynamics._fit_r2``.
 * The null breaks the rate↔distance pairing by **circular-shifting distance**
   (preserving each stream's autocorrelation), mirroring
-  ``ephys.decode_location._null_position_decode`` and
-  ``ephys.inter_brain_dynamics.shuffle_null_subspace``.
+  ``analysis.decode_location.decode_location._null_position_decode`` and
+  ``analysis.inter_brain_dynamics.inter_brain_dynamics.shuffle_null_subspace``.
 
 Units
 -----
@@ -178,7 +178,7 @@ def compute_distance_tuning(firing_rates: np.ndarray, distance: np.ndarray, *,
     """Occupancy-normalized mean firing rate per distance bin, per cell.
 
     The 1-D, distance-space analogue of
-    ``ephys.decode_location._build_tuning_curves``.
+    ``analysis.decode_location.decode_location._build_tuning_curves``.
 
     Parameters
     ----------
@@ -244,7 +244,7 @@ def single_cell_distance_scores(firing_rates: np.ndarray, distance: np.ndarray, 
 
     The partial R² for cell ``j`` is ``R²(nuisance + cell) − R²(nuisance)`` —
     the variance-partition idea from
-    ``ephys.inter_brain_dynamics.regress_shared_on_behavior``. It quantifies
+    ``analysis.inter_brain_dynamics.inter_brain_dynamics.regress_shared_on_behavior``. It quantifies
     distance information in the cell *beyond* what the focal self-motion
     covariates already explain. Cells are ranked by partial R² when nuisance
     is provided, else by raw R².
@@ -335,7 +335,7 @@ def _null_distance_regression(firing_rates: np.ndarray, distance: np.ndarray, *,
                               seed: int = 0) -> Dict:
     """Population-R² null from a broken rate↔distance pairing.
 
-    Regression analogue of ``ephys.decode_location._null_position_decode``.
+    Regression analogue of ``analysis.decode_location.decode_location._null_position_decode``.
     ``null='reverse'`` time-reverses distance once (deterministic, preserves
     autocorrelation and marginals); ``null='shuffle'`` applies ``n_shuffles``
     random circular shifts (bounds ``[0.1T, 0.9T]``, as in
@@ -386,7 +386,7 @@ def _bayesian_decode_1d(rates: np.ndarray, tuning: np.ndarray,
     """Poisson-likelihood Bayesian decode of distance from population rates.
 
     The 1-D, distance-space analogue of
-    ``ephys.decode_location._bayesian_decode``. Unlike the linear ridge
+    ``analysis.decode_location.decode_location._bayesian_decode``. Unlike the linear ridge
     decoder, this exploits the *shape* of each cell's distance tuning curve, so
     a cell that fires maximally at an intermediate distance (a "distance field",
     near-zero linear correlation) still contributes.
@@ -740,7 +740,7 @@ def build_distance_binned_data(ks_focal, tracking, sync, focal: str, partner: st
 
     Bins where the distance, any cell's rate, or any nuisance column is NaN
     (e.g. outside the tracked range) are dropped, mirroring
-    ``ephys.decode_location.build_binned_data``.
+    ``analysis.decode_location.decode_location.build_binned_data``.
 
     Parameters
     ----------

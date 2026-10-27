@@ -1,5 +1,5 @@
 """
-Tests for ephys/decode_location.py.
+Tests for analysis/decode_location/decode_location.py.
 
 Two things are guarded here, since this module previously had zero test
 coverage and shipped a real bug (leaky, shuffled cross-validation folds on
@@ -21,7 +21,7 @@ import pandas as pd
 import pytest
 import sklearn.model_selection
 
-from ephys.decode_location import decode_location, _cv_decode
+from analysis.decode_location.decode_location import decode_location, _cv_decode
 from video.tracking_import import VideoTrackingData
 
 DT = 0.05  # 20 Hz tracking

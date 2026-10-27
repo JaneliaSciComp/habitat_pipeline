@@ -2,7 +2,7 @@
 """
 Per-cell opponent-identity decoding auROC, as stacked count histograms.
 
-Companion to ``scripts/plot_decoding_accuracy_violins.py``. It reads the
+Companion to ``analysis/event_decoding/plot_decoding_accuracy_violins.py``. It reads the
 cached results of that script's significance run and re-scores each cell with
 **auROC** instead of accuracy. The decoder is the same per-cell LDA: same
 features, same scaling, and the same ``StratifiedKFold(shuffle=True,
@@ -36,14 +36,14 @@ Example
 -------
 ::
 
-    python scripts/plot_decoding_auroc_histograms.py \\
+    python analysis/event_decoding/plot_decoding_auroc_histograms.py \\
         --n_shuffles 100 --null_mode per_cell --select_uncorrected_p 0.05 \\
-        --output results/ec_top2_auroc.png
+        --output results/event_decoding/ec_top2_auroc.png
 
     # self- vs other-group opponent (label_mode group)
-    python scripts/plot_decoding_auroc_histograms.py --label_mode group \
+    python analysis/event_decoding/plot_decoding_auroc_histograms.py --label_mode group \
         --n_shuffles 100 --null_mode per_cell --select_uncorrected_p 0.05 \
-        --output results/ec_group_auroc.png
+        --output results/event_decoding/ec_group_auroc.png
 """
 
 from __future__ import annotations
@@ -65,18 +65,18 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold, cross_val_predict
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-for p in (REPO_ROOT, REPO_ROOT / "scripts"):
-    if str(p) not in sys.path:
-        sys.path.insert(0, str(p))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from analysis._paths import results_dir  # noqa: E402
 
-from ephys._lda_decoding import _prepare_lda_features  # noqa: E402
+from analysis.event_decoding._lda_decoding import _prepare_lda_features  # noqa: E402
 from ingestion.data_paths import DataStorageManager  # noqa: E402
-from ephys.decode_event_outcome import decode_event_outcome_population  # noqa: E402
+from analysis.event_decoding.decode_event_outcome import decode_event_outcome_population  # noqa: E402
 from ingestion.ephys_sync import DataSyncManager  # noqa: E402
 from ingestion.kilosort_data_import import load_kilosort_data  # noqa: E402
 from video.behavioral_events import load_behavioral_events  # noqa: E402
-import plot_decoding_accuracy_violins as violins  # noqa: E402
+from analysis.event_decoding import plot_decoding_accuracy_violins as violins  # noqa: E402
 
 SIG_COLOR = "#d1352b"
 NONSIG_COLOR = "#8db4e2"
@@ -91,7 +91,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p = violins._build_parser()
     p.description = ("Stacked per-cell auROC histograms for opponent-identity "
                      "decoding, significance reused from the violins cache.")
-    p.set_defaults(output="results/ec_top2_auroc.png",
+    p.set_defaults(output="results/event_decoding/ec_top2_auroc.png",
                    select_uncorrected_p=0.05)
     p.add_argument("--auroc_cache_dir", type=str,
                    default=".gui_cache/auroc_histograms")
@@ -107,7 +107,7 @@ def _build_parser() -> argparse.ArgumentParser:
                    default="end", help="Outcome mode only (default end).")
     p.add_argument("--refined_fdr", type=str, default=None, metavar="CSV",
                    help="Mark cells significant by BH q < --alpha from "
-                        "scripts/refine_permutation_fdr.py's CSV instead of "
+                        "analysis/event_decoding/refine_permutation_fdr.py's CSV instead of "
                         "the uncorrected cached p < --select_uncorrected_p.")
     p.add_argument("--mid_p", type=float, default=None, metavar="P",
                    help="With --refined_fdr: also mark, in dark blue, cells "

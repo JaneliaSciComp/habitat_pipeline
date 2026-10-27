@@ -1,4 +1,4 @@
-"""Synthetic rest-at-a-fixed-spot sessions for calibrating ephys.rest_distance_coding.
+"""Synthetic rest-at-a-fixed-spot sessions for calibrating analysis.rest_distance.rest_distance_coding.
 
 A session is a few contiguous rest segments. Latents (all unit-variance AR(1) unless noted):
     d_fast   partner log-distance, fast (tau ``tau_d`` s)

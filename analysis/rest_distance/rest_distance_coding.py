@@ -28,7 +28,7 @@ from typing import Dict
 import numpy as np
 import pandas as pd
 
-from ephys._stats_utils import benjamini_hochberg
+from analysis._common._stats_utils import benjamini_hochberg
 
 
 # ---------------------------------------------------------------------------

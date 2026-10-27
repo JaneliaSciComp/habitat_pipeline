@@ -93,7 +93,7 @@ the point of a repo-native Runner.
 |---|---|---|
 | which opponent was involved | `ephys.decode_opponent_identity` | `decode_opponent_identity_population(...)` |
 | who won/lost a fight | `ephys.decode_event_outcome` | `decode_event_outcome_population(...)` |
-| shared cross-animal dynamics | `ephys.run_inter_brain` / `ephys.inter_brain_dynamics` | see `ephys/README.md` |
+| shared cross-animal dynamics | `analysis.inter_brain_dynamics.run_inter_brain` / `ephys.inter_brain_dynamics` | see `analysis/README.md` |
 | social place fields / partner tuning | `ephys.social_spatial_fields` | `compute_social_place_fields(...)` |
 | distance-to-partner tuning | `ephys.decode_partner_distance` | see module docstring |
 
@@ -101,7 +101,7 @@ For the two decoders above, run the wrapper function **in-process** (import it a
 call it directly, e.g. via `python -c "..."` or a short throwaway script) rather than
 invoking `main()`/the CLI — you need the real result-dict object to log curated
 numbers to the notebook, not just stdout text. The CLIs
-(`python -m ephys.decode_opponent_identity ...`) are still useful for a human-facing
+(`python -m analysis.event_decoding.decode_opponent_identity ...`) are still useful for a human-facing
 smoke check or when you only need the printed summary + saved PNGs.
 
 ## 2. Repo gotchas (don't rediscover these — see `CLAUDE.md` for the full list)
@@ -137,7 +137,7 @@ Both decoder wrappers accept `n_shuffles` (default `0` = off), `alpha` (default
 `0.05`), `seed`, and `null_mode` (`'per_cell'` default / `'pooled'`). Leave
 `n_shuffles=0` for quick exploratory/cache-friendly runs. When a claim rides on it,
 turn it on — it populates three keys (see
-`ephys/_lda_decoding.py::compute_population_significance`):
+`analysis/event_decoding/_lda_decoding.py::compute_population_significance`):
 
 | key | what it is |
 |---|---|
@@ -153,7 +153,7 @@ cells, and a permutation test floors p at `1/(n_shuffles+1)`. Across 149 cells,
 significant, so a null result means nothing. Check first:
 
 ```python
-from ephys._stats_utils import fdr_resolution
+from analysis._common._stats_utils import fdr_resolution
 fdr_resolution(n_tests=149, n_shuffles=200, alpha=0.05)
 # -> {'resolvable': False, 'recommended_n_shuffles': 2980, 'min_tests_at_floor': 15, ...}
 ```
@@ -297,8 +297,8 @@ registry cannot disagree. Don't pass it by hand.
 
 **Record `seed` and `dataset_fingerprint`.** Both are preconditions of the
 confirmatory tier: a confirmation run that can't be reproduced confirms nothing. Pass
-`seed=None` when the module genuinely hardcodes it — `ephys/decode_location.py` and
-`ephys/_lda_decoding.py`'s time-resolved path both use `np.random.default_rng(0)` with
+`seed=None` when the module genuinely hardcodes it — `analysis/decode_location/decode_location.py` and
+`analysis/event_decoding/_lda_decoding.py`'s time-resolved path both use `np.random.default_rng(0)` with
 no parameter — and the report will say "not recorded (module hardcodes it)" rather
 than implying one was chosen. `compute_population_significance` *does* plumb `seed`
 correctly, so pass it there.

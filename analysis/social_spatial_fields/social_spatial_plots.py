@@ -1,8 +1,8 @@
 """
-Plots for the social place fields module (ephys/social_spatial_fields.py).
+Plots for the social place fields module (analysis/social_spatial_fields/social_spatial_fields.py).
 
 Driven by ``SocialFieldResults.parameters['analysis_title']`` and
-``['class_label']``, mirroring the convention in ``ephys/decoding_plots.py``:
+``['class_label']``, mirroring the convention in ``analysis/event_decoding/decoding_plots.py``:
 the figures read cosmetic strings off the result dataclass rather than branching
 on the analysis type. NaN rate-map bins (occupancy below threshold) are masked
 light gray throughout.
@@ -14,7 +14,7 @@ map accumulated — in the same arena coordinates. Under a self-position stratum
 that is a single disc; without one it is the focal's dwell-time contours, a
 visual reminder that the map is not conditioned on the focal's position at all
 and may therefore be self-position leakage. See the "Self-position confound"
-section of ``ephys/social_spatial_fields.py``.
+section of ``analysis/social_spatial_fields/social_spatial_fields.py``.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from typing import Dict, List, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ephys.social_spatial_fields import (
+from analysis.social_spatial_fields.social_spatial_fields import (
     SocialFieldResults,
     field_similarity_across_targets,
 )
@@ -460,7 +460,7 @@ def plot_social_place_summary(results: SocialFieldResults, cluster_id: Optional[
                               show_focal: bool = True):
     """Dashboard: one example rate map per target, over four population panels.
 
-    Analog of ``ephys.decoding_plots.plot_decoding_summary``. When ``cluster_id``
+    Analog of ``analysis.event_decoding.decoding_plots.plot_decoding_summary``. When ``cluster_id``
     is None, the top cell by max Skaggs across targets is used for the example
     rate-map row. The bottom row is classification counts, self-vs-partner
     tuning, split-half stability, and bits/spike against firing rate (the

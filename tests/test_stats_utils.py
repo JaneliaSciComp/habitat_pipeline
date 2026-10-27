@@ -1,4 +1,4 @@
-"""Tests for ephys._stats_utils.
+"""Tests for analysis._common._stats_utils.
 
 `TestBenjaminiHochberg` mirrors tests/test_social_spatial_fields.py for the
 independent copy of the same algorithm used by the LDA-decoding rigor layer.
@@ -8,7 +8,7 @@ independent copy of the same algorithm used by the LDA-decoding rigor layer.
 import numpy as np
 import pytest
 
-from ephys._stats_utils import (
+from analysis._common._stats_utils import (
     benjamini_hochberg,
     empirical_p_value,
     fdr_resolution,

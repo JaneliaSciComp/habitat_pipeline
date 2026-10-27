@@ -15,7 +15,7 @@ social-context coding at a fixed resting spot. Three separate reasons, each meas
 
 This says the question is untestable *here*, not that the cells do not encode territory or social context.
 
-## 1. Behaviour: territory is not exclusive (`video/territory_behavior.py`, `scripts/territory_behavior_screen.py`)
+## 1. Behaviour: territory is not exclusive (`video/territory_behavior.py`, `analysis/territory_behavior/territory_behavior_screen.py`)
 - Only two days have more than one APT chunk: 20251216 (7) and 20251217 (3). The other nine have one.
 - Within-day median self-reliability of utilisation distributions is 0.36 on both days; median territoriality
   (self overlap minus strongest same-chunk neighbour overlap) is -0.12 and -0.11.
@@ -33,11 +33,11 @@ This says the question is untestable *here*, not that the cells do not encode te
 - Diagnostic plot (`results/territory/20251216_145034_630_exploratory/example_cells.png`): in 1659 the rat occupies
   2-3 bins and exclusivity spans 0.38-0.46, so the "effect" is a rate difference between three positions;
   rate-vs-exclusivity is V-shaped for the top cells.
-- Fix added: `exclusivity_spread_gate` in `ephys/run_territory.py` (eff_bins >= 10 and exclusivity 5-95% range
+- Fix added: `exclusivity_spread_gate` in `analysis/territory/run_territory.py` (eff_bins >= 10 and exclusivity 5-95% range
   >= 0.2 in every chunk; provisional). Rerun on 630: eff_bins 3.4-6.2, range 0.03-0.14, fails all chunks.
 - Earlier rat631 run (20251216, two chunks, gates ignored) was also null and is likewise uninformative.
 
-## 3. Social context at a fixed spot (`scripts/territory_coverage_table.py`, `scripts/hub_event_counts.py`)
+## 3. Social context at a fixed spot (`analysis/territory_behavior/territory_coverage_table.py`, `analysis/territory_behavior/hub_event_counts.py`)
 Arrival/departure of a partner while the focal rests (strict: 30 s before, 10 s after; loose: 10 s / 5 s).
 
 | Focal | Spot | Chunks with >=5 min rest | Best partner, strict | Best partner, loose |
@@ -75,8 +75,8 @@ overlaps `decode_partner_distance` (see `docs/TERRITORY_HUB_SPEC.md`, draft, not
   at any confirmatory day.
 
 ## Artifacts
-Code: `video/territory.py`, `video/territory_behavior.py`, `ephys/territory_encoding.py`,
-`ephys/territory_population.py`, `ephys/run_territory.py`, `scripts/territory_behavior_screen.py`,
-`scripts/territory_coverage_table.py`, `scripts/hub_event_counts.py`, `scripts/territory_cell_examples.py`;
+Code: `video/territory.py`, `video/territory_behavior.py`, `analysis/territory/territory_encoding.py`,
+`analysis/territory/territory_population.py`, `analysis/territory/run_territory.py`, `analysis/territory_behavior/territory_behavior_screen.py`,
+`analysis/territory_behavior/territory_coverage_table.py`, `analysis/territory_behavior/hub_event_counts.py`, `analysis/territory/territory_cell_examples.py`;
 tests under `tests/test_territory*.py`, `tests/test_run_territory.py`. Results (git-ignored) in
 `results/territory/` and `results/territory_behavior/`.

@@ -5,11 +5,11 @@ Opponent Identity Decoding from Single Cell Ephys Activity
 Decodes which opponent animal was involved in each behavioral event from
 single-cell ephys activity using cross-validated LDA. The shared core
 (spike alignment, feature extraction, LDA/CV, cell selection) lives in
-``ephys/_lda_decoding.py``; the shared plots live in
-``ephys/decoding_plots.py``. This module is the opponent-flavored wrapper.
+``analysis/event_decoding/_lda_decoding.py``; the shared plots live in
+``analysis/event_decoding/decoding_plots.py``. This module is the opponent-flavored wrapper.
 
 Usage:
-    from ephys.decode_opponent_identity import decode_opponent_identity_population
+    from analysis.event_decoding.decode_opponent_identity import decode_opponent_identity_population
     from ingestion.kilosort_data_import import load_kilosort_data
     from video.behavioral_events import load_behavioral_events
     from ingestion.data_paths import DataStorageManager
@@ -42,7 +42,7 @@ from typing import Dict, Iterable, List, Optional, Tuple, Union
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ephys._lda_decoding import (
+from analysis.event_decoding._lda_decoding import (
     align_spikes_to_events,
     compute_population_significance,
     extract_firing_rate_features,
@@ -52,9 +52,9 @@ from ephys._lda_decoding import (
     run_time_resolved_population_decode,
     single_cell_lda_decode,
 )
-from ephys._stats_utils import majority_class_baseline
+from analysis._common._stats_utils import majority_class_baseline
 from ingestion.kilosort_data_import import _DEFAULT_QUALITY_THRESHOLDS
-from ephys.decoding_plots import (
+from analysis.event_decoding.decoding_plots import (
     plot_best_cells_decoding,
     plot_decoding_accuracy_distribution,
     plot_decoding_summary,
@@ -143,7 +143,7 @@ def decode_opponent_identity_population(ks_data,
 
     ``n_shuffles`` (default 0, i.e. off) opts into the rigor layer: a
     label-permutation significance test + Benjamini-Hochberg FDR correction
-    across cells (see ``ephys._lda_decoding.compute_population_significance``).
+    across cells (see ``analysis.event_decoding._lda_decoding.compute_population_significance``).
     When enabled it populates three keys — ``significance`` (per-cell dict),
     ``significance_population`` (the single well-resolved population-level
     test, the right headline when events are few), and
@@ -524,7 +524,7 @@ def main():
 
     args = parser.parse_args()
 
-    sys.path.append(str(Path(__file__).parent.parent))
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
 
     try:
         from ingestion.kilosort_data_import import load_kilosort_data

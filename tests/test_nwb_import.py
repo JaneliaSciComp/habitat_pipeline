@@ -221,7 +221,7 @@ class TestLoadNwbSession:
         assert isinstance(sync, IdentitySyncManager)
 
         # imported dataclasses feed the LDA decoding core
-        from ephys._lda_decoding import run_population_per_cell_decode
+        from analysis.event_decoding._lda_decoding import run_population_per_cell_decode
 
         cs = events.events_data.query("type == 'cs_onsets'")["ts_start_ephys"].to_numpy()
         us = events.events_data.query("type == 'us_deliveries'")["ts_start_ephys"].to_numpy()

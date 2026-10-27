@@ -13,7 +13,7 @@ balanced accuracy, or plain accuracy with ``--metric accuracy``.
 
 Colours follow the significance histograms. Light blue is every other cell.
 Dark blue is uncorrected p < ``--mid_p``. Red is BH q < ``--alpha``, using
-``scripts/refine_permutation_fdr.py``'s CSV. Red points are drawn on top.
+``analysis/event_decoding/refine_permutation_fdr.py``'s CSV. Red points are drawn on top.
 
 Writes ``<stem>_by_rat`` (one panel per rat) and ``<stem>_combined`` (every
 rat pooled), as .png and .pdf.
@@ -22,8 +22,8 @@ Example
 -------
 ::
 
-    python scripts/plot_accuracy_by_channel.py
-    python scripts/plot_accuracy_by_channel.py --label_mode group
+    python analysis/event_decoding/plot_accuracy_by_channel.py
+    python analysis/event_decoding/plot_accuracy_by_channel.py --label_mode group
 """
 
 from __future__ import annotations
@@ -42,17 +42,17 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-for p in (REPO_ROOT, REPO_ROOT / "scripts"):
-    if str(p) not in sys.path:
-        sys.path.insert(0, str(p))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from analysis._paths import results_dir  # noqa: E402
 
 from ingestion.data_paths import DataStorageManager  # noqa: E402
 from ingestion.kilosort_data_import import load_kilosort_data  # noqa: E402
-import plot_decoding_accuracy_violins as violins  # noqa: E402
-from plot_decoding_auroc_histograms import (INK, MID_COLOR, NONSIG_COLOR,  # noqa: E402
+from analysis.event_decoding import plot_decoding_accuracy_violins as violins  # noqa: E402
+from analysis.event_decoding.plot_decoding_auroc_histograms import (INK, MID_COLOR, NONSIG_COLOR,  # noqa: E402
                                             SIG_COLOR)
-from refine_permutation_fdr import decode_params  # noqa: E402
+from analysis.event_decoding.refine_permutation_fdr import decode_params  # noqa: E402
 
 plt.rcParams["font.family"] = "Arial"
 plt.rcParams["pdf.fonttype"] = 42
@@ -63,7 +63,7 @@ STEM = {"opponent": "ec_top2", "group": "ec_group"}
 
 def collect(mode: str, metric: str, alpha: float, mid_p: float,
             cache_dir: Path) -> List[Dict]:
-    fdr = pd.read_csv(REPO_ROOT / f"results/refined_fdr_{mode}.csv")
+    fdr = pd.read_csv(results_dir("event_decoding") / f"refined_fdr_{mode}.csv")
     params = decode_params(mode)
     groups = []
     for animal, session in violins.DEFAULT_TARGETS:
@@ -197,7 +197,7 @@ def main(argv=None) -> int:
                                                   args.x, xlabel)),
                         ("_combined", figure_combined(groups, ylabel, args.alpha,
                                                       args.mid_p, args.x, xlabel))):
-        base = REPO_ROOT / "results" / f"{stem}{suffix}"
+        base = results_dir("event_decoding") / f"{stem}{suffix}"
         fig.savefig(base.with_suffix(".png"), dpi=300, bbox_inches="tight")
         fig.savefig(base.with_suffix(".pdf"), bbox_inches="tight")
         plt.close(fig)

@@ -1,5 +1,5 @@
 """
-Tests for ephys/inter_brain_dynamics.py.
+Tests for analysis/inter_brain_dynamics/inter_brain_dynamics.py.
 
 Covers synthetic recovery of a planted shared subspace, shape contracts,
 variance-partition algebra, NaN dropping, the T < N regime that requires
@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ephys.inter_brain_dynamics import (
+from analysis.inter_brain_dynamics.inter_brain_dynamics import (
     SharedSubspaceFit,
     choose_n_components,
     cross_animal_correlation_matrix,

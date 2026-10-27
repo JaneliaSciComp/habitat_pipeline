@@ -12,7 +12,7 @@ Two distinct multiple-comparison problems are handled at two different
 granularities:
 
 - **Within one analysis run**, many cells get tested at once — corrected by
-  ``ephys._lda_decoding.compute_population_significance`` (per-cell BH-FDR).
+  ``analysis.event_decoding._lda_decoding.compute_population_significance`` (per-cell BH-FDR).
 - **Across a campaign**, many analysis iterations get run against one
   dataset — corrected here, per :class:`TestFamily`, via
   :meth:`LabNotebook.recompute_family_significance`.
@@ -139,14 +139,14 @@ _SESSION_DATE_RE = re.compile(r'(20\d{6})')
 #: corrupting anything.
 _ANALYSIS_ENTRY_POINTS = {
     'ephys.decode_opponent_identity':
-        'ephys.decode_opponent_identity:decode_opponent_identity_population',
+        'analysis.event_decoding.decode_opponent_identity:decode_opponent_identity_population',
     'ephys.decode_event_outcome':
-        'ephys.decode_event_outcome:decode_event_outcome_population',
-    'ephys.decode_location': 'ephys.decode_location:decode_all_locations',
+        'analysis.event_decoding.decode_event_outcome:decode_event_outcome_population',
+    'ephys.decode_location': 'analysis.decode_location.decode_location:decode_all_locations',
     'ephys.social_spatial_fields':
-        'ephys.social_spatial_fields:compute_social_place_fields',
+        'analysis.social_spatial_fields.social_spatial_fields:compute_social_place_fields',
     'ephys.decode_partner_distance':
-        'ephys.decode_partner_distance:decode_partner_distance',
+        'analysis.partner_distance.decode_partner_distance:decode_partner_distance',
 }
 
 #: Params that describe *where* a run wrote things rather than *what* it
@@ -1622,7 +1622,7 @@ class LabNotebook:
         dropped because of what a result showed stays in the count.
 
         Never hand a count of surviving tests to
-        :func:`ephys._stats_utils.fdr_resolution`. Feeding it the number a
+        :func:`analysis._common._stats_utils.fdr_resolution`. Feeding it the number a
         post-hoc exclusion produced is how a design that guard would have
         rejected as unresolvable came to be certified as resolvable.
         """
@@ -1691,13 +1691,13 @@ class LabNotebook:
         ``p = 1.0``. That reproduces conservative Benjamini-Hochberg at the
         declared denominator exactly — the step-up minimum-accumulate collapses
         the padded tail to 1.0 and leaves each real p-value adjusted by
-        ``p_i * m / i`` — so :func:`ephys._stats_utils.benjamini_hochberg` is
+        ``p_i * m / i`` — so :func:`analysis._common._stats_utils.benjamini_hochberg` is
         reused unchanged and the statistics core needs no edit.
 
         Pass ``n_shuffles`` to also get the resolution verdict computed against
         the ledger's denominator rather than a hand count.
         """
-        from ephys._stats_utils import benjamini_hochberg, fdr_resolution
+        from analysis._common._stats_utils import benjamini_hochberg, fdr_resolution
 
         denom = self.family_denominator(test_family_id)
         with self.get_db_session() as db_session:
@@ -1838,7 +1838,7 @@ class LabNotebook:
                                        p_value_key: str = 'p_value') -> Dict[int, float]:
         """Campaign-level BH-FDR: one p-value per iteration in the family.
 
-        Distinct from ``ephys._lda_decoding.compute_population_significance``,
+        Distinct from ``analysis.event_decoding._lda_decoding.compute_population_significance``,
         which corrects across many *cells* within a single iteration — this
         corrects across many *iterations* (analyses) in one campaign. Every
         member iteration's ``result_summary`` must contain ``p_value_key``
@@ -1848,7 +1848,7 @@ class LabNotebook:
 
         Returns ``{iteration_id: q_value}``.
         """
-        from ephys._stats_utils import benjamini_hochberg
+        from analysis._common._stats_utils import benjamini_hochberg
 
         with self.get_db_session() as db_session:
             family = db_session.get(TestFamily, test_family_id)

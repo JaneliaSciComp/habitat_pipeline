@@ -55,7 +55,7 @@ markers = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["ingestion*", "video*", "ephys*", "database*", "gui*", "discovery*", "reports*"]
+include = ["ingestion*", "video*", "analysis*", "database*", "gui*", "discovery*", "reports*"]
 
 [tool.setuptools.package-data]
 # hazards.json and capability_manifest.json are data the discovery layer reads

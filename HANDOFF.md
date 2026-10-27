@@ -4,7 +4,7 @@
 
 ## What this thread is about
 
-Designing an **AI-in-the-loop discovery platform** on top of `habitat_pipeline`: an agent that runs analyses using the existing code, interprets results (numbers + figures), searches the literature, generates/ranks hypotheses, implements them as new `ephys/` modules following repo conventions, re-runs on data, and iterates — with a scientist gating the decisions.
+Designing an **AI-in-the-loop discovery platform** on top of `habitat_pipeline`: an agent that runs analyses using the existing code, interprets results (numbers + figures), searches the literature, generates/ranks hypotheses, implements them as new `analysis/<name>/` modules following repo conventions, re-runs on data, and iterates — with a scientist gating the decisions.
 
 ## Artifacts already created (in this repo)
 
@@ -41,7 +41,7 @@ If the REAL leg turns green (produces a real result-dict + figures), that's the 
 
 Built per the approved plan (`~/.claude/plans/vivid-wobbling-pillow.md`): the lab notebook, the rigor layer, and the two lowest-risk skills/subagent. Deferred (per explicit scope decision): `propose-hypotheses`, `implement-module`, and the Coder subagent — they need literature-MCP auth and code-writing approval gates that deserve their own review.
 
-**Rigor layer** (`ephys/_stats_utils.py`, `ephys/_lda_decoding.py::compute_population_significance`): opt-in (`n_shuffles=0` by default) label-permutation significance + Benjamini-Hochberg FDR across cells, wired additively into `decode_opponent_identity_population`/`decode_event_outcome_population` (new `results['significance']` key, new `--n_shuffles`/`--alpha` CLI flags) without touching the pinned result-dict schema or `run_population_per_cell_decode`'s signature. New guardrail test (`tests/test_lda_decoding_significance.py`) recreates Phase 0's synthetic 24-cell/6-tuned scenario and asserts the FDR correction doesn't manufacture more false positives than the naive screen did.
+**Rigor layer** (`analysis/_common/_stats_utils.py`, `analysis/event_decoding/_lda_decoding.py::compute_population_significance`): opt-in (`n_shuffles=0` by default) label-permutation significance + Benjamini-Hochberg FDR across cells, wired additively into `decode_opponent_identity_population`/`decode_event_outcome_population` (new `results['significance']` key, new `--n_shuffles`/`--alpha` CLI flags) without touching the pinned result-dict schema or `run_population_per_cell_decode`'s signature. New guardrail test (`tests/test_lda_decoding_significance.py`) recreates Phase 0's synthetic 24-cell/6-tuned scenario and asserts the FDR correction doesn't manufacture more false positives than the naive screen did.
 
 **Real-data verification** (animal 631/session 20251216, `decode_event_outcome`, default params, 200 shuffles): 148/149 cells decoded (population accuracy 60.6%±11.4%, best cell 95.0%), but **0/148 cells survive FDR correction** — a materially different, more honest conclusion than "146 successful cells at 55-60% accuracy" reads as on its own. Worth noting: the 12-winner/7-loser class split means naive majority-class guessing already scores 63.2%, i.e. the per-cell CV accuracy here doesn't even clear that naive baseline — with only 19 events split across 5 CV folds, this is a plausible, real result (underpowered, not a bug), and exactly the kind of over-claiming the rigor layer exists to catch before it reaches a hypothesis. Runtime: ~370s for 149 cells × 200 shuffles on this workstation — opt-in, not default, for a reason.
 
@@ -59,15 +59,15 @@ Built per the approved plan (`~/.claude/plans/vivid-wobbling-pillow.md`): the la
 
 A review of the Phase 1 work found three verified miscalibrations. All are now fixed. Sequencing rationale: an agent generating and screening hypotheses on top of a miscalibrated significance test is exactly the false-positive factory the design doc §5 exists to prevent, so this came before the remaining agentic pieces.
 
-**1. The FDR had no resolution to detect anything.** A permutation test floors p at `1/(n_shuffles+1)`; BH multiplies the smallest p by the number of tests. At `n_shuffles=200` across 149 cells the best achievable q was **0.74** — no cell could pass at any effect size, and ≥15 cells would have had to hit the p-floor simultaneously. The "0/148 significant" result was predetermined by the budget. New [`fdr_resolution()`](ephys/_stats_utils.py) computes this up front; `compute_population_significance` calls it, raises a `RuntimeWarning`, and returns the verdict as `results['significance_resolution']` so an under-resolved run is self-labelling. Two escape hatches added: `null_mode='pooled'` (ranks each cell against all cells' nulls pooled → ~150× finer p-floor at *identical* compute) and a properly-resolved single population-level test (below).
+**1. The FDR had no resolution to detect anything.** A permutation test floors p at `1/(n_shuffles+1)`; BH multiplies the smallest p by the number of tests. At `n_shuffles=200` across 149 cells the best achievable q was **0.74** — no cell could pass at any effect size, and ≥15 cells would have had to hit the p-floor simultaneously. The "0/148 significant" result was predetermined by the budget. New [`fdr_resolution()`](analysis/_common/_stats_utils.py) computes this up front; `compute_population_significance` calls it, raises a `RuntimeWarning`, and returns the verdict as `results['significance_resolution']` so an under-resolved run is self-labelling. Two escape hatches added: `null_mode='pooled'` (ranks each cell against all cells' nulls pooled → ~150× finer p-floor at *identical* compute) and a properly-resolved single population-level test (below).
 
 **2. Accuracy was compared against the wrong baseline.** `chance_level = 1/n_classes` is prevalence-blind; the per-cell path returned no baseline at all. For the real 12-winner/7-loser split the majority-class baseline is **63.2%**, so the previously-reported 55.9–60.6% accuracies were at or *below* naive guessing. Added (purely additive) `baseline_accuracy` + `balanced_accuracy` per cell and `population_baseline_accuracy` + `population_balanced_accuracy_mean` per run, plus shared `print_baseline_block`/`print_significance_block` CLI reporters that flag "BELOW majority-class baseline" explicitly. Left alone by decision: `scoring='accuracy'` and `decoding_plots.py`'s `1/n_classes` chance lines (documented as a gotcha in CLAUDE.md instead of changing existing figures).
 
 **3. Campaign-level FDR was dead code.** `recompute_family_significance` reads a `p_value` from `result_summary` but nothing produced one. Now `results['significance_population']` gives one analysis-level permutation p-value (mean accuracy vs. its null) — **free**, since it reuses the retained null matrix. Being a single test it needs no correction and is well resolved at modest `n_shuffles`, which makes it the right headline when events are few. Subtlety handled: all cells now share one permutation per shuffle index, because independent per-cell permutations would shrink the population-mean null's variance by ~1/n_cells and make that test anti-conservative (there's a regression test for this).
 
-**Also fixed (pre-existing).** `ephys/social_spatial_fields.py`'s `_p_geq`/`_p_leq` used `k/n`, which returns exactly `p=0.0` when no shuffle beats the observed value — invalid from a finite permutation test, and it survives BH as `q=0` reading as infinite confidence. Now the add-one `(1+k)/(n+1)` form, consistent with the decoding path. **This turned out to be masking the same resolution bug**: four social-place-field tests only passed because `p=0.0` short-circuited a configuration (3 targets, 100 shuffles, `sig_alpha=0.01` → best q 0.030) that could never have classified a cell as tuned. Their shuffle budget is now 500. Note `compute_social_place_fields` does **not** yet self-check resolution — flagged in CLAUDE.md as a known gap.
+**Also fixed (pre-existing).** `analysis/social_spatial_fields/social_spatial_fields.py`'s `_p_geq`/`_p_leq` used `k/n`, which returns exactly `p=0.0` when no shuffle beats the observed value — invalid from a finite permutation test, and it survives BH as `q=0` reading as infinite confidence. Now the add-one `(1+k)/(n+1)` form, consistent with the decoding path. **This turned out to be masking the same resolution bug**: four social-place-field tests only passed because `p=0.0` short-circuited a configuration (3 targets, 100 shuffles, `sig_alpha=0.01` → best q 0.030) that could never have classified a cell as tuned. Their shuffle budget is now 500. Note `compute_social_place_fields` does **not** yet self-check resolution — flagged in CLAUDE.md as a known gap.
 
-**Also fixed (found during verification).** Non-finite null draws — degenerate CV folds, common with few events — were being silently counted as "did not exceed", because `nan >= x` is False. That biases every p-value *downward*. Now `ephys._stats_utils.empirical_p_value` single-sources the add-one form and drops non-finite draws from both numerator and denominator; runs report `n_valid_shuffles`/`n_nan_draws`.
+**Also fixed (found during verification).** Non-finite null draws — degenerate CV folds, common with few events — were being silently counted as "did not exceed", because `nan >= x` is False. That biases every p-value *downward*. Now `analysis._common._stats_utils.empirical_p_value` single-sources the add-one form and drops non-finite draws from both numerator and denominator; runs report `n_valid_shuffles`/`n_nan_draws`.
 
 **Test suite**: `slow` marker added to `pyproject.toml` (none existed). Fast pass `pytest -q -m "not slow"` → 253 passed, 1 skipped, 5 deselected in ~90 s (was ~170 s with everything inline). Heavy permutation tests run in the full pass.
 
@@ -133,9 +133,9 @@ it, and flag every hypothesis produced this way as "not literature-grounded" rat
 than silently proceeding as if it were cited. On a scientist pick, pre-registers via
 `nb.add_hypothesis(...)` (status stays `'proposed'` — no gate at this stage).
 
-**`.claude/agents/coder.md`**: writes a new `ephys/` module + matching mock test.
+**`.claude/agents/coder.md`**: writes a new `analysis/<name>/` module + matching mock test.
 Picks between the two conventions already in the repo — reuse the classification
-core (`ephys/_lda_decoding.py`) or `decode_partner_distance.py`'s I/O-free-core +
+core (`analysis/event_decoding/_lda_decoding.py`) or `decode_partner_distance.py`'s I/O-free-core +
 thin-wrapper split — and is required to document statistical assumptions the way
 `decode_partner_distance.py` (module "Statistical notes") and
 `_lda_decoding.py::compute_population_significance` (function "Assumptions:") already
@@ -194,9 +194,9 @@ Cross-checking against the actual repo surfaced several corrections worth
 remembering:
 
 - Allocentric social place fields and conjunctive self×partner cells are **already
-  built** (`ephys/social_spatial_fields.py`) — not new work, contrary to how the
+  built** (`analysis/social_spatial_fields/social_spatial_fields.py`) — not new work, contrary to how the
   contributed list framed them.
-- `ephys/decode_location.py` already supports decoding *any* tracked animal's
+- `analysis/decode_location/decode_location.py` already supports decoding *any* tracked animal's
   position from *any* animal's spikes (`object_name` is independent of whose
   `KilosortData` is passed), with CV and a null baseline built in —
   partner-position decoding is nearly free, not a new-module item.
@@ -220,7 +220,7 @@ session's transcript). Result is a caution, not a finding — full writeup in
 - The module's default `null='reverse'` is a weak, order-only null (explicitly
   preserves autocorrelation per its docstring) — a first pass using it produced a
   spurious "win" for a near-stationary animal and cases where the null beat real
-  decoding outright. Re-ran with `null='shuffle'` + `ephys._stats_utils.empirical_p_value`
+  decoding outright. Re-ran with `null='shuffle'` + `analysis._common._stats_utils.empirical_p_value`
   + BH-FDR instead (iterations 10 then 11) — the same "always use a proper
   permutation null" lesson Phase 1.5 already taught the LDA decoders, now confirmed
   to generalize to this older module too.
@@ -230,12 +230,12 @@ session's transcript). Result is a caution, not a finding — full writeup in
 
 ## `decode_location.py` CV-leakage fix — done 2026-08-19
 
-Root-caused the self-decoding failure above: `ephys/decode_location.py::_cv_decode`
+Root-caused the self-decoding failure above: `analysis/decode_location/decode_location.py::_cv_decode`
 used `KFold(n_splits=cv_folds, shuffle=True, random_state=42)`. Position is
 autocorrelated in time (like distance in `decode_partner_distance.py`), so shuffled
 folds leak adjacent, near-identical time bins between train and test — this repo
 already has an established convention against exactly this
-(`decode_partner_distance.py`/`ephys.inter_brain_dynamics._fit_r2` both use
+(`decode_partner_distance.py`/`analysis.inter_brain_dynamics.inter_brain_dynamics._fit_r2` both use
 `KFold(shuffle=False)`), just not yet applied here. Confirmed empirically before
 fixing: patching in contiguous folds alone dropped self-decoding's p-value from 0.43
 to 0.138 (both real and null errors got larger and more honest — the leakage had
@@ -343,7 +343,7 @@ has not been explained.
 ### Layer 0 — `discovery/`
 
 `hazards.json` holds **29 entries**, 16 with executable detectors (`callable` →
-`ephys._stats_utils` or `discovery/detectors.py`; `test` → a pytest node id).
+`analysis._common._stats_utils` or `discovery/detectors.py`; `test` → a pytest node id).
 `validate_registry` enforces an **earn-your-place rule** — an entry qualifies only if
 it demonstrably caused a wrong result here, or it carries a real detector — plus
 importlib-resolvability of every callable and (under `slow`) collectability of every
@@ -378,7 +378,7 @@ real database migrated cleanly (snapshot taken first); legacy rows read `NULL` =
   result dict).
 - `family_fdr` pads declared-but-unrun members with p=1.0 and calls the existing
   `benjamini_hochberg` **unchanged** — that reproduces conservative BH at the declared
-  m exactly, so `ephys/_stats_utils.py` needed no edit at all.
+  m exactly, so `analysis/_common/_stats_utils.py` needed no edit at all.
 - `abandon_family_test`'s `outcome_dependent` is **required with no default**. An
   outcome-dependent exclusion *stays* in the denominator: deciding to drop it was
   itself a test.
@@ -417,7 +417,7 @@ forking paths, not compute cost.
 
 ### Correction to earlier framing in this file
 
-`ephys/_lda_decoding.py`'s three `StratifiedKFold(shuffle=True, random_state=42)`
+`analysis/event_decoding/_lda_decoding.py`'s three `StratifiedKFold(shuffle=True, random_state=42)`
 sites are **not** the same defect as the `decode_location` leak. That one shuffled
 0.5 s *position bins* — adjacent, near-identical samples of an autocorrelated signal.
 These split **one row per behavioural event**, seconds to minutes apart. The genuine

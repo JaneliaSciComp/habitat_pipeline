@@ -30,9 +30,9 @@ The current `DataStorageManager` is per-animal. Add multi-animal support without
 
 ### 2. Inter-brain analysis module — new under `ephys/`
 
-- **New file: `ephys/inter_brain_dynamics.py`**
+- **New file: `analysis/inter_brain_dynamics/inter_brain_dynamics.py`**
 
-Core API (label-agnostic, mirrors `ephys/_lda_decoding.py`'s style):
+Core API (label-agnostic, mirrors `analysis/event_decoding/_lda_decoding.py`'s style):
 
 ```python
 def fit_shared_subspace(
@@ -90,7 +90,7 @@ Implementation notes:
 
 ### 3. Plots — new under `ephys/`
 
-- **New file: `ephys/inter_brain_plots.py`**, with `SharedSubspaceFit` as the input contract. Functions:
+- **New file: `analysis/inter_brain_dynamics/inter_brain_plots.py`**, with `SharedSubspaceFit` as the input contract. Functions:
 
   - `plot_canonical_correlations(fit, shuffle_null=None)` — bar chart of per-K canonical correlation, with shuffle null band.
   - `plot_variance_partition(fit)` — stacked bars per animal for shared vs unique variance.
@@ -98,16 +98,16 @@ Implementation notes:
   - `plot_cross_animal_correlation(corr_matrix)` — heatmap of cell-pair correlations sorted by hierarchical clustering.
   - `plot_time_lagged_cca(lags, ccs)` — leader-follower lag profile.
   - `plot_shared_vs_behavior(fit, regression_results)` — bar chart of R² self vs partner vs joint, per shared dim.
-  - `plot_inter_brain_summary(fit, ...)` — 6-panel dashboard combining the above (like `plot_decoding_summary` in `ephys/decoding_plots.py`).
+  - `plot_inter_brain_summary(fit, ...)` — 6-panel dashboard combining the above (like `plot_decoding_summary` in `analysis/event_decoding/decoding_plots.py`).
 
-Match the title/axis-label pattern from `ephys/decoding_plots.py` (titles driven by `fit.parameters['analysis_title']`).
+Match the title/axis-label pattern from `analysis/event_decoding/decoding_plots.py` (titles driven by `fit.parameters['analysis_title']`).
 
 ### 4. CLI entry — new
 
-- **New file: `ephys/run_inter_brain.py`** with `main()` and `argparse`:
+- **New file: `analysis/inter_brain_dynamics/run_inter_brain.py`** with `main()` and `argparse`:
 
 ```bash
-python -m ephys.run_inter_brain \
+python -m analysis.inter_brain_dynamics.run_inter_brain \
     --session_id 20251216 --animal_ids 631 632 \
     --bin_size 0.5 --smoothing 0.25 \
     --max_K 20 --n_shuffles 200 \
@@ -116,7 +116,7 @@ python -m ephys.run_inter_brain \
 
 Behaviors:
 - Loads via `MultiAnimalSession`, builds common binned rates, fits the subspace, runs the shuffle null, runs the behavior regression (using `BehavioralEventsData` + tracking-derived features — see §5), saves a results pickle, and writes the six-panel summary PNG.
-- Mirror the CLI structure in `ephys/decode_opponent_identity.py` (argument parsing, output dir layout, logging).
+- Mirror the CLI structure in `analysis/event_decoding/decode_opponent_identity.py` (argument parsing, output dir layout, logging).
 
 ### 5. Behavior feature builder
 
@@ -149,15 +149,15 @@ The regression in §2 (`regress_shared_on_behavior`) needs continuous per-bin be
 ### 8. Documentation
 
 - Add a section to `README.md` under "ephys" describing the new module, the CLI invocation, and a 6-line example.
-- Add a row to `ARCHITECTURE.md`'s Capabilities table linking to `ephys/inter_brain_dynamics.py`.
+- Add a row to `ARCHITECTURE.md`'s Capabilities table linking to `analysis/inter_brain_dynamics/inter_brain_dynamics.py`.
 - Append a "Gotchas" entry to `CLAUDE.md`: all animals in a session share one ephys clock — bin spike times directly on a common ephys-second grid via `MultiAnimalSession.get_common_binned_rates`; do not attempt cross-animal clock conversion. Behavior↔ephys sync still goes through a single per-session `DataSyncManager`.
-- Notebook stub: `ephys/inter_brain_demo.ipynb` that walks through one session end-to-end (load → fit → variance partition → shuffle null → behavior regression → plots).
+- Notebook stub: `analysis/inter_brain_dynamics/inter_brain_demo.ipynb` that walks through one session end-to-end (load → fit → variance partition → shuffle null → behavior regression → plots).
 
 ## Acceptance criteria
 
-1. `python -m ephys.run_inter_brain --session_id 20251216 --animal_ids 631 632 --bin_size 0.5 --max_K 10 --n_shuffles 100 --output_dir ./results` runs end-to-end on real data, writes a pickle and a PNG, exits 0.
+1. `python -m analysis.inter_brain_dynamics.run_inter_brain --session_id 20251216 --animal_ids 631 632 --bin_size 0.5 --max_K 10 --n_shuffles 100 --output_dir ./results` runs end-to-end on real data, writes a pickle and a PNG, exits 0.
 2. Synthetic test recovers planted shared subspace; shuffle null is below true canonical correlations by ≥3 SD.
-3. `from ephys.inter_brain_dynamics import fit_shared_subspace, shuffle_null_subspace, regress_shared_on_behavior` and `from ephys.inter_brain_plots import plot_inter_brain_summary` work from a fresh Python session in the conda env.
+3. `from analysis.inter_brain_dynamics.inter_brain_dynamics import fit_shared_subspace, shuffle_null_subspace, regress_shared_on_behavior` and `from analysis.inter_brain_dynamics.inter_brain_plots import plot_inter_brain_summary` work from a fresh Python session in the conda env.
 4. Streamlit GUI shows an Inter-Brain tab, the multi-animal selector populates from the session's available rats, and the summary plot updates when K changes (using cached fits).
 5. `MultiAnimalSession.get_common_binned_rates` returns identical bin edges across animals, in ephys seconds, with no cross-clock arithmetic anywhere in the code path — verified by grep for `convert_ephys` / `convert_behavior` outside of `ingestion/`.
 6. No regressions: existing pytest suite passes (`cd tests && python run_tests.py`).
@@ -178,7 +178,7 @@ The regression in §2 (`regress_shared_on_behavior`) needs continuous per-bin be
 
 - Multi-animal **MARL agent** analyses from Figs. 5–6 of the paper. Just biological data.
 - Cell-type / opsin labeling — RatCity ephys does not have molecular labels.
-- Any modification to `ephys/_lda_decoding.py`, `ephys/decoding_plots.py`, or the existing decoder result-dict schemas.
+- Any modification to `analysis/event_decoding/_lda_decoding.py`, `analysis/event_decoding/decoding_plots.py`, or the existing decoder result-dict schemas.
 
 ## Stretch goals (only after the above is green and tested)
 

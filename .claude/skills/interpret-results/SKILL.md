@@ -105,7 +105,7 @@ plot look consistent with the reported mean and best-cell accuracy — not as a 
 of new claims.
 
 ⚠️ **The saved decoding figures draw their chance line at `1/n_classes`** and their
-"Cells > Chance" counts against it (`ephys/decoding_plots.py`). On imbalanced classes
+"Cells > Chance" counts against it (`analysis/event_decoding/decoding_plots.py`). On imbalanced classes
 that line sits *below* the honest majority-class baseline, so a figure can show most
 cells "above chance" for a result that doesn't beat naive guessing. Trust
 `baseline_accuracy` from step 2 over the plotted line, and say so if they conflict.

@@ -1,7 +1,7 @@
 """Shared event-aligned firing-rate tensor builder.
 
-Used by both [ephys/population_geometry.py](population_geometry.py) and
-[ephys/_lda_decoding.py](_lda_decoding.py). Keep this thin and dependency-free.
+Used by both [analysis/population_geometry/population_geometry.py](population_geometry.py) and
+[analysis/event_decoding/_lda_decoding.py](_lda_decoding.py). Keep this thin and dependency-free.
 """
 from __future__ import annotations
 

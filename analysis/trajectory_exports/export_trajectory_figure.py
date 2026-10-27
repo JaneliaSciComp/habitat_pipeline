@@ -5,7 +5,7 @@ Reads the explore cache (nothing is refitted or reloaded from the share). By def
 the same tracking source and time range as the cached CEBRA-position fit, so the figure
 matches ``export_embedding_video.py``.
 
-    python scripts/export_trajectory_figure.py --animal rat631 --session 20251216_094334
+    python analysis/trajectory_exports/export_trajectory_figure.py --animal rat631 --session 20251216_094334
 """
 from __future__ import annotations
 
@@ -16,12 +16,12 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from gui import explore_cache as xc  # noqa: E402
-from export_embedding_video import load_events  # noqa: E402
+from analysis.trajectory_exports.export_embedding_video import load_events  # noqa: E402
 
 #: An event is placed only if a tracked frame lies this close (as in the dashboard).
 EVENT_SNAP_S = 1.0
@@ -118,7 +118,7 @@ def main(argv=None) -> None:
     fig.tight_layout()
 
     tag = "" if a.events.lower() == "none" else f"_{a.events}"
-    out = a.out or ROOT / "results" / f"{a.animal}_{a.session}_trajectory_{src}{tag}.png"
+    out = a.out or ROOT / "results" / "trajectory_exports" / f"{a.animal}_{a.session}_trajectory_{src}{tag}.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, facecolor=bg)
     print(f"wrote {out}  ({len(tv)} frames, {n_shown} events shown, {n_untracked} untracked)")

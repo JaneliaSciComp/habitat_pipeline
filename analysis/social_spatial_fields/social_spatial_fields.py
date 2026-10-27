@@ -8,20 +8,20 @@ sparsity, coherence, split-half stability), attach shuffle-based significance,
 and classify cells by which conspecific(s) they encode (self vs partner-specific
 vs broadcast).
 
-This module is label-agnostic in the same spirit as :mod:`ephys._lda_decoding`:
+This module is label-agnostic in the same spirit as :mod:`analysis.event_decoding._lda_decoding`:
 the low-level ``compute_rate_map`` / ``spatial_*`` / ``field_significance``
 functions take plain arrays and DataFrames, and the multi-target sweep
 ``compute_social_place_fields`` is the wrapper that knows about
 ``KilosortData`` (focal) / ``VideoTrackingData`` (session) and stamps the
 result-dict ``parameters`` with ``class_label='target_position'`` and
-``analysis_title`` so the plot module ([ephys/social_spatial_plots.py]) can be
+``analysis_title`` so the plot module ([analysis/social_spatial_fields/social_spatial_plots.py]) can be
 driven from the dataclass without per-target branches. Only the focal animal
 needs ephys; the target animals contribute tracking trajectories only.
 
 Conventions
 -----------
 - ``RateMap.rates`` is ``(n_y_bins, n_x_bins)`` (image convention) — note this is
-  transposed relative to ``ephys.decode_location``'s ``(n_x, n_y)``.
+  transposed relative to ``analysis.decode_location.decode_location``'s ``(n_x, n_y)``.
 - Occupancy is **dwell time in seconds** (the per-spatial-bin sum of frame
   intervals), not a count of time bins.
 - All times are ephys seconds. Tracking↔ephys conversion lives only in
@@ -956,7 +956,7 @@ def field_significance(
     # returns exactly 0.0 when no shuffle beats the observed value, which then
     # survives Benjamini-Hochberg as q == 0 and reads as infinite confidence.
     # The floor here is 1/(n+1), matching
-    # ``ephys._lda_decoding.compute_population_significance``.
+    # ``analysis.event_decoding._lda_decoding.compute_population_significance``.
     def _p_geq(true_val, shuffles):
         valid = shuffles[np.isfinite(shuffles)]
         if not np.isfinite(true_val) or valid.size == 0:

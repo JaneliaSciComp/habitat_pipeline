@@ -1,5 +1,5 @@
 """
-Tests for ephys/decode_partner_distance.py.
+Tests for analysis/partner_distance/decode_partner_distance.py.
 
 Synthetic-recovery style (no disk-backed session): all tests exercise the
 array-level functions, which is why ``_analyze`` and the cores take pre-binned
@@ -13,7 +13,7 @@ and the ``insufficient_data`` guard.
 import numpy as np
 import pytest
 
-from ephys.decode_partner_distance import (
+from analysis.partner_distance.decode_partner_distance import (
     _analyze,
     _bayesian_decode_1d,
     _cv_bayesian_distance,

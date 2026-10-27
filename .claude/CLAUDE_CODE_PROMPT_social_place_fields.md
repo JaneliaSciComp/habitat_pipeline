@@ -21,7 +21,7 @@ Relevant prior literature this design is informed by (not to replicate verbatim 
 
 ## What to build
 
-### 1. Core module — `ephys/social_spatial_fields.py`
+### 1. Core module — `analysis/social_spatial_fields/social_spatial_fields.py`
 
 **Public dataclasses:**
 
@@ -193,9 +193,9 @@ def get_tracking_on_ephys_clock(
 
 This is the *only* place tracking↔ephys time conversion happens. Everything downstream takes `t` in ephys seconds.
 
-### 3. Plots — new file `ephys/social_spatial_plots.py`
+### 3. Plots — new file `analysis/social_spatial_fields/social_spatial_plots.py`
 
-Driven by `SocialFieldResults.parameters['analysis_title']` and `['class_label']`, mirroring the convention from `ephys/decoding_plots.py`.
+Driven by `SocialFieldResults.parameters['analysis_title']` and `['class_label']`, mirroring the convention from `analysis/event_decoding/decoding_plots.py`.
 
 - `plot_rate_maps_grid(results, cluster_id)` — one panel per target animal, side by side. Color bar shared; NaN bins masked light gray; cluster ID and per-target Skaggs/p in subtitle.
 - `plot_field_similarity_grid(results, cluster_id)` — heatmap of pairwise rate-map correlations across targets for a single cell.
@@ -205,10 +205,10 @@ Driven by `SocialFieldResults.parameters['analysis_title']` and `['class_label']
 - `plot_field_stability(results)` — split-half stability per target as violins; horizontal stripes at canonical thresholds (0.3, 0.5).
 - `plot_social_place_summary(results, ...)` — 6-panel dashboard combining the above (analog of `plot_decoding_summary`).
 
-### 4. CLI — new file `ephys/run_social_spatial.py`
+### 4. CLI — new file `analysis/social_spatial_fields/run_social_spatial.py`
 
 ```bash
-python -m ephys.run_social_spatial \
+python -m analysis.social_spatial_fields.run_social_spatial \
     --session_id 20251216 --animal_ids 631 632 633 \
     --focal 631 \
     --bin_size 5 --smoothing 5 --speed_threshold 5 \
@@ -217,7 +217,7 @@ python -m ephys.run_social_spatial \
     --output_dir ./results
 ```
 
-Same shape as `ephys/decode_opponent_identity.py`: load via `MultiAnimalSession`, build per-animal tracking on ephys clock via `get_tracking_on_ephys_clock`, call `compute_social_place_fields`, save a `SocialFieldResults` pickle, and emit the six-panel summary PNG plus a multi-page PDF with the per-cluster grid plots for the top-N cells by max Skaggs across targets.
+Same shape as `analysis/event_decoding/decode_opponent_identity.py`: load via `MultiAnimalSession`, build per-animal tracking on ephys clock via `get_tracking_on_ephys_clock`, call `compute_social_place_fields`, save a `SocialFieldResults` pickle, and emit the six-panel summary PNG plus a multi-page PDF with the per-cluster grid plots for the top-N cells by max Skaggs across targets.
 
 ### 5. GUI integration — new tab `gui/tabs/social_spatial.py`
 
@@ -257,19 +257,19 @@ Wire into `gui/app.py` next to the inter-brain tab.
 
 ### 7. Documentation
 
-- Add a row to `ARCHITECTURE.md`'s Capabilities table linking to `ephys/social_spatial_fields.py`.
+- Add a row to `ARCHITECTURE.md`'s Capabilities table linking to `analysis/social_spatial_fields/social_spatial_fields.py`.
 - Add a short section to `README.md` under "ephys" with the API summary and CLI example.
 - Append to `CLAUDE.md` Gotchas:
   - "Social place field occupancy must be computed over the *target's* `(x, y)`, not the focal animal's. Speed-gating by target (not focal) is the default and important — when the partner is stationary, occupancy variance dominates the rate map."
   - "Tracking↔ephys time conversion lives only in `MultiAnimalSession.get_tracking_on_ephys_clock`. Anything else that needs both clocks must call that method."
-- Notebook stub `ephys/social_place_fields_demo.ipynb`: load session → compute_social_place_fields → render grid plots for a few example cells → cell-classification summary.
+- Notebook stub `analysis/social_spatial_fields/social_place_fields_demo.ipynb`: load session → compute_social_place_fields → render grid plots for a few example cells → cell-classification summary.
 
 ## Acceptance criteria
 
-1. `python -m ephys.run_social_spatial --session_id 20251216 --animal_ids 631 632 633 --focal 631 --n_shuffles 200 --output_dir ./results` runs end-to-end on real data, writes a pickle, a PNG summary, and a PDF, exits 0.
+1. `python -m analysis.social_spatial_fields.run_social_spatial --session_id 20251216 --animal_ids 631 632 633 --focal 631 --n_shuffles 200 --output_dir ./results` runs end-to-end on real data, writes a pickle, a PNG summary, and a PDF, exits 0.
 2. Synthetic test #1 (planted partner field) recovers the bump within one bin; shuffle p < 0.001 with 500 shuffles.
 3. Synthetic test #2 (self-only planted) correctly classifies the cell as `self_only`.
-4. `from ephys.social_spatial_fields import compute_social_place_fields, RateMap, FieldStats, SocialFieldResults` works in a fresh Python session.
+4. `from analysis.social_spatial_fields.social_spatial_fields import compute_social_place_fields, RateMap, FieldStats, SocialFieldResults` works in a fresh Python session.
 5. Streamlit GUI shows a Social Place Fields tab; selecting focal + targets + cluster renders the grid plot; cache hits on re-render at the same params.
 6. No tracking↔ephys time conversion outside `MultiAnimalSession.get_tracking_on_ephys_clock` — verified by grep for `convert_behavior_to_ephys` / `convert_ephys_to_behavior` outside `ingestion/`.
 7. Result-dict conventions match the existing decoders: `parameters` carries `class_label='target_position'` and `analysis_title` so the plot module can be driven from the dataclass without code branches per target.

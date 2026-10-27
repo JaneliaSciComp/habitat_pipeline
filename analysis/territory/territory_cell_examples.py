@@ -1,9 +1,9 @@
 """Example-cell diagnostics for an exploratory territory run (rate vs exclusivity, rate map, exclusivity map).
 
-    python scripts/territory_cell_examples.py --animal 630 --session 20251216_145034 \
+    python analysis/territory/territory_cell_examples.py --animal 630 --session 20251216_145034 \
         --cells 415:1659 270:1659 143:1829 294:1659 294:1829 --out results/territory/..._examples.png
 
-Re-derives the same covariates as ephys.run_territory.analyse_chunk (leave-one-chunk-out map), so what is
+Re-derives the same covariates as analysis.territory.run_territory.analyse_chunk (leave-one-chunk-out map), so what is
 plotted is exactly what the GLM saw. Diagnostic only: no test is run.
 """
 
@@ -18,8 +18,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from ephys import run_territory as rt  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from analysis.territory import run_territory as rt  # noqa: E402
 from video.territory import build_territory_map_loo, exclusivity_map, label_positions  # noqa: E402
 
 

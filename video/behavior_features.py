@@ -1,7 +1,7 @@
 """
 Per-bin behavior feature matrix for inter-brain regression.
 
-The downstream regression in ``ephys/inter_brain_dynamics.py``
+The downstream regression in ``analysis/inter_brain_dynamics/inter_brain_dynamics.py``
 (``regress_shared_on_behavior``) needs continuous, ephys-aligned
 behavioral features at exactly the same bin centers as the firing-rate
 matrices produced by ``MultiAnimalSession.get_common_binned_rates``.

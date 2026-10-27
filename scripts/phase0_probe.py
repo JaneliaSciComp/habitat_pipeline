@@ -168,7 +168,7 @@ def check_loop(rep: Reporter, seed: int) -> None:
     sys.path.insert(0, str(REPO_ROOT))
     try:
         import numpy as np
-        from ephys._lda_decoding import run_population_per_cell_decode
+        from analysis.event_decoding._lda_decoding import run_population_per_cell_decode
     except Exception as exc:  # noqa: BLE001
         rep.record("LOOP: runner+interpreter", "FAIL", f"import failed: {exc}")
         return
@@ -217,8 +217,8 @@ def check_loop(rep: Reporter, seed: int) -> None:
     # silently skipped on this workstation; the pipeline now has the real thing.
     import warnings as _warnings
 
-    from ephys._lda_decoding import compute_population_significance
-    from ephys._stats_utils import fdr_resolution
+    from analysis.event_decoding._lda_decoding import compute_population_significance
+    from analysis._common._stats_utils import fdr_resolution
 
     # The resolution trap first: a permutation budget too small for the number
     # of cells makes a null result meaningless whatever the effect sizes are.

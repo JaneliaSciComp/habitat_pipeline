@@ -8,7 +8,7 @@ needs no ephys. These tests exercise:
 
 * the extracted free function ``video.tracking_import.resolve_tracking_on_ephys_clock``
   directly (no MultiAnimalSession needed), and
-* ``ephys.decode_partner_distance.build_distance_binned_data`` end-to-end with a
+* ``analysis.partner_distance.decode_partner_distance.build_distance_binned_data`` end-to-end with a
   stub focal ``KilosortData`` and a synthetic two-animal tracking object.
 
 Stub/synthetic style mirrors ``tests/test_multi_animal_tracking.py``; no disk or
@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ephys.decode_partner_distance import build_distance_binned_data
+from analysis.partner_distance.decode_partner_distance import build_distance_binned_data
 from video.tracking_import import VideoTrackingData, resolve_tracking_on_ephys_clock
 
 SESSION = "20251216"

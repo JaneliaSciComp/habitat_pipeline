@@ -1,5 +1,5 @@
 """
-Tests for video/conflict_territory.py and ephys/decode_conflict_territory.py.
+Tests for video/conflict_territory.py and analysis/conflict_territory/decode_conflict_territory.py.
 
 Synthetic, I/O-free (pattern of tests/test_decode_partner_distance.py): plain
 numpy trajectories, conflict layouts and populations, no share access.
@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ephys.decode_conflict_territory import (
+from analysis.conflict_territory.decode_conflict_territory import (
     _analyze,
     _cv_predict,
     build_territory_binned_data,
@@ -27,7 +27,7 @@ from ephys.decode_conflict_territory import (
     segments_from_mask,
     summarize,
 )
-from ephys.territory_population import _cv_balanced_accuracy, preprocess_rates
+from analysis.territory.territory_population import _cv_balanced_accuracy, preprocess_rates
 from tests.test_social_spatial_fields import _make_ks
 from video.behavioral_events import BehavioralEventsData
 from video.conflict_territory import (
@@ -265,7 +265,7 @@ class TestCore:
         lab = voronoi_labels(x, y, c.x, c.y, c.outcome)["own"]
         Z = preprocess_rates(rates, DT)
         preds, _ = _cv_predict(Z, lab, n_folds=5, purge=20)
-        from ephys.territory_population import _balanced_accuracy
+        from analysis.territory.territory_population import _balanced_accuracy
         assert _balanced_accuracy(lab, preds) == pytest.approx(
             _cv_balanced_accuracy(Z, lab, n_folds=5, purge=20))
 

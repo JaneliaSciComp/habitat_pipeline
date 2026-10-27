@@ -1,10 +1,10 @@
 import streamlit as st
 
-from ephys.decode_event_outcome import (
+from analysis.event_decoding.decode_event_outcome import (
     decode_event_outcome_population,
     decode_event_outcome_time_resolved,
 )
-from ephys.decode_opponent_identity import (
+from analysis.event_decoding.decode_opponent_identity import (
     decode_opponent_identity_population,
     decode_opponent_identity_time_resolved,
     plot_best_cells_decoding,

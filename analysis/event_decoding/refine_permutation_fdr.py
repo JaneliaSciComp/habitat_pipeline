@@ -3,7 +3,7 @@
 Staged permutation refinement and per-session BH-FDR for per-cell identity
 decoding.
 
-The violins cache (``scripts/plot_decoding_accuracy_violins.py``) holds a
+The violins cache (``analysis/event_decoding/plot_decoding_accuracy_violins.py``) holds a
 per-cell permutation p-value from 100 shuffles, so p >= 1/101. With m
 cells in a rat, BH gives q >= m/101: nothing can be significant. A lone
 strong cell needs about ``m / alpha`` shuffles
@@ -42,10 +42,10 @@ Example
 -------
 ::
 
-    python scripts/refine_permutation_fdr.py --label_mode opponent
-    python scripts/refine_permutation_fdr.py --label_mode group
+    python analysis/event_decoding/refine_permutation_fdr.py --label_mode opponent
+    python analysis/event_decoding/refine_permutation_fdr.py --label_mode group
     # winner vs loser, from the auROC script's outcome cache
-    python scripts/refine_permutation_fdr.py --label_mode outcome \
+    python analysis/event_decoding/refine_permutation_fdr.py --label_mode outcome \
         --target rat631:20251216
 """
 
@@ -66,17 +66,17 @@ import pandas as pd
 from joblib import Parallel, delayed
 from scipy.stats import beta
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-for p in (REPO_ROOT, REPO_ROOT / "scripts"):
-    if str(p) not in sys.path:
-        sys.path.insert(0, str(p))
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from analysis._paths import results_dir  # noqa: E402
 
-from ephys._lda_decoding import _cv_lda_accuracy, _prepare_lda_features  # noqa: E402
-from ephys._stats_utils import (benjamini_hochberg, empirical_p_value,  # noqa: E402
+from analysis.event_decoding._lda_decoding import _cv_lda_accuracy, _prepare_lda_features  # noqa: E402
+from analysis._common._stats_utils import (benjamini_hochberg, empirical_p_value,  # noqa: E402
                                 fdr_resolution)
 from ingestion.data_paths import DataStorageManager  # noqa: E402
 from ingestion.kilosort_data_import import load_kilosort_data  # noqa: E402
-import plot_decoding_accuracy_violins as violins  # noqa: E402
+from analysis.event_decoding import plot_decoding_accuracy_violins as violins  # noqa: E402
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -101,7 +101,7 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Where the cached 100-shuffle decodes live (read only).")
     p.add_argument("--out_dir", default=".gui_cache/refined_significance")
     p.add_argument("--csv", default=None,
-                   help="Default results/refined_fdr_<label_mode>.csv")
+                   help="Default results/event_decoding/refined_fdr_<label_mode>.csv")
     p.add_argument("--verify_only", action="store_true",
                    help="Only check that 100 shuffles at seed 0 reproduce the "
                         "cached p-values for a few cells per rat.")
@@ -300,7 +300,7 @@ def main(argv=None) -> int:
         return 0
 
     df = pd.concat(frames, ignore_index=True)
-    csv = Path(args.csv or REPO_ROOT / f"results/refined_fdr_{args.label_mode}.csv")
+    csv = Path(args.csv or results_dir("event_decoding") / f"refined_fdr_{args.label_mode}.csv")
     csv.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(csv, index=False)
     with open(out_dir / "refined_fdr.pkl", "wb") as fh:

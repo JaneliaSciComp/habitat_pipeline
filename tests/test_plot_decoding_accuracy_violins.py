@@ -1,4 +1,4 @@
-"""Tests for ``scripts/plot_decoding_accuracy_violins.py``.
+"""Tests for ``analysis/event_decoding/plot_decoding_accuracy_violins.py``.
 
 Mock result dicts only — no share access. The point of the file is the
 baseline logic: CLAUDE.md records that reading plain ``'accuracy'`` against
@@ -21,7 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _spec = importlib.util.spec_from_file_location(
     "plot_decoding_accuracy_violins",
-    REPO_ROOT / "scripts" / "plot_decoding_accuracy_violins.py",
+    REPO_ROOT / "analysis" / "event_decoding" / "plot_decoding_accuracy_violins.py",
 )
 violins = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = violins

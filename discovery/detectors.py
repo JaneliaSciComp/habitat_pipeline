@@ -2,7 +2,7 @@
 Executable checks backing the hazard registry (:mod:`discovery.hazards`).
 
 Every function here is deliberately thin. All of the statistics lives in
-:mod:`ephys._stats_utils` (``fdr_resolution``, ``empirical_p_value``,
+:mod:`analysis._common._stats_utils` (``fdr_resolution``, ``empirical_p_value``,
 ``benjamini_hochberg``, ``majority_class_baseline``); these functions only
 marshal a detector context into that module's arguments and apply a
 threshold. A detector that reimplements a statistic will eventually disagree
@@ -127,11 +127,11 @@ def accuracy_beats_baseline(
 
     Supply either ``class_counts`` (a mapping label -> count, or a sequence of
     labels, from which the baseline is derived via
-    :func:`ephys._stats_utils.majority_class_baseline`) or a precomputed
+    :func:`analysis._common._stats_utils.majority_class_baseline`) or a precomputed
     ``baseline``. Usable at propose time from manifest counts alone, before
     anything runs.
     """
-    from ephys._stats_utils import majority_class_baseline
+    from analysis._common._stats_utils import majority_class_baseline
 
     # Accept a whole result mapping and find the keys, since the raw result dict
     # and the curated summary use different names for the same quantities.
@@ -239,7 +239,7 @@ def tracking_coverage_ok(
     tracking file (``merged_20251216_0950_1200``) covers roughly 63% of a
     recording that starts at 09:43:34, and both
     :func:`video.tracking_import.resolve_tracking_on_ephys_clock` and
-    :func:`ephys.social_spatial_fields.compute_social_place_fields` accept a
+    :func:`analysis.social_spatial_fields.social_spatial_fields.compute_social_place_fields` accept a
     time window that defaults to "everything". An analysis run over the full
     recording therefore mixes no-position time into its occupancy maps
     silently.
@@ -300,7 +300,7 @@ def param_equals(value: Any, expected: Any) -> Dict[str, Any]:
     """Assert a parameter was set to a specific value.
 
     Used for hazards where a *default* is the trap — e.g.
-    :mod:`ephys.decode_location`'s ``null='reverse'``, which per its own
+    :mod:`analysis.decode_location.decode_location`'s ``null='reverse'``, which per its own
     docstring only reverses trajectory order and therefore preserves every
     marginal and the autocorrelation. It tests temporal-order asymmetry, not
     "beats chance", and a claim needs ``null='shuffle'``.
@@ -444,14 +444,31 @@ def method_implemented(module: str, attr: str) -> Dict[str, Any]:
 # module necessarily contains the very patterns it searches for (in its
 # regexes and its docstrings), so including it would make every scanning
 # detector self-match and report a permanent false positive.
-_PY_GLOBS = ('ephys/*.py', 'ingestion/*.py', 'video/*.py', 'database/*.py')
+_PY_GLOBS = ('analysis/**/*.py', 'ingestion/*.py', 'video/*.py', 'database/*.py')
+
+# Files that lived in ``scripts/`` before the analysis/ reorganization. The scan
+# never covered ``scripts/`` (it covered ``ephys/*.py``), so these are excluded to
+# keep the guard's scope exactly what it was. Widening the scan to them is a
+# scientist decision: ``plot_decoding_auroc_histograms.py`` reuses the allowlisted
+# ``StratifiedKFold(shuffle=True, random_state=42)`` folds on purpose and would be
+# flagged as an unapproved site. Delete an entry here to bring that file in scope.
+_UNSCANNED_FORMER_SCRIPTS = frozenset({
+    'plot_decoding_accuracy_violins.py', 'plot_decoding_auroc_histograms.py',
+    'plot_accuracy_by_channel.py', 'plot_bh_significant_bar.py', 'refine_permutation_fdr.py',
+    'opponent_barcode.py', 'barcode_characterize.py', 'barcode_connectivity.py',
+    'plot_opponent_barcode_slide.py', 'territory_cell_examples.py',
+    'territory_behavior_screen.py', 'territory_coverage_table.py',
+    'hub_distance_variation.py', 'hub_event_counts.py', 'rest_distance_cell_plots.py',
+    'export_trajectory_video.py', 'export_trajectory_figure.py',
+    'export_embedding_video.py', 'export_sync_video.py',
+})
 
 
 def _iter_repo_py(repo_root: Optional[Path] = None) -> Iterable[Path]:
     root = Path(repo_root) if repo_root else REPO_ROOT
     for pattern in _PY_GLOBS:
         for path in sorted(root.glob(pattern)):
-            if path.name.startswith('_test'):
+            if path.name.startswith('_test') or path.name in _UNSCANNED_FORMER_SCRIPTS:
                 continue
             yield path
 
@@ -495,7 +512,7 @@ def repo_pattern_absent(
 #: numbers rot on the first unrelated edit, and a stale allowlist silently
 #: stops guarding.
 #:
-#: ``ephys/_lda_decoding.py`` — ``StratifiedKFold(shuffle=True,
+#: ``analysis/event_decoding/_lda_decoding.py`` — ``StratifiedKFold(shuffle=True,
 #: random_state=42)`` operates on one row per *behavioral event*, and events
 #: are seconds-to-minutes apart, so it is not the adjacent-bin leakage that
 #: was fixed in ``decode_location``. The fixed ``random_state`` across the
@@ -509,7 +526,7 @@ def repo_pattern_absent(
 #: either the site was fixed (delete the entry) or the file moved (update it),
 #: and either way the allowlist has stopped guarding what it claims to.
 _KFOLD_SHUFFLE_ALLOWLIST = (
-    'ephys/_lda_decoding.py',
+    'analysis/event_decoding/_lda_decoding.py',
 )
 
 _KFOLD_SHUFFLE_RE = re.compile(r'(?:Stratified)?(?:Group)?KFold\s*\([^)]*shuffle\s*=\s*True', re.S)
@@ -523,7 +540,7 @@ def kfold_shuffle_audit(
 
     Shuffled folds leak whenever adjacent samples are near-identical draws
     from an autocorrelated signal. This was a real bug in
-    :mod:`ephys.decode_location`, whose ``_cv_decode`` shuffled 0.5 s position
+    :mod:`analysis.decode_location.decode_location`, whose ``_cv_decode`` shuffled 0.5 s position
     bins; fixing it to contiguous folds moved self-position decoding from
     p=0.43 to p=0.138 (both the real and null errors grew and became more
     honest — the leakage had been inflating both comparably, hiding a real
@@ -534,8 +551,8 @@ def kfold_shuffle_audit(
     per-file rationale) and fires on new ones. It does not assert the
     allowlisted sites are correct — only that they were reviewed. New code on
     a time-ordered axis should use ``KFold(shuffle=False)``, matching
-    :mod:`ephys.decode_partner_distance` and
-    :func:`ephys.inter_brain_dynamics._fit_r2`.
+    :mod:`analysis.partner_distance.decode_partner_distance` and
+    :func:`analysis.inter_brain_dynamics.inter_brain_dynamics._fit_r2`.
     """
     allowed = set(_KFOLD_SHUFFLE_ALLOWLIST)
     allowed.update(str(a).replace('\\', '/') for a in (allow_files or ()))

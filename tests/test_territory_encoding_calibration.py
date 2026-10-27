@@ -1,7 +1,7 @@
-"""Type-I calibration and power contract for ``ephys.territory_encoding``.
+"""Type-I calibration and power contract for ``analysis.territory.territory_encoding``.
 
 Written BEFORE the implementation. The module is skipped until
-``ephys/territory_encoding.py`` exists; when it does, these tests define what
+``analysis/territory/territory_encoding.py`` exists; when it does, these tests define what
 "calibrated" means and must pass before any real-data run.
 
 Contract (the implementation must provide):
@@ -37,8 +37,8 @@ import pytest
 from scipy import stats
 
 te = pytest.importorskip(
-    "ephys.territory_encoding",
-    reason="ephys/territory_encoding.py not written yet; these tests are its acceptance contract",
+    "analysis.territory.territory_encoding",
+    reason="analysis/territory/territory_encoding.py not written yet; these tests are its acceptance contract",
 )
 
 from tests._territory_sim import (  # noqa: E402

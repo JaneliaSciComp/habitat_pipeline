@@ -25,7 +25,7 @@ A hazard is only as useful as the check behind it, so each carries one of:
     avoided. The audit record is a ``HazardAcknowledgement`` row in the lab
     notebook — instructional enforcement, but reviewable after the fact.
 ``callable``
-    A repo function (usually in :mod:`ephys._stats_utils` or
+    A repo function (usually in :mod:`analysis._common._stats_utils` or
     :mod:`discovery.detectors`) plus a ``pass_if`` predicate. Genuinely
     executable.
 ``test``

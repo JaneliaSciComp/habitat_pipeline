@@ -1,6 +1,6 @@
 """Plots for the strongest rest-distance cells of a finished run (re-prepares the same inputs as the run).
 
-    python scripts/rest_distance_cell_plots.py --run_dir results/rest_distance/20251216_145034_630_exploratory
+    python analysis/rest_distance/rest_distance_cell_plots.py --run_dir results/rest_distance/20251216_145034_630_exploratory
 
 Selection (fixed, not tuned): cells with q <= 0.05 in every tested chunk, then the cells with the largest mean |r|
 among those whose r has the same sign in every chunk, up to ``--n_cells`` in total. One row per cell, one column per
@@ -21,8 +21,8 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from ephys import run_rest_distance as rr  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from analysis.rest_distance import run_rest_distance as rr  # noqa: E402
 
 
 def select_cells(cells: dict, n: int):

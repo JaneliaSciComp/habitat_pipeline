@@ -12,7 +12,7 @@ The **code is healthy and agent-drivable**; the loop's only hard blocker is **da
 
 1. **Environment probe.** Python 3.10; installed the light dependency set from `requirements.txt` (numpy/scipy/pandas/scikit-learn/matplotlib/seaborn/h5py/pytest). No heavy/GPU deps needed for the CLI path.
 2. **Mock-data test suite.** Ran the core analysis tests (`test_social_spatial_fields`, `test_inter_brain_dynamics`, `test_multi_animal_session`, `test_kilosort_data_analysis`, `test_decode_partner_distance`): **104 passed in ~13 s.**
-3. **Real-session CLI.** `python -m ephys.decode_opponent_identity --animal_id 631 --session_id 20251216 --use_quality_cells`.
+3. **Real-session CLI.** `python -m analysis.event_decoding.decode_opponent_identity --animal_id 631 --session_id 20251216 --use_quality_cells`.
 4. **Loop mechanics demo.** Ran the LDA core (`run_population_per_cell_decode`) on a synthetic session with known ground truth, then had an "Interpreter" pass read the result-dict and summarize.
 
 ## Results
@@ -51,7 +51,7 @@ The configs point at SMB shares (`//nearline/karpova/...`); those are on the Jan
 Re-run this same Phase 0 on the **Janelia workstation** (where the share is mounted) instead of the sandbox:
 
 ```bash
-python -m ephys.decode_opponent_identity --animal_id 631 --session_id 20251216 --use_quality_cells
+python -m analysis.event_decoding.decode_opponent_identity --animal_id 631 --session_id 20251216 --use_quality_cells
 ```
 
 If that produces a real result-dict + figures, we have a genuine end-to-end Runner→Interpreter pass on real data, and Phase 1 (codifying the loop as skills + the lab notebook, with the rigor layer wired in) can begin against a working baseline.
@@ -78,14 +78,14 @@ Error extracting behavioral events: No ephys-synchronized timestamp columns foun
 Analysis failed: No ephys-synchronized timestamp columns found in behavioral data
 ```
 
-Root cause: `ephys/decode_opponent_identity.py::main()` (and the same pattern in `ephys/decode_event_outcome.py::main()`) loads `BehavioralEventsData` and hands it straight to the decoder — it never constructs a `DataSyncManager` or calls `behavior_data.synchronize_with_ephys(sync)`. Per the `ts_*_ephys` gotcha in `CLAUDE.md`, `extract_opponent_labels`/`extract_outcome_labels` require sync to have already happened, so the CLI reliably fails on *every* real session, not just this one.
+Root cause: `analysis/event_decoding/decode_opponent_identity.py::main()` (and the same pattern in `analysis/event_decoding/decode_event_outcome.py::main()`) loads `BehavioralEventsData` and hands it straight to the decoder — it never constructs a `DataSyncManager` or calls `behavior_data.synchronize_with_ephys(sync)`. Per the `ts_*_ephys` gotcha in `CLAUDE.md`, `extract_opponent_labels`/`extract_outcome_labels` require sync to have already happened, so the CLI reliably fails on *every* real session, not just this one.
 
 The GUI path does not have this bug — `gui/loaders.py` builds a `DataSyncManager(dio_channel=1, ...)` and calls `events.synchronize_with_ephys(sync, create_new_columns=True)` before any decoding runs (`gui/loaders.py:50-92`). So the pipeline itself is fine; the two standalone CLI `main()` functions are missing a step the GUI already does correctly.
 
 This is a better-defined blocker than "data locality" was: it's a one-time fix (call the same sync sequence the GUI uses) rather than an environment constraint, and it fully explains why the REAL leg still fails on a machine where the share is mounted.
 
 ### ✅ Fixed — both CLIs now sync before decoding
-`ephys/decode_opponent_identity.py::main()` and `ephys/decode_event_outcome.py::main()` now construct a `DataSyncManager(data_manager, dio_channel=1)` and call `behavior_data.synchronize_with_ephys(sync, create_new_columns=True)` right after loading behavioral events, mirroring `gui/loaders.py`.
+`analysis/event_decoding/decode_opponent_identity.py::main()` and `analysis/event_decoding/decode_event_outcome.py::main()` now construct a `DataSyncManager(data_manager, dio_channel=1)` and call `behavior_data.synchronize_with_ephys(sync, create_new_columns=True)` right after loading behavioral events, mirroring `gui/loaders.py`.
 
 Verifying the fix surfaced two more pre-existing, unrelated bugs on this Windows workstation, both fixed along the way:
 - `video/behavioral_events.py` printed a `✓` (U+2713) in several status lines, which crashes on the default Windows `cp1252` console codepage (`UnicodeEncodeError`) — caught by the decoder's broad `except Exception`, so it surfaced as a confusing "Error extracting behavioral events" rather than the real cause. Replaced with `[OK]`.

@@ -35,7 +35,7 @@ flowchart LR
 | [config/](config/) | JSON cohort configs (`default_paths.json` = cohort 7, `cohort5_paths.json`). |
 | [ingestion/](ingestion/) | Path discovery, Kilosort 4 loading, Trodes binary I/O, ephys↔behavior clock sync. |
 | [video/](video/) | Tracking ingestion, behavioral event records, trajectory and event visualization. |
-| [ephys/](ephys/) | Shared LDA decoding core, opponent/outcome/location decoders, decoding plots, population geometry, rastermap, QA. |
+| [analysis/](analysis/) | One folder per analysis (see [analysis/README.md](analysis/README.md)). Shared LDA decoding core, opponent/outcome/location decoders, decoding plots, population geometry, rastermap, QA. |
 | [database/](database/) | SQLAlchemy ORM + CLI for session/animal/file metadata (`habitat_pipeline.db`). |
 | [gui/](gui/) | Streamlit dashboard ([gui/app.py](gui/app.py) + [gui/tabs/](gui/tabs/)) and Panel app ([gui/interactive_app.py](gui/interactive_app.py)). |
 | [workflow.py](workflow.py) | End-to-end CLI orchestrator (legacy; main entry points are now the GUIs and the per-module decoders). |
@@ -123,55 +123,55 @@ Plain JSON files declaring root paths for `ephys`, `video`, `tracking`, and `eve
 
 [video/plot_trajectory.py](video/plot_trajectory.py) — trajectory and occupancy plots: `plot_animal_path`, `plot_multiple_paths`, `plot_path_heatmap`, `plot_territorial_occupancy`, `plot_voronoi_territories`, `plot_proximity_network`, `compute_proximity_interactions`, plus `calculate_path_distance` / `calculate_path_statistics`, and `save_visualization` for batch export.
 
-### `ephys/` — Neural Analysis
+### `analysis/` — Neural Analysis
 
 Decoding modules share a label-agnostic core plus a shared plotting module:
 
-- [ephys/_lda_decoding.py](ephys/_lda_decoding.py) — spike alignment, firing-rate features, quality-cell selection, per-cell LDA, per-cell population sweep, time-resolved population LDA. Returns label-agnostic result dicts (`unique_classes`, `class_counts`, …).
-- [ephys/decoding_plots.py](ephys/decoding_plots.py) — `plot_decoding_accuracy_distribution`, `plot_best_cells_decoding`, `plot_decoding_summary`, `plot_time_resolved_decoding`, `plot_top_cells_firing_rates`, `plot_top_cells_rasters`. Titles/axis labels are driven by `results['parameters']['class_label']` and `['analysis_title']` so the same plots work for opponent-identity and outcome decoding.
+- [analysis/event_decoding/_lda_decoding.py](analysis/event_decoding/_lda_decoding.py) — spike alignment, firing-rate features, quality-cell selection, per-cell LDA, per-cell population sweep, time-resolved population LDA. Returns label-agnostic result dicts (`unique_classes`, `class_counts`, …).
+- [analysis/event_decoding/decoding_plots.py](analysis/event_decoding/decoding_plots.py) — `plot_decoding_accuracy_distribution`, `plot_best_cells_decoding`, `plot_decoding_summary`, `plot_time_resolved_decoding`, `plot_top_cells_firing_rates`, `plot_top_cells_rasters`. Titles/axis labels are driven by `results['parameters']['class_label']` and `['analysis_title']` so the same plots work for opponent-identity and outcome decoding.
 
-[ephys/decode_opponent_identity.py](ephys/decode_opponent_identity.py) — opponent (and ID-group) decoding wrapper.
+[analysis/event_decoding/decode_opponent_identity.py](analysis/event_decoding/decode_opponent_identity.py) — opponent (and ID-group) decoding wrapper.
 
 | Symbol | Purpose |
 |---|---|
 | `decode_opponent_identity_single_cell(...)` | Single-cell LDA decode wrapper, with optional `selected_opponents` filter. |
-| `decode_opponent_identity_population(ks_data, behavior_data, animal_of_interest, behavior_type=None, label_mode='opponent'/'group', ...)` ([ephys/decode_opponent_identity.py:111](ephys/decode_opponent_identity.py#L111)) | Per-cell population sweep. Returns the unified per-cell result dict. |
-| `decode_opponent_identity_time_resolved(...)` ([ephys/decode_opponent_identity.py:213](ephys/decode_opponent_identity.py#L213)) | Population-LDA accuracy per time bin with optional shuffle null. |
+| `decode_opponent_identity_population(ks_data, behavior_data, animal_of_interest, behavior_type=None, label_mode='opponent'/'group', ...)` ([analysis/event_decoding/decode_opponent_identity.py:111](analysis/event_decoding/decode_opponent_identity.py#L111)) | Per-cell population sweep. Returns the unified per-cell result dict. |
+| `decode_opponent_identity_time_resolved(...)` ([analysis/event_decoding/decode_opponent_identity.py:213](analysis/event_decoding/decode_opponent_identity.py#L213)) | Population-LDA accuracy per time bin with optional shuffle null. |
 | `main()` | CLI entry. |
 
-[ephys/decode_event_outcome.py](ephys/decode_event_outcome.py) — winner/loser decoding wrapper. Mirrors the opponent module: `decode_event_outcome_single_cell`, `decode_event_outcome_population` ([ephys/decode_event_outcome.py:85](ephys/decode_event_outcome.py#L85)), `decode_event_outcome_time_resolved`. Re-exports the shared plot functions.
+[analysis/event_decoding/decode_event_outcome.py](analysis/event_decoding/decode_event_outcome.py) — winner/loser decoding wrapper. Mirrors the opponent module: `decode_event_outcome_single_cell`, `decode_event_outcome_population` ([analysis/event_decoding/decode_event_outcome.py:85](analysis/event_decoding/decode_event_outcome.py#L85)), `decode_event_outcome_time_resolved`. Re-exports the shared plot functions.
 
-[ephys/decode_location.py](ephys/decode_location.py) — decode `(x, y)` of self/other animals from population activity.
+[analysis/decode_location/decode_location.py](analysis/decode_location/decode_location.py) — decode `(x, y)` of self/other animals from population activity.
 
 | Symbol | Purpose |
 |---|---|
-| `build_binned_data(ks_data, tracking_data, object_name, bin_size)` ([ephys/decode_location.py:28](ephys/decode_location.py#L28)) | Aligned firing-rate × position matrix. |
-| `decode_location(...)` ([ephys/decode_location.py:248](ephys/decode_location.py#L248)) | Bayesian population decoder (posterior-mean or MAP). |
-| `decode_all_locations(...)` ([ephys/decode_location.py:386](ephys/decode_location.py#L386)) | Sweep over tracked objects. |
+| `build_binned_data(ks_data, tracking_data, object_name, bin_size)` ([analysis/decode_location/decode_location.py:28](analysis/decode_location/decode_location.py#L28)) | Aligned firing-rate × position matrix. |
+| `decode_location(...)` ([analysis/decode_location/decode_location.py:248](analysis/decode_location/decode_location.py#L248)) | Bayesian population decoder (posterior-mean or MAP). |
+| `decode_all_locations(...)` ([analysis/decode_location/decode_location.py:386](analysis/decode_location/decode_location.py#L386)) | Sweep over tracked objects. |
 | `plot_decoding_results` / `plot_all_decoding_summary` | Reporting plots. |
 
-[ephys/population_geometry.py](ephys/population_geometry.py) — population dynamics and dimensionality reduction.
+[analysis/population_geometry/population_geometry.py](analysis/population_geometry/population_geometry.py) — population dynamics and dimensionality reduction.
 
 | Symbol | Purpose |
 |---|---|
-| `PopulationGeometryAnalyzer(ks_data, behavior_data)` ([ephys/population_geometry.py:46](ephys/population_geometry.py#L46)) | Build population matrices, run PCA/UMAP, analyze trajectories. |
+| `PopulationGeometryAnalyzer(ks_data, behavior_data)` ([analysis/population_geometry/population_geometry.py:46](analysis/population_geometry/population_geometry.py#L46)) | Build population matrices, run PCA/UMAP, analyze trajectories. |
 | `.construct_population_matrix(...)` / `.apply_dimensionality_reduction(...)` | Core construction and reduction methods. |
 | `.plot_population_dynamics(...)` / `.plot_population_dynamics_interactive(...)` / `.plot_pca_summary(...)` / `.plot_normalized_population_matrix(...)` | Built-in plots. |
-| `plot_pca_trajectory_with_events(...)` ([ephys/population_geometry.py:868](ephys/population_geometry.py#L868)) | 3D PCA trajectory annotated with event markers. |
-| `run_population_analysis_pipeline(ks_data, behavior_data, ...)` ([ephys/population_geometry.py:1064](ephys/population_geometry.py#L1064)) | End-to-end population analysis workflow. |
+| `plot_pca_trajectory_with_events(...)` ([analysis/population_geometry/population_geometry.py:868](analysis/population_geometry/population_geometry.py#L868)) | 3D PCA trajectory annotated with event markers. |
+| `run_population_analysis_pipeline(ks_data, behavior_data, ...)` ([analysis/population_geometry/population_geometry.py:1064](analysis/population_geometry/population_geometry.py#L1064)) | End-to-end population analysis workflow. |
 
-[ephys/plot_ephys_qa_stats.py](ephys/plot_ephys_qa_stats.py) — quality metric visualization: `plot_firing_pattern_histograms`, `plot_pass_fail_histograms`, `test_threshold_combinations`, `load_and_analyze_data`. CLI via `main()`.
+[analysis/ephys_qa/plot_ephys_qa_stats.py](analysis/ephys_qa/plot_ephys_qa_stats.py) — quality metric visualization: `plot_firing_pattern_histograms`, `plot_pass_fail_histograms`, `test_threshold_combinations`, `load_and_analyze_data`. CLI via `main()`.
 
-[ephys/rastermap_viz.py](ephys/rastermap_viz.py) — Rastermap-based population visualization (Stringer et al., 2024): `run_rastermap`, `plot_rastermap`, `plot_rastermap_interactive`, `plot_rastermap_with_events`. Also exposes a `bin_spikes_matrix` helper used by the Panel app.
+[analysis/rastermap_viz/rastermap_viz.py](analysis/rastermap_viz/rastermap_viz.py) — Rastermap-based population visualization (Stringer et al., 2024): `run_rastermap`, `plot_rastermap`, `plot_rastermap_interactive`, `plot_rastermap_with_events`. Also exposes a `bin_spikes_matrix` helper used by the Panel app.
 
-[ephys/inter_brain_dynamics.py](ephys/inter_brain_dynamics.py), [ephys/inter_brain_plots.py](ephys/inter_brain_plots.py), [ephys/run_inter_brain.py](ephys/run_inter_brain.py) — Inter-brain shared subspace between two simultaneously-recorded animals (Zhang et al., *Nature* 645, 2025). Backed by [ingestion/multi_animal_session.py](ingestion/multi_animal_session.py) (common ephys-second binning across animals) and [video/behavior_features.py](video/behavior_features.py) (per-bin self / partner / event features for the regression). Streamlit tab at [gui/tabs/inter_brain.py](gui/tabs/inter_brain.py); CLI `python -m ephys.run_inter_brain`. See [ephys/README.md](ephys/README.md) for the full API.
+[analysis/inter_brain_dynamics/inter_brain_dynamics.py](analysis/inter_brain_dynamics/inter_brain_dynamics.py), [analysis/inter_brain_dynamics/inter_brain_plots.py](analysis/inter_brain_dynamics/inter_brain_plots.py), [analysis/inter_brain_dynamics/run_inter_brain.py](analysis/inter_brain_dynamics/run_inter_brain.py) — Inter-brain shared subspace between two simultaneously-recorded animals (Zhang et al., *Nature* 645, 2025). Backed by [ingestion/multi_animal_session.py](ingestion/multi_animal_session.py) (common ephys-second binning across animals) and [video/behavior_features.py](video/behavior_features.py) (per-bin self / partner / event features for the regression). Streamlit tab at [gui/tabs/inter_brain.py](gui/tabs/inter_brain.py); CLI `python -m analysis.inter_brain_dynamics.run_inter_brain`. See [analysis/README.md](analysis/README.md) for the full API.
 
 | Symbol | Purpose |
 |---|---|
 | `MultiAnimalSession(session_id, animal_ids, ...)` ([ingestion/multi_animal_session.py](ingestion/multi_animal_session.py)) | Orchestrator over per-animal `DataStorageManager`s; `get_common_binned_rates` returns identical bin edges across animals on the shared ephys clock. |
-| `fit_shared_subspace(X_A, X_B, n_components, method='regularized', ...)` ([ephys/inter_brain_dynamics.py](ephys/inter_brain_dynamics.py)) | Ridge-whitened SVD of the cross-covariance (default; sklearn `cca` / `pls` also available). Returns a `SharedSubspaceFit` dataclass mirroring the LDA result-dict convention (`parameters['class_label'/'analysis_title']`). |
+| `fit_shared_subspace(X_A, X_B, n_components, method='regularized', ...)` ([analysis/inter_brain_dynamics/inter_brain_dynamics.py](analysis/inter_brain_dynamics/inter_brain_dynamics.py)) | Ridge-whitened SVD of the cross-covariance (default; sklearn `cca` / `pls` also available). Returns a `SharedSubspaceFit` dataclass mirroring the LDA result-dict convention (`parameters['class_label'/'analysis_title']`). |
 | `shuffle_null_subspace`, `choose_n_components`, `time_lagged_cca`, `cross_animal_correlation_matrix`, `regress_shared_on_behavior` | Null distribution (circular shifts), K selection (train-CC vs CV-mean rules), leader/follower sweep, full Pearson cross-correlation matrix, and self/partner/both behavior regression. |
-| `plot_inter_brain_summary(fit, ...)` ([ephys/inter_brain_plots.py](ephys/inter_brain_plots.py)) | Six-panel dashboard combining all seven individual plots. |
+| `plot_inter_brain_summary(fit, ...)` ([analysis/inter_brain_dynamics/inter_brain_plots.py](analysis/inter_brain_dynamics/inter_brain_plots.py)) | Six-panel dashboard combining all seven individual plots. |
 
 ### `database/` — Metadata Persistence
 
@@ -217,7 +217,7 @@ Supporting modules:
 
 ### `workflow.py` — CLI Orchestrator (legacy)
 
-Run with `python workflow.py --animal_id 613 --session_id 20251210`. Steps: `parse_arguments`, `process_kilosort_data`, `process_tracking_data`, `process_synchronization`, `generate_visualizations`. Useful as a reference scaffold but the GUIs and the per-module CLIs (`python -m ephys.decode_opponent_identity ...`, `python -m ephys.decode_event_outcome ...`) are the recommended entry points.
+Run with `python workflow.py --animal_id 613 --session_id 20251210`. Steps: `parse_arguments`, `process_kilosort_data`, `process_tracking_data`, `process_synchronization`, `generate_visualizations`. Useful as a reference scaffold but the GUIs and the per-module CLIs (`python -m analysis.event_decoding.decode_opponent_identity ...`, `python -m analysis.event_decoding.decode_event_outcome ...`) are the recommended entry points.
 
 ## Key Data Structures
 
@@ -236,7 +236,7 @@ Run with `python workflow.py --animal_id 613 --session_id 20251210`. Steps: `par
 - Per-cell population: `{status, cell_results: {cluster_id: {accuracy, accuracy_std, n_events, n_classes, class_counts, confusion_matrix, cv_scores}}, successful_cells, population_accuracy_mean/std/median, best_cell_accuracy, best_cell_id, event_times, labels, parameters, behavioral_summary}`.
 - Time-resolved population: `{status, accuracy_by_bin, accuracy_sem_by_bin, bin_centers, shuffle_null, chance_level, unique_classes, best_bin_*, n_cells, n_events, event_times, labels, parameters}`.
 
-`parameters` always carries `class_label` and `analysis_title`, which drive plot titles/axes via [ephys/decoding_plots.py](ephys/decoding_plots.py).
+`parameters` always carries `class_label` and `analysis_title`, which drive plot titles/axes via [analysis/event_decoding/decoding_plots.py](analysis/event_decoding/decoding_plots.py).
 
 ## Typical Analysis Pipeline
 
@@ -245,7 +245,7 @@ from ingestion.data_paths import DataStorageManager
 from ingestion.kilosort_data_import import load_kilosort_data
 from ingestion.ephys_sync import DataSyncManager
 from video.behavioral_events import load_behavioral_events
-from ephys.decode_opponent_identity import decode_opponent_identity_population
+from analysis.event_decoding.decode_opponent_identity import decode_opponent_identity_population
 
 dsm = DataStorageManager("631", "20251216", auto_load=True)
 ks = load_kilosort_data(dsm.get_kilosort_path())
@@ -277,31 +277,31 @@ Variants:
 | Python API | `from ingestion.data_paths import DataStorageManager` (see README Quick Start). |
 | Streamlit GUI | `streamlit run gui/app.py` — primary interactive entry point. |
 | Panel GUI | `panel serve gui/interactive_app.py --show` — linked timeline + Rastermap + PCA. |
-| Opponent decoder CLI | `python -m ephys.decode_opponent_identity --animal_id <id> --session_id <id>`. |
-| Outcome decoder CLI | `python -m ephys.decode_event_outcome --animal_id <id> --session_id <id>`. |
-| Inter-brain CLI | `python -m ephys.run_inter_brain --session_id <id> --animal_ids <id1> <id2> --output_dir <dir>`. |
-| QA stats CLI | `python -m ephys.plot_ephys_qa_stats --animal_id <id> --session_id <id>`. |
+| Opponent decoder CLI | `python -m analysis.event_decoding.decode_opponent_identity --animal_id <id> --session_id <id>`. |
+| Outcome decoder CLI | `python -m analysis.event_decoding.decode_event_outcome --animal_id <id> --session_id <id>`. |
+| Inter-brain CLI | `python -m analysis.inter_brain_dynamics.run_inter_brain --session_id <id> --animal_ids <id1> <id2> --output_dir <dir>`. |
+| QA stats CLI | `python -m analysis.ephys_qa.plot_ephys_qa_stats --animal_id <id> --session_id <id>`. |
 | Legacy workflow | `python workflow.py --animal_id <id> --session_id <id>`. |
 | Database CLI | `python -m database.database_cli <subcommand>`. |
-| Notebooks | [pipeline_demo.ipynb](pipeline_demo.ipynb), [test.ipynb](test.ipynb), [db_example.ipynb](db_example.ipynb), [ephys/LDA_demo.ipynb](ephys/LDA_demo.ipynb), [video/trajectory_plots_examples.ipynb](video/trajectory_plots_examples.ipynb), [tests/KilosortData_test_demo.ipynb](tests/KilosortData_test_demo.ipynb). |
+| Notebooks | [pipeline_demo.ipynb](pipeline_demo.ipynb), [test.ipynb](test.ipynb), [db_example.ipynb](db_example.ipynb), [analysis/event_decoding/LDA_demo.ipynb](analysis/event_decoding/LDA_demo.ipynb), [video/trajectory_plots_examples.ipynb](video/trajectory_plots_examples.ipynb), [tests/KilosortData_test_demo.ipynb](tests/KilosortData_test_demo.ipynb). |
 
 ## Capabilities
 
 | Feature | Module(s) |
 |---|---|
 | Automated data discovery | [ingestion/data_paths.py](ingestion/data_paths.py) |
-| Kilosort 4 ingestion + quality filtering + on-disk cache | [ingestion/kilosort_data_import.py](ingestion/kilosort_data_import.py), [ephys/plot_ephys_qa_stats.py](ephys/plot_ephys_qa_stats.py) |
+| Kilosort 4 ingestion + quality filtering + on-disk cache | [ingestion/kilosort_data_import.py](ingestion/kilosort_data_import.py), [analysis/ephys_qa/plot_ephys_qa_stats.py](analysis/ephys_qa/plot_ephys_qa_stats.py) |
 | Multi-animal tracking | [video/tracking_import.py](video/tracking_import.py), [video/plot_trajectory.py](video/plot_trajectory.py) |
 | Behavioral event analysis | [video/behavioral_events.py](video/behavioral_events.py), [video/behavioral_visualization.py](video/behavioral_visualization.py) |
 | Ephys↔behavior synchronization | [ingestion/ephys_sync.py](ingestion/ephys_sync.py) |
-| Opponent identity / ID-group decoding | [ephys/decode_opponent_identity.py](ephys/decode_opponent_identity.py) |
-| Event outcome (winner/loser) decoding | [ephys/decode_event_outcome.py](ephys/decode_event_outcome.py) |
-| Time-resolved population LDA | [ephys/_lda_decoding.py](ephys/_lda_decoding.py) |
-| Location decoding | [ephys/decode_location.py](ephys/decode_location.py) |
-| Population geometry (PCA/UMAP/trajectories) | [ephys/population_geometry.py](ephys/population_geometry.py) |
-| Rastermap visualization | [ephys/rastermap_viz.py](ephys/rastermap_viz.py) |
-| Inter-brain shared subspace (multi-animal CCA, nulls, behavior regression) | [ephys/inter_brain_dynamics.py](ephys/inter_brain_dynamics.py), [ephys/inter_brain_plots.py](ephys/inter_brain_plots.py), [ephys/run_inter_brain.py](ephys/run_inter_brain.py), [ingestion/multi_animal_session.py](ingestion/multi_animal_session.py), [video/behavior_features.py](video/behavior_features.py), [gui/tabs/inter_brain.py](gui/tabs/inter_brain.py) — see [ephys/README.md](ephys/README.md) |
-| Allocentric social place fields (per-cell rate maps over each animal's position, multi-target tuning + shuffle significance) | [ephys/social_spatial_fields.py](ephys/social_spatial_fields.py), [ephys/social_spatial_plots.py](ephys/social_spatial_plots.py), [ephys/run_social_spatial.py](ephys/run_social_spatial.py), [gui/tabs/social_spatial.py](gui/tabs/social_spatial.py) — tracking on the ephys clock via [ingestion/multi_animal_session.py](ingestion/multi_animal_session.py) |
+| Opponent identity / ID-group decoding | [analysis/event_decoding/decode_opponent_identity.py](analysis/event_decoding/decode_opponent_identity.py) |
+| Event outcome (winner/loser) decoding | [analysis/event_decoding/decode_event_outcome.py](analysis/event_decoding/decode_event_outcome.py) |
+| Time-resolved population LDA | [analysis/event_decoding/_lda_decoding.py](analysis/event_decoding/_lda_decoding.py) |
+| Location decoding | [analysis/decode_location/decode_location.py](analysis/decode_location/decode_location.py) |
+| Population geometry (PCA/UMAP/trajectories) | [analysis/population_geometry/population_geometry.py](analysis/population_geometry/population_geometry.py) |
+| Rastermap visualization | [analysis/rastermap_viz/rastermap_viz.py](analysis/rastermap_viz/rastermap_viz.py) |
+| Inter-brain shared subspace (multi-animal CCA, nulls, behavior regression) | [analysis/inter_brain_dynamics/inter_brain_dynamics.py](analysis/inter_brain_dynamics/inter_brain_dynamics.py), [analysis/inter_brain_dynamics/inter_brain_plots.py](analysis/inter_brain_dynamics/inter_brain_plots.py), [analysis/inter_brain_dynamics/run_inter_brain.py](analysis/inter_brain_dynamics/run_inter_brain.py), [ingestion/multi_animal_session.py](ingestion/multi_animal_session.py), [video/behavior_features.py](video/behavior_features.py), [gui/tabs/inter_brain.py](gui/tabs/inter_brain.py) — see [analysis/README.md](analysis/README.md) |
+| Allocentric social place fields (per-cell rate maps over each animal's position, multi-target tuning + shuffle significance) | [analysis/social_spatial_fields/social_spatial_fields.py](analysis/social_spatial_fields/social_spatial_fields.py), [analysis/social_spatial_fields/social_spatial_plots.py](analysis/social_spatial_fields/social_spatial_plots.py), [analysis/social_spatial_fields/run_social_spatial.py](analysis/social_spatial_fields/run_social_spatial.py), [gui/tabs/social_spatial.py](gui/tabs/social_spatial.py) — tracking on the ephys clock via [ingestion/multi_animal_session.py](ingestion/multi_animal_session.py) |
 | Streamlit + Panel dashboards | [gui/app.py](gui/app.py), [gui/interactive_app.py](gui/interactive_app.py) |
 | CLI orchestration | [workflow.py](workflow.py), per-module `main()` entries |
 | Metadata database (SQLite) | [database/](database/) |

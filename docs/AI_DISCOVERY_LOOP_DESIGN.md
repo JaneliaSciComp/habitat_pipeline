@@ -46,11 +46,11 @@ A small multi-agent system. Each role maps to concrete repo affordances.
 
 | # | Agent role | What it does | Repo hook |
 |---|---|---|---|
-| ① | **Runner** | Invokes analyses honoring the cache | `python -m ephys.decode_opponent_identity …`, `run_inter_brain`, `run_social_spatial`, `run_partner_distance`; `.gui_cache/` keyed on `(session, params)` |
-| ② | **Interpreter** | Reads the result-dict *and looks at the PNGs* (vision) | Unified result-dict schema (`parameters`, `class_label`, `analysis_title`, `behavioral_summary`) from `ephys/_lda_decoding.py`; plots from `ephys/decoding_plots.py` |
+| ① | **Runner** | Invokes analyses honoring the cache | `python -m analysis.event_decoding.decode_opponent_identity …`, `run_inter_brain`, `run_social_spatial`, `run_partner_distance`; `.gui_cache/` keyed on `(session, params)` |
+| ② | **Interpreter** | Reads the result-dict *and looks at the PNGs* (vision) | Unified result-dict schema (`parameters`, `class_label`, `analysis_title`, `behavioral_summary`) from `analysis/event_decoding/_lda_decoding.py`; plots from `analysis/event_decoding/decoding_plots.py` |
 | ③ | **Literature** | Searches papers/preprints/targets | MCP tools already connected in this environment: bioRxiv/medRxiv, PubMed-style article search, Open Targets, ChEMBL |
 | ④ | **Hypothesizer** | Generate → critique → rank candidate hypotheses | Co-Scientist-style; 2–3 agents debating, scored on a rubric (§5) |
-| ⑤ | **Coder** | Writes a new `ephys/` module **+ matching mock test**, following the result-dict contract | Pattern in `decode_*` wrappers; tests in `tests/` (e.g. `test_social_spatial_fields.py`) |
+| ⑤ | **Coder** | Writes a new `analysis/<name>/` module **+ matching mock test**, following the result-dict contract | Pattern in `decode_*` wrappers; tests in `tests/` (e.g. `test_social_spatial_fields.py`) |
 | ⑥ | **Runner** (again) | Re-runs and compares against prior iterations | Same as ① |
 
 **Interpreter caveat.** The neuroscience case study flags *weak visual self-evaluation* as a top failure mode. Mitigation: every figure the pipeline emits must be accompanied by the structured metrics behind it (already true of the result-dict), and the Interpreter reasons over the numbers primarily and the image secondarily — never the image alone.
@@ -83,7 +83,7 @@ Building §5's mechanisms changed four things about how they have to work. See
   hand-counted `n_tests` to `fdr_resolution`.
 - **`statsmodels` is not used and should not be.** §5 names
   `statsmodels.stats.multitest` and `statsmodels.stats.power`; neither is installed,
-  deliberately, so `ephys/_stats_utils.py` carries dependency-free equivalents. The
+  deliberately, so `analysis/_common/_stats_utils.py` carries dependency-free equivalents. The
   ledger's `family_fdr` reuses `benjamini_hochberg` **unchanged** by padding
   declared-but-unrun members with p=1.0, which reproduces conservative BH at the
   declared m exactly — so no edit to the statistics core was needed at all.

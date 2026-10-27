@@ -1,4 +1,4 @@
-"""Calibration and power for ephys.rest_distance_coding (partner distance at a fixed resting spot).
+"""Calibration and power for analysis.rest_distance.rest_distance_coding (partner distance at a fixed resting spot).
 
 Judged over independent synthetic sessions against the 99.9% binomial bound, one cell per session for the
 single-cell test (cells of a session share the same distance trace, so their p-values are not independent).
@@ -12,7 +12,7 @@ import pandas as pd
 import pytest
 from scipy import stats
 
-from ephys import rest_distance_coding as rd
+from analysis.rest_distance import rest_distance_coding as rd
 from tests._rest_sim import DT, RestSpec, make_rest_session
 
 

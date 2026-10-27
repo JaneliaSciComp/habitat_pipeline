@@ -139,7 +139,7 @@ Before ranking, stress-test every candidate:
 
 - **Power.** Same math `run-analysis` applies:
   ```python
-  from ephys._stats_utils import fdr_resolution, majority_class_baseline
+  from analysis._common._stats_utils import fdr_resolution, majority_class_baseline
   ```
   Flag a candidate as under-powered if the likely event count per class is too small
   for a meaningful CV split (`min_events_per_class=5` is the decoders' own floor) or

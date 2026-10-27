@@ -1,5 +1,5 @@
 """
-Smoke tests for ephys/inter_brain_plots.py.
+Smoke tests for analysis/inter_brain_dynamics/inter_brain_plots.py.
 
 These verify that every plotting function produces a matplotlib Figure
 without errors on synthetic inputs. We don't pixel-compare; the goal is
@@ -15,7 +15,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import pytest  # noqa: E402
 
-from ephys.inter_brain_dynamics import (  # noqa: E402
+from analysis.inter_brain_dynamics.inter_brain_dynamics import (  # noqa: E402
     SharedSubspaceFit,
     cross_animal_correlation_matrix,
     fit_shared_subspace,
@@ -23,7 +23,7 @@ from ephys.inter_brain_dynamics import (  # noqa: E402
     shuffle_null_subspace,
     time_lagged_cca,
 )
-from ephys.inter_brain_plots import (  # noqa: E402
+from analysis.inter_brain_dynamics.inter_brain_plots import (  # noqa: E402
     plot_canonical_correlations,
     plot_cross_animal_correlation,
     plot_inter_brain_summary,

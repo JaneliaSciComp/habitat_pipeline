@@ -1,9 +1,9 @@
-"""Input-building tests for ephys.run_rest_distance (mock tracks, no share needed)."""
+"""Input-building tests for analysis.rest_distance.run_rest_distance (mock tracks, no share needed)."""
 
 import numpy as np
 import pandas as pd
 
-from ephys.run_rest_distance import bin_mean, bridge_gaps, keypoint_motion, replication, rest_inputs
+from analysis.rest_distance.run_rest_distance import bin_mean, bridge_gaps, keypoint_motion, replication, rest_inputs
 
 
 class TestBridgeGaps:

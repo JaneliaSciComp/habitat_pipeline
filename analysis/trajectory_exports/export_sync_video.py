@@ -8,7 +8,7 @@ Event markers (coloured by opponent) appear in both panels when they happen. Rea
 cache only; nothing is refitted. Playback covers the tracked time range, since the spatial panel
 has nothing to show outside it.
 
-    python scripts/export_sync_video.py --animal rat631 --session 20251216_094334
+    python analysis/trajectory_exports/export_sync_video.py --animal rat631 --session 20251216_094334
 """
 from __future__ import annotations
 
@@ -19,13 +19,13 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from gui import explore_cache as xc  # noqa: E402
-from export_embedding_video import BACK_ALPHA, SHELL, load_events  # noqa: E402
-from export_trajectory_video import (EVENT_SNAP_S, FORMAT_NAMES, MAX_GAP_S,  # noqa: E402
+from analysis.trajectory_exports.export_embedding_video import BACK_ALPHA, SHELL, load_events  # noqa: E402
+from analysis.trajectory_exports.export_trajectory_video import (EVENT_SNAP_S, FORMAT_NAMES, MAX_GAP_S,  # noqa: E402
                                      MAX_PATH_POINTS, TRAIL_S)
 
 
@@ -168,7 +168,7 @@ def main(argv=None) -> None:
     clock = fig.text(0.72, 0.045, "", color=fg, ha="center", fontsize=12, family="monospace")
 
     n_frames = max(2, int(round(a.duration * a.fps)))
-    out = a.out or ROOT / "results" / (
+    out = a.out or ROOT / "results" / "trajectory_exports" / (
         f"{a.animal}_{a.session}_cebra-pos_vs_space_{src}"
         f"{'' if a.events.lower() == 'none' else '_' + a.events}.mp4")
     out.parent.mkdir(parents=True, exist_ok=True)

@@ -24,7 +24,7 @@
           "interpret"
         ],
         "modules": [
-          "ephys._lda_decoding",
+          "analysis.event_decoding._lda_decoding",
           "ephys.social_spatial_fields",
           "ephys.decode_location"
         ],
@@ -40,7 +40,7 @@
       "consequence": "The null result is a statement about the shuffle budget, not about the data. No cell can be significant at any effect size.",
       "detector": {
         "type": "callable",
-        "callable": "ephys._stats_utils:fdr_resolution",
+        "callable": "analysis._common._stats_utils:fdr_resolution",
         "args_from": {
           "n_tests": "$params.n_tests",
           "n_shuffles": "$params.n_shuffles",
@@ -71,8 +71,8 @@
       },
       "references": [
         "CLAUDE.md - Gotchas I keep tripping over",
-        "ephys/_stats_utils.py::fdr_resolution",
-        "ephys/_lda_decoding.py::compute_population_significance"
+        "analysis/_common/_stats_utils.py::fdr_resolution",
+        "analysis/event_decoding/_lda_decoding.py::compute_population_significance"
       ]
     },
     {
@@ -89,7 +89,7 @@
           "interpret"
         ],
         "modules": [
-          "ephys._lda_decoding"
+          "analysis.event_decoding._lda_decoding"
         ],
         "analyses": [
           "ephys.decode_opponent_identity",
@@ -112,12 +112,12 @@
         "on_fail": "Accuracy {accuracy:.3f} is BELOW the majority-class baseline {baseline_accuracy:.3f} (margin {margin:+.3f}). This is not evidence of coding."
       },
       "remedies": [
-        "use baseline_accuracy / population_baseline_accuracy from ephys._stats_utils.majority_class_baseline",
+        "use baseline_accuracy / population_baseline_accuracy from analysis._common._stats_utils.majority_class_baseline",
         "use balanced_accuracy, whose chance level genuinely is 1/n_classes",
         "at propose time the manifest's per-analysis majority_baseline gives the same bar before anything runs"
       ],
       "known_gaps": [
-        "ephys/decoding_plots.py still draws chance lines and 'Cells > Chance' counts at 1/n_classes - deliberately, to avoid changing published figures. See HZ-INTERP-001.",
+        "analysis/event_decoding/decoding_plots.py still draws chance lines and 'Cells > Chance' counts at 1/n_classes - deliberately, to avoid changing published figures. See HZ-INTERP-001.",
         "The decoder's raw result dict and the notebook's curated summary name the baseline differently (population_baseline_accuracy vs baseline_accuracy). The detector takes the whole results mapping and accepts either, because reading one key made it report 'cannot check' on correctly-logged iterations - including two runs that were genuinely below baseline."
       ],
       "evidence": {
@@ -130,7 +130,7 @@
       },
       "references": [
         "CLAUDE.md - Gotchas I keep tripping over",
-        "ephys/_stats_utils.py::majority_class_baseline"
+        "analysis/_common/_stats_utils.py::majority_class_baseline"
       ]
     },
     {
@@ -147,10 +147,10 @@
           "run"
         ],
         "modules": [
-          "ephys._stats_utils",
-          "ephys._lda_decoding",
+          "analysis._common._stats_utils",
+          "analysis.event_decoding._lda_decoding",
           "ephys.social_spatial_fields",
-          "ephys.decode_conflict_territory"
+          "analysis.conflict_territory.decode_conflict_territory"
         ]
       },
       "symptom": "A p-value of exactly 0.0 appears in a result, and survives BH as q = 0.",
@@ -167,10 +167,10 @@
           "op": "==",
           "value": 0
         },
-        "on_fail": "The add-one p-value guarantee is broken. Every null in this repo must route through ephys._stats_utils.empirical_p_value."
+        "on_fail": "The add-one p-value guarantee is broken. Every null in this repo must route through analysis._common._stats_utils.empirical_p_value."
       },
       "remedies": [
-        "use ephys._stats_utils.empirical_p_value, which single-sources the add-one form"
+        "use analysis._common._stats_utils.empirical_p_value, which single-sources the add-one form"
       ],
       "known_gaps": [],
       "evidence": {
@@ -178,12 +178,12 @@
         "date": "2026-08-06",
         "where": [
           "HANDOFF.md - Phase 1.5, 'Also fixed (pre-existing)'",
-          "ephys/social_spatial_fields.py _p_geq/_p_leq used k/n; four tests only passed because p=0.0 short-circuited a configuration that could never have classified a cell as tuned"
+          "analysis/social_spatial_fields/social_spatial_fields.py _p_geq/_p_leq used k/n; four tests only passed because p=0.0 short-circuited a configuration that could never have classified a cell as tuned"
         ]
       },
       "references": [
         "CLAUDE.md - Gotchas I keep tripping over",
-        "ephys/_stats_utils.py::empirical_p_value"
+        "analysis/_common/_stats_utils.py::empirical_p_value"
       ]
     },
     {
@@ -200,8 +200,8 @@
           "run"
         ],
         "modules": [
-          "ephys._stats_utils",
-          "ephys._lda_decoding"
+          "analysis._common._stats_utils",
+          "analysis.event_decoding._lda_decoding"
         ]
       },
       "symptom": "p-values are systematically smaller than they should be when events are few.",
@@ -232,7 +232,7 @@
       },
       "references": [
         "CLAUDE.md - Gotchas I keep tripping over",
-        "ephys/_stats_utils.py::empirical_p_value"
+        "analysis/_common/_stats_utils.py::empirical_p_value"
       ]
     },
     {
@@ -252,7 +252,7 @@
           "ephys.decode_location",
           "ephys.decode_partner_distance",
           "ephys.inter_brain_dynamics",
-          "ephys.decode_conflict_territory"
+          "analysis.conflict_territory.decode_conflict_territory"
         ]
       },
       "symptom": "Both the real decode and its null look implausibly tight, and a real effect hides between two artificially small numbers.",
@@ -266,7 +266,7 @@
           "field": "no_unapproved_sites",
           "op": "is_true"
         },
-        "on_fail": "{n_unapproved} unreviewed shuffle=True CV site(s): {unapproved_sites}. On a time-ordered axis use KFold(shuffle=False), matching ephys/decode_partner_distance.py and ephys.inter_brain_dynamics._fit_r2. If the axis is genuinely exchangeable, document why in a 'Statistical notes' docstring section and add the file to the allowlist."
+        "on_fail": "{n_unapproved} unreviewed shuffle=True CV site(s): {unapproved_sites}. On a time-ordered axis use KFold(shuffle=False), matching analysis/partner_distance/decode_partner_distance.py and analysis.inter_brain_dynamics.inter_brain_dynamics._fit_r2. If the axis is genuinely exchangeable, document why in a 'Statistical notes' docstring section and add the file to the allowlist."
       },
       "remedies": [
         "KFold(shuffle=False) for anything binned in time",
@@ -274,19 +274,19 @@
         "tests/test_decode_location.py::TestContiguousFolds::test_cv_decode_uses_shuffle_false spies on the splitter as a direct regression guard"
       ],
       "known_gaps": [
-        "ephys/_lda_decoding.py's three StratifiedKFold(shuffle=True, random_state=42) sites are allowlisted, NOT cleared. They split one row per behavioral event, and events are seconds-to-minutes apart, so this is not the adjacent-bin defect fixed in decode_location; the fixed random_state across the observed run and every permutation is also correct, because it makes the comparison paired. The genuine residual risk is bouts of events clustered in time, which would want grouped folds. Changing it would move the published 16-significant-cells result, so it is a scientist decision and is explicitly off-limits to the coder agent."
+        "analysis/event_decoding/_lda_decoding.py's three StratifiedKFold(shuffle=True, random_state=42) sites are allowlisted, NOT cleared. They split one row per behavioral event, and events are seconds-to-minutes apart, so this is not the adjacent-bin defect fixed in decode_location; the fixed random_state across the observed run and every permutation is also correct, because it makes the comparison paired. The genuine residual risk is bouts of events clustered in time, which would want grouped folds. Changing it would move the published 16-significant-cells result, so it is a scientist decision and is explicitly off-limits to the coder agent."
       ],
       "evidence": {
         "occurred": true,
         "date": "2026-08-19",
         "where": [
           "HANDOFF.md - decode_location.py CV-leakage fix",
-          "ephys/decode_location.py::_cv_decode used KFold(shuffle=True, random_state=42); fixing it to contiguous folds moved self-position decoding from p=0.43 to p=0.138, and to p=0.022 with rate smoothing"
+          "analysis/decode_location/decode_location.py::_cv_decode used KFold(shuffle=True, random_state=42); fixing it to contiguous folds moved self-position decoding from p=0.43 to p=0.138, and to p=0.022 with rate smoothing"
         ]
       },
       "references": [
         "CLAUDE.md - Gotchas I keep tripping over",
-        "ephys/decode_location.py - Statistical notes",
+        "analysis/decode_location/decode_location.py - Statistical notes",
         "tests/test_decode_location.py::TestContiguousFolds"
       ]
     },
@@ -325,7 +325,7 @@
           "field": "matches",
           "op": "is_true"
         },
-        "on_fail": "null={value!r} is not a chance null. Use null='shuffle' with ephys._stats_utils.empirical_p_value and a BH-FDR pass for any real claim."
+        "on_fail": "null={value!r} is not a chance null. Use null='shuffle' with analysis._common._stats_utils.empirical_p_value and a BH-FDR pass for any real claim."
       },
       "remedies": [
         "null='shuffle' plus empirical_p_value plus benjamini_hochberg over the declared test family"
@@ -341,7 +341,7 @@
       },
       "references": [
         "CLAUDE.md - Gotchas I keep tripping over",
-        "ephys/decode_location.py::_null_position_decode"
+        "analysis/decode_location/decode_location.py::_null_position_decode"
       ]
     },
     {
@@ -397,7 +397,7 @@
       },
       "references": [
         "CLAUDE.md - Gotchas I keep tripping over",
-        "ephys/decode_location.py"
+        "analysis/decode_location/decode_location.py"
       ]
     },
     {
@@ -414,7 +414,7 @@
           "interpret"
         ],
         "modules": [
-          "ephys._lda_decoding",
+          "analysis.event_decoding._lda_decoding",
           "ephys.decode_location",
           "ephys.social_spatial_fields"
         ]
@@ -450,7 +450,7 @@
       },
       "references": [
         "CLAUDE.md - Gotchas I keep tripping over",
-        "ephys/_stats_utils.py::fdr_resolution"
+        "analysis/_common/_stats_utils.py::fdr_resolution"
       ]
     },
     {
@@ -478,7 +478,7 @@
       "consequence": "A null result is unfalsifiable and unlabelled, which is strictly worse than the decoding path's self-labelling under-resolved runs.",
       "detector": {
         "type": "callable",
-        "callable": "ephys._stats_utils:fdr_resolution",
+        "callable": "analysis._common._stats_utils:fdr_resolution",
         "args_from": {
           "n_tests": "$params.n_targets",
           "n_shuffles": "$params.n_shuffles",
@@ -507,7 +507,7 @@
       },
       "references": [
         "CLAUDE.md - Gotchas I keep tripping over",
-        "ephys/social_spatial_fields.py::compute_social_place_fields"
+        "analysis/social_spatial_fields/social_spatial_fields.py::compute_social_place_fields"
       ]
     },
     {
@@ -525,7 +525,7 @@
         ],
         "modules": [
           "video.behavioral_events",
-          "ephys._lda_decoding"
+          "analysis.event_decoding._lda_decoding"
         ],
         "analyses": [
           "ephys.decode_opponent_identity",
@@ -581,7 +581,7 @@
         "modules": [
           "database.lab_notebook",
           "ephys.decode_location",
-          "ephys._lda_decoding"
+          "analysis.event_decoding._lda_decoding"
         ]
       },
       "symptom": "A sweep runs N tests, then reports q-values computed over fewer than N, with prose reasons for the drops.",
@@ -617,7 +617,7 @@
       "references": [
         "CLAUDE.md - Gotchas I keep tripping over",
         "database/lab_notebook.py::family_denominator",
-        "ephys/_stats_utils.py::fdr_resolution"
+        "analysis/_common/_stats_utils.py::fdr_resolution"
       ]
     },
     {
@@ -683,7 +683,7 @@
           "interpret"
         ],
         "modules": [
-          "ephys._lda_decoding",
+          "analysis.event_decoding._lda_decoding",
           "video.behavioral_events"
         ],
         "analyses": [
@@ -849,7 +849,7 @@
       },
       "references": [
         "video/tracking_import.py::resolve_tracking_on_ephys_clock",
-        "ephys/social_spatial_fields.py::compute_social_place_fields"
+        "analysis/social_spatial_fields/social_spatial_fields.py::compute_social_place_fields"
       ]
     },
     {
@@ -1063,7 +1063,7 @@
         "analyses": [
           "ephys.decode_opponent_identity",
           "ephys.decode_event_outcome",
-          "ephys.decode_conflict_territory"
+          "analysis.conflict_territory.decode_conflict_territory"
         ]
       },
       "symptom": "Nothing visible. An analysis reports a sample size, and a different version of the same session's scoring would have given a materially different one.",
@@ -1242,7 +1242,7 @@
         "analyses": [
           "ephys.decode_opponent_identity",
           "ephys.decode_event_outcome",
-          "ephys.decode_conflict_territory"
+          "analysis.conflict_territory.decode_conflict_territory"
         ]
       },
       "symptom": "Label extraction returns nothing, or events cannot be aligned to spikes.",
@@ -1295,7 +1295,7 @@
         ],
         "analyses": [
           "ephys.decode_opponent_identity",
-          "ephys.decode_conflict_territory"
+          "analysis.conflict_territory.decode_conflict_territory"
         ]
       },
       "symptom": "AttributeError: 'int' object has no attribute 'startswith', raised deep inside label extraction.",
@@ -1377,7 +1377,7 @@
       },
       "references": [
         "CLAUDE.md - Gotchas I keep tripping over",
-        "ephys/decode_event_outcome.py"
+        "analysis/event_decoding/decode_event_outcome.py"
       ]
     },
     {
@@ -1425,7 +1425,7 @@
       },
       "references": [
         "CLAUDE.md - Gotchas I keep tripping over",
-        "ephys/social_spatial_fields.py::compute_social_place_fields",
+        "analysis/social_spatial_fields/social_spatial_fields.py::compute_social_place_fields",
         "tests/test_social_spatial_fields.py::TestMultiTargetSweep"
       ]
     },
@@ -1501,7 +1501,7 @@
         "type": "callable",
         "callable": "discovery.detectors:method_implemented",
         "args_from": {
-          "module": "ephys.inter_brain_dynamics",
+          "module": "analysis.inter_brain_dynamics.inter_brain_dynamics",
           "attr": "fit_multiset_subspace"
         },
         "pass_if": {
@@ -1520,8 +1520,8 @@
       },
       "references": [
         "docs/HYPOTHESIS_BACKLOG.md - section I",
-        "ephys/README.md - stretch goals",
-        "ephys/inter_brain_dynamics.py::fit_shared_subspace"
+        "analysis/README.md - stretch goals",
+        "analysis/inter_brain_dynamics/inter_brain_dynamics.py::fit_shared_subspace"
       ]
     },
     {
@@ -1537,7 +1537,7 @@
           "interpret"
         ],
         "modules": [
-          "ephys.decoding_plots"
+          "analysis.event_decoding.decoding_plots"
         ],
         "analyses": [
           "ephys.decode_opponent_identity",
@@ -1545,7 +1545,7 @@
         ]
       },
       "symptom": "A figure shows many cells above its chance line for a result that does not beat naive guessing.",
-      "mechanism": "ephys/decoding_plots.py draws its chance lines and computes its 'Cells > Chance' counts at 1/n_classes. This was left in place on purpose, to avoid changing already-published figures.",
+      "mechanism": "analysis/event_decoding/decoding_plots.py draws its chance lines and computes its 'Cells > Chance' counts at 1/n_classes. This was left in place on purpose, to avoid changing already-published figures.",
       "consequence": "The figure and the statistics disagree by construction, and the figure is the more persuasive of the two. This is the specific reason the Interpreter must reason over the numbers first and the image second.",
       "detector": {
         "type": "none"
@@ -1567,7 +1567,7 @@
       },
       "references": [
         "CLAUDE.md - Gotchas I keep tripping over",
-        "ephys/decoding_plots.py",
+        "analysis/event_decoding/decoding_plots.py",
         ".claude/agents/interpreter.md"
       ]
     },
@@ -1659,12 +1659,12 @@
         "occurred": true,
         "date": "2026-09-17",
         "where": [
-          "ephys/social_place_fields_demo.ipynb - a 20251210 run reported 153 of 377 cells as tuned (partner_only 62, conjunctive 49, self_only 22, broadcast 20); after the fix a 40-cell sample spanning the same spike-count range yielded 0-1 significant partner tests out of 80",
+          "analysis/social_spatial_fields/social_place_fields_demo.ipynb - a 20251210 run reported 153 of 377 cells as tuned (partner_only 62, conjunctive 49, self_only 22, broadcast 20); after the fix a 40-cell sample spanning the same spike-count range yielded 0-1 significant partner tests out of 80",
           "the same run showed 238 tests becoming significant only under the stratum, and 19 self-map positive controls failing"
         ]
       },
       "references": [
-        "ephys/social_spatial_fields.py::field_significance",
+        "analysis/social_spatial_fields/social_spatial_fields.py::field_significance",
         "tests/test_social_spatial_fields.py::TestNullCalibration",
         "tests/test_social_spatial_fields.py::TestPositionShuffleInvariants"
       ]
@@ -1714,7 +1714,7 @@
         ]
       },
       "references": [
-        "ephys/social_spatial_fields.py::field_significance",
+        "analysis/social_spatial_fields/social_spatial_fields.py::field_significance",
         "HZ-STAT-014"
       ]
     },
@@ -1768,12 +1768,12 @@
         "occurred": true,
         "date": "2026-09-18",
         "where": [
-          "ephys/social_place_fields_demo.ipynb - a 20251210 run reported 'conjunctive 377' (every quality cell) and 1131 of 1131 partner tests significant unrestricted",
+          "analysis/social_spatial_fields/social_place_fields_demo.ipynb - a 20251210 run reported 'conjunctive 377' (every quality cell) and 1131 of 1131 partner tests significant unrestricted",
           "introduced into that notebook's unrestricted arm by switching the default to null_method='auto', which selects circular_shift when no stratum is active; the previous position_shuffle default hid it behind HZ-STAT-014"
         ]
       },
       "references": [
-        "ephys/social_spatial_fields.py::field_significance",
+        "analysis/social_spatial_fields/social_spatial_fields.py::field_significance",
         "HZ-STAT-014",
         "HZ-STAT-015"
       ]
@@ -1793,10 +1793,10 @@
           "interpret"
         ],
         "modules": [
-          "ephys.decode_conflict_territory"
+          "analysis.conflict_territory.decode_conflict_territory"
         ],
         "analyses": [
-          "ephys.decode_conflict_territory"
+          "analysis.conflict_territory.decode_conflict_territory"
         ]
       },
       "symptom": "A pure place-cell population gives a small map-null p for the conflict-defined territory label, which reads as territory coding.",
@@ -1813,7 +1813,7 @@
           "op": "==",
           "value": 0
         },
-        "on_fail": "The position-only map null (diagnostics['position_map_null']) no longer flags the geometry confound, or the confound no longer reproduces; do not read the neural map-null p of ephys.decode_conflict_territory until this is understood."
+        "on_fail": "The position-only map null (diagnostics['position_map_null']) no longer flags the geometry confound, or the confound no longer reproduces; do not read the neural map-null p of analysis.conflict_territory.decode_conflict_territory until this is understood."
       },
       "remedies": [
         "read diagnostics['position_map_null'] BEFORE the neural map_null: if a smooth-position decoder also puts the real map in the null's upper tail, the neural map-null p is confounded by map geometry",
@@ -1826,11 +1826,11 @@
         "occurred": false,
         "date": "2026-10-12",
         "where": [
-          "Not yet on a real result - found while implementing ephys/decode_conflict_territory.py, before its first real run: synthetic place-only population with clustered W/L layout gave map-null p = 0.01-0.03 on 3/3 seeds (99 shuffles), position-only map-null p = 0.01-0.02; with interleaved layout map-null p = 0.26-0.94"
+          "Not yet on a real result - found while implementing analysis/conflict_territory/decode_conflict_territory.py, before its first real run: synthetic place-only population with clustered W/L layout gave map-null p = 0.01-0.03 on 3/3 seeds (99 shuffles), position-only map-null p = 0.01-0.02; with interleaved layout map-null p = 0.26-0.94"
         ]
       },
       "references": [
-        "ephys/decode_conflict_territory.py - module 'Statistical notes'",
+        "analysis/conflict_territory/decode_conflict_territory.py - module 'Statistical notes'",
         "tests/test_decode_conflict_territory.py::TestMapGeometryConfound"
       ]
     }

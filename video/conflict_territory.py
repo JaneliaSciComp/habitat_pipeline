@@ -53,7 +53,7 @@ def localize_events(times: Sequence[float], labels: Sequence, focal_df: pd.DataF
     ``focal_df`` is one animal's ``(t, x, y[, speed])`` frame on the ephys clock
     (as returned by :func:`video.tracking_import.resolve_tracking_on_ephys_clock`).
     Positions are linearly interpolated with the same nearest-sample gap rule as
-    :func:`ephys.run_territory.interp_on_grid`: an event whose nearest tracked
+    :func:`analysis.territory.run_territory.interp_on_grid`: an event whose nearest tracked
     sample is more than ``max_gap`` seconds away (or that lies outside the
     tracked range) has no position and is **dropped**.
 
@@ -61,7 +61,7 @@ def localize_events(times: Sequence[float], labels: Sequence, focal_df: pd.DataF
     ``t, x, y, outcome`` (plus ``t_end`` when ``end_times`` is given), sorted by
     ``t``.
     """
-    from ephys.run_territory import interp_on_grid
+    from analysis.territory.run_territory import interp_on_grid
 
     times = np.asarray(times, dtype=float)
     labels = np.asarray(labels)

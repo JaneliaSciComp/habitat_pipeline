@@ -186,7 +186,7 @@ class TestConsultPathStaysCheap:
         probe = (
             "import discovery.capability_manifest, sys;"
             "leaked=[m for m in ('ingestion.data_paths','video.tracking_import',"
-            "'ephys.decode_location','ephys._lda_decoding','sqlalchemy')"
+            "'ephys.decode_location','analysis.event_decoding._lda_decoding','sqlalchemy')"
             " if m in sys.modules];"
             "print(','.join(leaked))"
         )

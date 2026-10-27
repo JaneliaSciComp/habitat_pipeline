@@ -1,5 +1,5 @@
 """
-Tests for ephys/social_spatial_fields.py.
+Tests for analysis/social_spatial_fields/social_spatial_fields.py.
 
 Synthetic positions are smooth random walks in a known arena; spikes are sampled
 from an inhomogeneous Poisson process whose rate is a Gaussian bump over a chosen
@@ -13,7 +13,7 @@ import pytest
 
 from types import SimpleNamespace
 
-from ephys.social_spatial_fields import (
+from analysis.social_spatial_fields.social_spatial_fields import (
     RateMap,
     STRATUM_COLUMN,
     compute_rate_map,
@@ -296,7 +296,7 @@ def _sweep(ks, tracking, focal="A", **kw):
         # BH-adjusted q reachable across 3 targets is 0.030 — above alpha, i.e.
         # no cell could ever be classified as tuned. These tests previously
         # passed only because `_p_geq` returned an invalid p == 0.0; see
-        # `ephys._stats_utils.fdr_resolution`.
+        # `analysis._common._stats_utils.fdr_resolution`.
         speed_filter_subject="none", n_shuffles=500, min_n_spikes=50,
         use_quality_cells=False, arena_bounds=ARENA, seed=0,
     )
@@ -685,7 +685,7 @@ class TestPositionShuffleInvariants:
         ix_i[rows] = prep.ix[rows][perm]
         iy_i[rows] = prep.iy[rows][perm]
         idx = _spike_sample_indices(prep, spikes)
-        from ephys.social_spatial_fields import _accumulate
+        from analysis.social_spatial_fields.social_spatial_fields import _accumulate
         occ = _accumulate(prep, iy_i[prep.keep], ix_i[prep.keep], prep.dt[prep.keep])
         counts = _accumulate(prep, iy_i[idx], ix_i[idx], 1.0)
         return observed, occ, counts
@@ -1003,7 +1003,7 @@ class TestSelfPositionStratum:
         assert d_smooth["retained_seconds"] >= d_raw["retained_seconds"]
 
     def test_disc_kernel_shape_tracks_the_radius(self):
-        from ephys.social_spatial_fields import _disc_kernel
+        from analysis.social_spatial_fields.social_spatial_fields import _disc_kernel
         k = _disc_kernel(10.0, 5.0)          # radius = 2 bins
         assert k.shape == (5, 5)
         assert k[2, 2] == 1.0                 # centre

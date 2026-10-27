@@ -1,6 +1,6 @@
 """
 Shared LDA decoding core for the per-cell and population analyses in
-``ephys/decode_opponent_identity.py`` and ``ephys/decode_event_outcome.py``.
+``analysis/event_decoding/decode_opponent_identity.py`` and ``analysis/event_decoding/decode_event_outcome.py``.
 
 This module is label-agnostic: it does not know whether labels mean opponent
 identity, win/loss, or anything else. Callers extract labels however they want
@@ -33,8 +33,8 @@ import warnings
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
-from ephys._rate_tensor import event_aligned_rates
-from ephys._stats_utils import (
+from analysis._common._rate_tensor import event_aligned_rates
+from analysis._common._stats_utils import (
     benjamini_hochberg,
     empirical_p_value,
     fdr_resolution,
@@ -271,7 +271,7 @@ def compute_population_significance(spike_times_list: Sequence[np.ndarray],
         headline statistic when the per-cell screen is under-resolved (see
         below) or when events are few.
     ``'resolution'``
-        ``ephys._stats_utils.fdr_resolution`` output for this run, plus
+        ``analysis._common._stats_utils.fdr_resolution`` output for this run, plus
         ``null_mode``. **Read this before interpreting a null per-cell
         result**: if ``resolvable`` is False, no single cell could have
         reached ``q < alpha`` regardless of effect size, so zero significant

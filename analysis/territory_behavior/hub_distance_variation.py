@@ -1,6 +1,6 @@
 """How much partner-distance variation exists while the focal rests at a fixed spot? (tracking only)
 
-    python scripts/hub_distance_variation.py --animal 630 [--own_home]
+    python analysis/territory_behavior/hub_distance_variation.py --animal 630 [--own_home]
 
 Per chunk with full ephys overlap: 0.5 s bins where the focal is still within ``hub_frac_diag`` of the spot.
 Reports distance to the nearest other rat, its SD, how much of its variance is slow (a 120 s running mean) vs

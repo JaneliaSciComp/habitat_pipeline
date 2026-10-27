@@ -1,5 +1,5 @@
 """
-Tests for ephys/run_social_spatial.py.
+Tests for analysis/social_spatial_fields/run_social_spatial.py.
 
 Covers the argparse contract (the prompt's example invocation parses) and the
 output writer (_write_outputs produces results.pkl, summary.png, and the
@@ -17,8 +17,8 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import pytest  # noqa: E402
 
-from ephys.social_spatial_fields import compute_social_place_fields  # noqa: E402
-from ephys.run_social_spatial import (  # noqa: E402
+from analysis.social_spatial_fields.social_spatial_fields import compute_social_place_fields  # noqa: E402
+from analysis.social_spatial_fields.run_social_spatial import (  # noqa: E402
     _build_parser,
     _write_outputs,
     _max_skaggs_by_cluster,

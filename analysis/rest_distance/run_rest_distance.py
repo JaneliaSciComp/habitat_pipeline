@@ -1,10 +1,10 @@
 """Rest-distance coding runner: does the focal rat's activity track partner distance while it rests at its own home base?
 
-    python -m ephys.run_rest_distance --session_id 20251216_145034 --animal_id 630 --gates_only
-    python -m ephys.run_rest_distance --session_id 20251216_145034 --animal_id 630 --smoke
-    python -m ephys.run_rest_distance --session_id 20251216_145034 --animal_id 630 --purpose exploratory
+    python -m analysis.rest_distance.run_rest_distance --session_id 20251216_145034 --animal_id 630 --gates_only
+    python -m analysis.rest_distance.run_rest_distance --session_id 20251216_145034 --animal_id 630 --smoke
+    python -m analysis.rest_distance.run_rest_distance --session_id 20251216_145034 --animal_id 630 --purpose exploratory
 
-Statistics live in ``ephys/rest_distance_coding.py`` (calibrated on synthetic sessions in
+Statistics live in ``analysis/rest_distance/rest_distance_coding.py`` (calibrated on synthetic sessions in
 ``tests/test_rest_distance_calibration.py``); this module only builds its inputs from real chunks.
 
 Per APT chunk that lies inside the focal's quality-cell spike window:
@@ -44,9 +44,9 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from ephys import rest_distance_coding as rd
-from ephys._stats_utils import fdr_resolution
-from ephys.run_territory import (DT, apt_chunk_dirs, bin_counts, chunk_ephys_window, chunk_inputs, git_commit,
+from analysis.rest_distance import rest_distance_coding as rd
+from analysis._common._stats_utils import fdr_resolution
+from analysis.territory.run_territory import (DT, apt_chunk_dirs, bin_counts, chunk_ephys_window, chunk_inputs, git_commit,
                                  interp_on_grid, save)
 from video.territory_behavior import arena_bounds, chunk_summary, speed_px_s
 

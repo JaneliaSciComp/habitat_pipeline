@@ -340,7 +340,7 @@ def _session_date(session_id: Any) -> Optional[str]:
 
     Mirrors ``database.lab_notebook.normalize_session_key`` — a small
     independent copy rather than an import, following the same convention as
-    ``ephys._stats_utils.benjamini_hochberg`` vs. its counterpart in
+    ``analysis._common._stats_utils.benjamini_hochberg`` vs. its counterpart in
     ``social_spatial_fields``. The reason here is import weight: the consult
     path is meant to be a JSON read, and reaching into ``database`` would pull
     SQLAlchemy in behind it. ``tests/test_capability_manifest.py`` asserts the

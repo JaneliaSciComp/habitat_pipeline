@@ -91,9 +91,9 @@ prose; this file is the actionable, feasibility-checked backlog to draw from.
    the session behind the opponent-identity finding) have **4** simultaneously-
    implanted animals (`rat613`, `rat615`, `rat630`, `rat631`), not 2. This corrects
    the original caveat here — the data-availability blocker doesn't apply. What's
-   still missing is the *math*: `ephys/inter_brain_dynamics.py::fit_shared_subspace`
+   still missing is the *math*: `analysis/inter_brain_dynamics/inter_brain_dynamics.py::fit_shared_subspace`
    and every test/CLI/README example are pairwise-only; multi-set CCA is an
-   unimplemented stretch goal per `ephys/README.md`. So Tier assignments in §I below
+   unimplemented stretch goal per `analysis/README.md`. So Tier assignments in §I below
    reflect a **missing-method** gap, not a missing-data one — meaningfully easier to
    greenlight than originally written, since the 4-animal ephys data to test against
    already exists for a session we've already worked with.
@@ -109,7 +109,7 @@ prose; this file is the actionable, feasibility-checked backlog to draw from.
 ## A. Already there or nearly free
 
 - **[Tier 0] Allocentric social place fields.** Already built —
-  `ephys/social_spatial_fields.py::compute_social_place_fields`. Recapitulates
+  `analysis/social_spatial_fields/social_spatial_fields.py::compute_social_place_fields`. Recapitulates
   Danjo et al. 2018 / Omer et al. 2018 / Sarel et al. 2022, but in a much larger
   arena with multiple identifiable partners than any of those studies. Nothing to
   implement; worth a fresh write-up of what's already on record (16 significant
@@ -120,7 +120,7 @@ prose; this file is the actionable, feasibility-checked backlog to draw from.
   With 8 distinguishable opponents in the EC event set, worth checking whether any
   conjunctive cells are partner-*specific* (conjunctive only with opponent X) vs.
   partner-general.
-- **[Tier 1] Partner-position decoding.** `ephys/decode_location.py::decode_all_locations`
+- **[Tier 1] Partner-position decoding.** `analysis/decode_location/decode_location.py::decode_all_locations`
   already loops every tracked object against one animal's spikes with cross-validation
   (`_cv_decode`) and a reverse/shuffle null (`_null_position_decode`) built in — decoding
   rat B's position from rat A's spikes is a parameter choice (`object_name='rat632'`),
@@ -146,7 +146,7 @@ prose; this file is the actionable, feasibility-checked backlog to draw from.
   not for gaze). New piece: re-bin `compute_rate_map`'s occupancy/significance
   machinery against `(distance, relative_bearing)` instead of allocentric `(x, y)`.
   Classic boundary-vector-cell statistics (Hartley/Lever) apply directly.
-- **[Tier 2] Personal-space boundary cells.** Extends `ephys/decode_partner_distance.py`
+- **[Tier 2] Personal-space boundary cells.** Extends `analysis/partner_distance/decode_partner_distance.py`
   with a changepoint/nonlinear-fit variant instead of assuming a smooth linear
   distance→rate relationship — tests whether some cells are literally
   personal-space-violation detectors.
@@ -195,7 +195,7 @@ prose; this file is the actionable, feasibility-checked backlog to draw from.
   `decode_opponent_identity`'s classification (already established: 28.8% vs 27.7%
   baseline, animal 631/session 20251216) as representational similarity analysis —
   does neural distance between opponent pairs' representations correlate with their
-  rank/ID distance? Reuses `ephys/_lda_decoding.py::extract_firing_rate_features`
+  rank/ID distance? Reuses `analysis/event_decoding/_lda_decoding.py::extract_firing_rate_features`
   entirely; only the analysis on top (RSA instead of LDA) is new. Directly relevant
   to why Hypothesis #2's group-level split found a real-but-tiny effect — rank may
   be encoded continuously, not categorically.
@@ -240,7 +240,7 @@ prose; this file is the actionable, feasibility-checked backlog to draw from.
 
 - **[Tier 3] Transfer entropy / mutual information rate between brains.** A more
   general (and more expensive) alternative to time-lagged CCA's directionality
-  signal; would reuse `ephys/_stats_utils.py`'s permutation/surrogate machinery for
+  signal; would reuse `analysis/_common/_stats_utils.py`'s permutation/surrogate machinery for
   significance rather than rebuilding it.
 - **[Tier 3–4] Cross-brain "communication subspace" (Semedo et al. 2019 style).**
   Find the low-d projection of A's activity that best predicts B's activity at lag
@@ -283,7 +283,7 @@ from "blocked."
 - **[Tier 3–4] Generalized / multi-set CCA (Kettenring 1971) or JIVE/SLIDE.** Finds
   directions correlated across all N brains, partitioning variance into
   cohort-shared / dyad-shared / individual. Explicitly listed as an unimplemented
-  stretch goal in `ephys/README.md` — genuinely new math (not in any existing
+  stretch goal in `analysis/README.md` — genuinely new math (not in any existing
   dependency), but the 4-animal data to run it on already exists for session
   `20251216`.
 - **[Tier 3–4] Identity-aware per-dyad subspace comparison.** Fit one shared subspace
@@ -318,7 +318,7 @@ from "blocked."
   syllable if built). The encoding-model analog of the existing decoding work;
   well-scoped but genuinely new infra.
 - **[Tier 3] Tensor Component Analysis (cells × time × encounter).**
-  `ephys/_rate_tensor.py::event_aligned_rates` already builds exactly this tensor
+  `analysis/_common/_rate_tensor.py::event_aligned_rates` already builds exactly this tensor
   shape — the data-prep half of this is done; only the TCA decomposition itself
   (e.g. Williams et al. 2018) and correlating component loadings with
   identity/outcome/rank is new.
@@ -330,11 +330,11 @@ from "blocked."
   learning (Schneider et al., *Nature* 2023) as an alternative to CCA for the shared
   subspace. Would introduce a new ML dependency not currently in the repo — biggest
   new-infra lift here, positioned as a `method="cebra"` branch alongside the
-  existing `fit_shared_subspace` per `ephys/README.md`'s own stretch-goal list.
+  existing `fit_shared_subspace` per `analysis/README.md`'s own stretch-goal list.
 
 ## Update 2026-08-19 — partner-position decoding (item A) run; a caution, not a result
 
-Ran `ephys/decode_location.py::decode_all_locations` (item A, Tier 1) for animal
+Ran `analysis/decode_location/decode_location.py::decode_all_locations` (item A, Tier 1) for animal
 631/session `20251210` against all 12 tracked objects. Two things worth recording
 for whoever picks up any `decode_location`-based item next:
 
@@ -346,7 +346,7 @@ for whoever picks up any `decode_location`-based item next:
   gets near-zero error on a target that barely moves) and cases where the null
   outperformed real decoding entirely (likely stereotyped/patterned trajectories).
   **Always use `null='shuffle'` with a proper `empirical_p_value`/BH-FDR pass
-  (`ephys/_stats_utils.py`) for any real claim from this module** — same lesson the
+  (`analysis/_common/_stats_utils.py`) for any real claim from this module** — same lesson the
   LDA decoders already learned the hard way (see Phase 1.5 above).
 - **Self-position decoding failed a proper shuffle-null test** (p=0.43, animal 631
   decoding its own position from its own spikes, default params). Root-caused and
@@ -356,7 +356,7 @@ for whoever picks up any `decode_location`-based item next:
   (`decode_partner_distance.py`/`inter_brain_dynamics._fit_r2` both use
   `KFold(shuffle=False)`). Leakage was inflating *both* the real decode and the
   shuffle-null comparably, hiding a real effect under two artificially-tight numbers.
-  Fixed in `ephys/decode_location.py` (contiguous folds now, "Statistical notes"
+  Fixed in `analysis/decode_location/decode_location.py` (contiguous folds now, "Statistical notes"
   docstring added, new `tests/test_decode_location.py` — this module had zero test
   coverage before).
 - **After the fix** (contiguous folds + `rate_smoothing_sigma=2.0`, iteration 12):

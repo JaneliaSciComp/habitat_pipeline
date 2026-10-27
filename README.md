@@ -11,7 +11,7 @@ from ingestion.data_paths import DataStorageManager
 from ingestion.kilosort_data_import import load_kilosort_data
 from ingestion.ephys_sync import DataSyncManager
 from video.behavioral_events import load_behavioral_events
-from ephys.decode_opponent_identity import decode_opponent_identity_population
+from analysis.event_decoding.decode_opponent_identity import decode_opponent_identity_population
 
 # Discover all session data files automatically
 dsm = DataStorageManager("631", "20251216", auto_load=True)
@@ -55,15 +55,17 @@ habitat_pipeline/
 │   ├── behavioral_events.py           # BehavioralEventsData + opponent/group/outcome labels
 │   ├── behavioral_visualization.py    # Event heatmaps & timelines
 │   └── plot_trajectory.py             # Trajectory, occupancy, Voronoi, proximity
-├── ephys/                             # Electrophysiology analysis
-│   ├── _lda_decoding.py               # Shared LDA / CV / feature core (label-agnostic)
-│   ├── decoding_plots.py              # Shared decoding plots
-│   ├── decode_opponent_identity.py    # Opponent identity / ID-group LDA decoding
-│   ├── decode_event_outcome.py        # Winner/loser LDA decoding
-│   ├── decode_location.py             # Bayesian location decoding
-│   ├── population_geometry.py         # PCA/UMAP population dynamics
-│   ├── rastermap_viz.py               # Rastermap visualization
-│   └── plot_ephys_qa_stats.py         # Quality-metric plots + CLI
+├── analysis/                          # One folder per analysis (code, plots, demos); see analysis/README.md
+│   ├── _common/                       # Shared stats helpers (BH-FDR, baselines)
+│   ├── event_decoding/                # LDA opponent/outcome decoders + shared core + plots
+│   ├── opponent_barcode/              # Per-opponent barcode analyses
+│   ├── inter_brain_dynamics/          # Shared-subspace CCA
+│   ├── social_spatial_fields/         # Social place fields
+│   ├── partner_distance/              # Partner-distance decoding
+│   ├── decode_location/               # Bayesian location decoding
+│   ├── territory/ territory_behavior/ rest_distance/ conflict_territory/
+│   ├── population_geometry/ rastermap_viz/ ephys_qa/
+│   └── trajectory_exports/            # Trajectory / embedding / sync video+figure exports
 ├── gui/                               # Streamlit + Panel dashboards
 │   ├── app.py                         # Streamlit entry
 │   ├── interactive_app.py             # Panel + Bokeh + Plotly entry
@@ -140,7 +142,7 @@ habitat_pipeline/
 
 ### ephys
 
-The decoding modules share a single label-agnostic core ([ephys/_lda_decoding.py](ephys/_lda_decoding.py)) and a shared plotting module ([ephys/decoding_plots.py](ephys/decoding_plots.py)). Wrappers add label-specific extraction and identical plot calls.
+The decoding modules share a single label-agnostic core ([analysis/event_decoding/_lda_decoding.py](analysis/event_decoding/_lda_decoding.py)) and a shared plotting module ([analysis/event_decoding/decoding_plots.py](analysis/event_decoding/decoding_plots.py)). Wrappers add label-specific extraction and identical plot calls.
 
 **`decode_opponent_identity.py`** — Opponent identity (and ID-group) LDA decoding.
 
@@ -167,7 +169,7 @@ The decoding modules share a single label-agnostic core ([ephys/_lda_decoding.py
 
 **`plot_ephys_qa_stats.py`** — Quality-assessment plots: `plot_firing_pattern_histograms`, `plot_pass_fail_histograms`, `test_threshold_combinations`, `load_and_analyze_data` (+ CLI).
 
-**`inter_brain_dynamics.py`** / **`inter_brain_plots.py`** / **`run_inter_brain.py`** — Inter-brain shared subspace between two simultaneously-recorded animals (Zhang, Phi, Li et al., *Nature* 645, 991–1001 (2025)). See [ephys/README.md](ephys/README.md) for the full module map.
+**`inter_brain_dynamics.py`** / **`inter_brain_plots.py`** / **`run_inter_brain.py`** — Inter-brain shared subspace between two simultaneously-recorded animals (Zhang, Phi, Li et al., *Nature* 645, 991–1001 (2025)). See [analysis/README.md](analysis/README.md) for the full module map.
 
 | Symbol | Description |
 |--------|-------------|
@@ -177,13 +179,13 @@ The decoding modules share a single label-agnostic core ([ephys/_lda_decoding.py
 | `time_lagged_cca(...)`, `cross_animal_correlation_matrix(...)` | Leader/follower lag sweep and full cell-pair Pearson cross-correlation. |
 | `regress_shared_on_behavior(fit, behavior_by_animal, ...)` | Ridge regression of each shared dim onto self / partner / both behavior feature sets; reports `R²_self`, `R²_partner`, `R²_both` and the two unique-variance decompositions. |
 | `build_behavior_feature_matrix(...)` in [video/behavior_features.py](video/behavior_features.py) | Per-bin behavior features (speed, angular speed, distance, relative bearing, relative speed, ± event indicators) for the regression. |
-| `python -m ephys.run_inter_brain --session_id ... --animal_ids ... ...` | Full pipeline → results pickle + 6-panel summary PNG. |
+| `python -m analysis.inter_brain_dynamics.run_inter_brain --session_id ... --animal_ids ... ...` | Full pipeline → results pickle + 6-panel summary PNG. |
 
 Six-line example:
 
 ```python
 from ingestion.multi_animal_session import MultiAnimalSession
-from ephys.inter_brain_dynamics import fit_shared_subspace
+from analysis.inter_brain_dynamics.inter_brain_dynamics import fit_shared_subspace
 
 session = MultiAnimalSession("20251216", ["631", "632"])
 bin_centers, rates = session.get_common_binned_rates(bin_size_sec=0.5, smoothing_sigma_sec=0.25)
@@ -194,11 +196,11 @@ fit = fit_shared_subspace(rates["631"].T, rates["632"].T, n_components=5,
 CLI:
 
 ```bash
-python -m ephys.run_inter_brain \
+python -m analysis.inter_brain_dynamics.run_inter_brain \
     --session_id 20251216 --animal_ids 631 632 \
     --bin_size 0.5 --smoothing 0.25 \
     --max_K 20 --n_shuffles 200 \
-    --behavior_type EC --output_dir ./results
+    --behavior_type EC --output_dir ./results/inter_brain_dynamics
 ```
 
 **`social_spatial_fields.py`** / **`social_spatial_plots.py`** / **`run_social_spatial.py`** — Allocentric **social place fields**: occupancy-normalized firing-rate maps of a focal animal's cells over *each other* animal's `(x, y)`, with multi-target tuning classification and shuffle significance (informed by Ray et al., *Science* 2025; Danjo/Omer *Science* 2018; Skaggs *NIPS* 1993).
@@ -210,13 +212,13 @@ python -m ephys.run_inter_brain \
 | `spatial_information` / `spatial_sparsity` / `spatial_coherence` / `split_half_stability` | Skaggs bits/spike + bits/sec, occupancy-weighted sparsity, neighborhood coherence, first-vs-second-half stability. |
 | `field_significance(..., null_method='circular_shift'|'position_shuffle')` | Shuffle null. `compute_social_place_fields` defaults to `'auto'`: `position_shuffle` under a self-position stratum, `circular_shift` otherwise. |
 | `compute_social_place_fields(ks_focal, tracking, sync, focal_animal, target_animals=None, *, pixels_per_cm=None, ...)` | Sweep every focal cell over every target → `SocialFieldResults` with rate maps, stats, significance, `cell_classification` (BH-FDR; `self_only`/`partner_only`/`conjunctive`/`broadcast`/`none`), and population field-similarity. Only the focal animal needs ephys. `parameters` carry `class_label='target_position'`. |
-| `python -m ephys.run_social_spatial --session_id ... --animal_ids ... --focal ... ...` | Full pipeline → results pickle + 6-panel summary PNG + per-cluster grid PDF. |
+| `python -m analysis.social_spatial_fields.run_social_spatial --session_id ... --animal_ids ... --focal ... ...` | Full pipeline → results pickle + 6-panel summary PNG + per-cluster grid PDF. |
 
 Six-line example:
 
 ```python
 from ingestion.focal_session import load_focal_session_inputs
-from ephys.social_spatial_fields import compute_social_place_fields
+from analysis.social_spatial_fields.social_spatial_fields import compute_social_place_fields
 
 # Only the focal animal needs ephys; tracking (all animals) + sync come with it.
 inp = load_focal_session_inputs("20251216", "631")
@@ -231,10 +233,10 @@ print(results.cell_classification["category"].value_counts())
 CLI:
 
 ```bash
-python -m ephys.run_social_spatial \
+python -m analysis.social_spatial_fields.run_social_spatial \
     --session_id 20251216 --animal_ids 631 632 633 --focal 631 \
     --bin_size 5 --smoothing 5 --speed_threshold 5 \
-    --speed_filter_subject target --n_shuffles 500 --output_dir ./results
+    --speed_filter_subject target --n_shuffles 500 --output_dir ./results/social_spatial_fields
 ```
 
 **`decoding_plots.py`** — Shared plots for both opponent and outcome decoders. Result-dict-driven titles (`results['parameters']['class_label']` / `['analysis_title']`):
@@ -293,7 +295,7 @@ Data paths are defined in JSON files under `config/`:
 | `pipeline_demo.ipynb` | Full workflow: data loading, behavioral analysis, population decoding, PCA. |
 | `test.ipynb` | Working scratchpad covering the most recent refactors. |
 | `db_example.ipynb` | Database setup and queries. |
-| `ephys/LDA_demo.ipynb` | Single-cell opponent identity decoding walkthrough. |
+| `analysis/event_decoding/LDA_demo.ipynb` | Single-cell opponent identity decoding walkthrough. |
 | `video/trajectory_plots_examples.ipynb` | Trajectory visualization and spatial occupancy examples. |
 | `tests/KilosortData_test_demo.ipynb` | KilosortData loader demo. |
 

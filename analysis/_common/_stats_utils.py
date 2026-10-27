@@ -17,7 +17,7 @@ import numpy as np
 def benjamini_hochberg(pvals: np.ndarray) -> np.ndarray:
     """Benjamini-Hochberg adjusted p-values (q-values). NaNs map to 1.0.
 
-    Mirrors ``ephys.social_spatial_fields._benjamini_hochberg`` (same
+    Mirrors ``analysis.social_spatial_fields.social_spatial_fields._benjamini_hochberg`` (same
     algorithm, kept as a small independent copy here rather than importing
     across modules).
     """
@@ -62,7 +62,7 @@ def fdr_resolution(n_tests: int, n_shuffles: int, alpha: float = 0.05) -> Dict:
     number of tests that must *simultaneously* hit ``p_floor`` before BH's
     rank denominator lets any of them through. (Pooling nulls across tests,
     as ``null_mode='pooled'`` does in
-    ``ephys._lda_decoding.compute_population_significance``, lowers
+    ``analysis.event_decoding._lda_decoding.compute_population_significance``, lowers
     ``p_floor`` instead, at the cost of assuming a shared null.)
 
     Returns a dict with ``p_floor``, ``best_achievable_q`` (for one lone

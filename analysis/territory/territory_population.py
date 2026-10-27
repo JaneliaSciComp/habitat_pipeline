@@ -48,7 +48,7 @@ from typing import Dict, Optional, Sequence, Tuple
 import numpy as np
 from scipy import ndimage
 
-from ephys.territory_encoding import blocked_folds
+from analysis.territory.territory_encoding import blocked_folds
 from video.territory import TerritoryMap, signed_distance_from_mask
 
 logger = logging.getLogger(__name__)

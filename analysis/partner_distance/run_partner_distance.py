@@ -9,16 +9,16 @@ single-cell + population regression decode (with focal self-motion partialled
 out and a circular-shift null). Only the focal animal needs ephys. Writes a
 results pickle and a summary PNG.
 
-Mirrors the CLI structure of ``ephys/run_inter_brain.py``.
+Mirrors the CLI structure of ``analysis/inter_brain_dynamics/run_inter_brain.py``.
 
 Example
 -------
 ::
 
-    python -m ephys.run_partner_distance \\
+    python -m analysis.partner_distance.run_partner_distance \\
         --session_id 20251216 --animal_ids 631 632 \\
         --bin_size 0.5 --smoothing 0.25 --alpha 1.0 --cv_folds 5 \\
-        --null shuffle --n_shuffles 100 --output_dir ./results
+        --null shuffle --n_shuffles 100 --output_dir ./results/partner_distance
 """
 
 from __future__ import annotations
@@ -33,8 +33,8 @@ from typing import Optional
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ephys.decode_partner_distance import _analyze, build_distance_binned_data
-from ephys.decode_partner_distance_plots import plot_partner_distance_summary
+from analysis.partner_distance.decode_partner_distance import _analyze, build_distance_binned_data
+from analysis.partner_distance.decode_partner_distance_plots import plot_partner_distance_summary
 from ingestion.focal_session import load_focal_session_inputs
 
 logger = logging.getLogger(__name__)
@@ -171,7 +171,7 @@ def main(argv: Optional[list] = None) -> int:
     )
     focal, partner = args.animal_ids
 
-    sys.path.append(str(Path(__file__).parent.parent))
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
 
     logger.info("Loading focal %s ephys + session tracking for %s (partner %s)",
                 focal, args.session_id, partner)

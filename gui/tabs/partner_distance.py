@@ -3,7 +3,7 @@
 Decode the continuous distance between the loaded *focal* animal and a chosen
 *partner* from the focal's neural activity (regression). Calls into
 ``ephys.decode_partner_distance`` for the math and
-``ephys.decode_partner_distance_plots`` for the plots; the heavy run is wrapped
+``analysis.partner_distance.decode_partner_distance_plots`` for the plots; the heavy run is wrapped
 by :func:`gui.runners.cached_step` so the disk cache invalidates on any
 parameter change.
 """
@@ -13,8 +13,8 @@ import logging
 
 import streamlit as st
 
-from ephys.decode_partner_distance import _analyze, build_distance_binned_data
-from ephys.decode_partner_distance_plots import (
+from analysis.partner_distance.decode_partner_distance import _analyze, build_distance_binned_data
+from analysis.partner_distance.decode_partner_distance_plots import (
     plot_distance_posterior,
     plot_distance_tuning_curves,
     plot_partner_distance_summary,

@@ -12,7 +12,7 @@ from typing import Optional
 import numpy as np
 import streamlit as st
 
-from ephys.rastermap_viz import plot_rastermap, plot_rastermap_with_events
+from analysis.rastermap_viz.rastermap_viz import plot_rastermap, plot_rastermap_with_events
 from ingestion.data_paths import DataStorageManager
 from ingestion.ephys_sync import DataSyncManager
 from ingestion.kilosort_data_import import load_kilosort_data

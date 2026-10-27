@@ -6,8 +6,8 @@ appear as they happen, and a ring marks the rat's current position. Reads the ex
 so nothing is refitted or reloaded from the share. By default it uses the same tracking
 source as the cached CEBRA-position fit.
 
-    python scripts/export_trajectory_video.py --animal rat631 --session 20251216_094334
-    python scripts/export_trajectory_video.py --animal rat631 --session 20251216_094334 \
+    python analysis/trajectory_exports/export_trajectory_video.py --animal rat631 --session 20251216_094334
+    python analysis/trajectory_exports/export_trajectory_video.py --animal rat631 --session 20251216_094334 \
         --duration 90 --events F
 """
 from __future__ import annotations
@@ -19,12 +19,12 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from gui import explore_cache as xc  # noqa: E402
-from export_embedding_video import load_events  # noqa: E402
+from analysis.trajectory_exports.export_embedding_video import load_events  # noqa: E402
 
 EVENT_SNAP_S = 1.0       # an event is placed only if a tracked frame lies this close
 FORMAT_NAMES = {"apt_tqt": "APT", "mask_metrics": "manual"}
@@ -133,7 +133,7 @@ def main(argv=None) -> None:
     fig.tight_layout()
 
     n_frames = max(2, int(round(a.duration * a.fps)))
-    out = a.out or ROOT / "results" / (
+    out = a.out or ROOT / "results" / "trajectory_exports" / (
         f"{a.animal}_{a.session}_trajectory_{src}"
         f"{'' if a.events.lower() == 'none' else '_' + a.events}_buildup.mp4")
     out.parent.mkdir(parents=True, exist_ok=True)

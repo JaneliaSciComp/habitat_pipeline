@@ -8,7 +8,7 @@ tests focus on:
   ``as_dict`` round-trip.
 * The new tab module ``gui.tabs.inter_brain`` imports cleanly.
 * ``gui.app`` imports cleanly (it now references the new tab).
-* The refactored pure-compute ``ephys.run_inter_brain._analyze`` returns
+* The refactored pure-compute ``analysis.inter_brain_dynamics.run_inter_brain._analyze`` returns
   the same payload shape that ``_analyze_and_save`` does, modulo I/O.
 """
 
@@ -130,8 +130,8 @@ def _synthetic_rates(T=300, N_A=10, N_B=10, K_true=2, noise=0.5, seed=0):
 
 class TestAnalyzePure:
     def test_pure_analyze_returns_full_payload(self):
-        from ephys.inter_brain_dynamics import SharedSubspaceFit
-        from ephys.run_inter_brain import _analyze
+        from analysis.inter_brain_dynamics.inter_brain_dynamics import SharedSubspaceFit
+        from analysis.inter_brain_dynamics.run_inter_brain import _analyze
         X_A, X_B = _synthetic_rates(T=300, N_A=10, N_B=10, K_true=2)
         bin_centers = np.arange(X_A.shape[0]) * 0.5
         payload = _analyze(
@@ -158,7 +158,7 @@ class TestAnalyzePure:
 
     def test_pure_analyze_does_not_write_to_disk(self, tmp_path, monkeypatch):
         """_analyze is I/O-free; the only side-effects are logging."""
-        from ephys.run_inter_brain import _analyze
+        from analysis.inter_brain_dynamics.run_inter_brain import _analyze
         X_A, X_B = _synthetic_rates(T=300, N_A=8, N_B=8, K_true=2)
         bin_centers = np.arange(X_A.shape[0]) * 0.5
         monkeypatch.chdir(tmp_path)

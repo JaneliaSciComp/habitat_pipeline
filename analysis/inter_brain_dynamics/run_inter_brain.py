@@ -10,17 +10,17 @@ when tracking is available) a ridge regression of each shared dim onto
 self vs partner behavior. Writes a results pickle and a six-panel
 summary PNG into the output directory.
 
-Mirrors the CLI structure of ``ephys/decode_opponent_identity.py``.
+Mirrors the CLI structure of ``analysis/event_decoding/decode_opponent_identity.py``.
 
 Example
 -------
 ::
 
-    python -m ephys.run_inter_brain \\
+    python -m analysis.inter_brain_dynamics.run_inter_brain \\
         --session_id 20251216 --animal_ids 631 632 \\
         --bin_size 0.5 --smoothing 0.25 \\
         --max_K 20 --n_shuffles 200 \\
-        --behavior_type EC --output_dir ./results
+        --behavior_type EC --output_dir ./results/inter_brain_dynamics
 """
 
 from __future__ import annotations
@@ -35,14 +35,14 @@ from typing import Dict, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ephys.inter_brain_dynamics import (
+from analysis.inter_brain_dynamics.inter_brain_dynamics import (
     cross_animal_correlation_matrix,
     fit_shared_subspace,
     regress_shared_on_behavior,
     shuffle_null_subspace,
     time_lagged_cca,
 )
-from ephys.inter_brain_plots import plot_inter_brain_summary
+from analysis.inter_brain_dynamics.inter_brain_plots import plot_inter_brain_summary
 
 logger = logging.getLogger(__name__)
 
@@ -291,7 +291,7 @@ def main(argv: Optional[list] = None) -> int:
         return 1
     a_id, b_id = args.animal_ids
 
-    sys.path.append(str(Path(__file__).parent.parent))
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
 
     try:
         from ingestion.multi_animal_session import MultiAnimalSession

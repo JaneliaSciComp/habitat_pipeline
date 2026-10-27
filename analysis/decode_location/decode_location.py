@@ -18,8 +18,8 @@ Statistical notes
   autocorrelated in time, so cross-validation uses **contiguous**
   ``KFold(shuffle=False)`` folds — shuffled folds would leak adjacent time
   bins (nearly identical position) between train and test and inflate
-  apparent accuracy. This mirrors ``ephys.decode_partner_distance`` and
-  ``ephys.inter_brain_dynamics._fit_r2``.
+  apparent accuracy. This mirrors ``analysis.partner_distance.decode_partner_distance`` and
+  ``analysis.inter_brain_dynamics.inter_brain_dynamics._fit_r2``.
 * The ``null='shuffle'`` baseline circularly shifts the trajectory, which
   preserves its autocorrelation — a fair null only once folds are contiguous;
   with leaky (shuffled) folds, the null benefits from the same leakage as the

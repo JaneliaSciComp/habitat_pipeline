@@ -1,7 +1,7 @@
 """
 Plotting helpers for inter-brain neural dynamics.
 
-Mirrors the style of :mod:`ephys.decoding_plots`: titles and axis labels
+Mirrors the style of :mod:`analysis.event_decoding.decoding_plots`: titles and axis labels
 are driven by ``fit.parameters['analysis_title']`` and
 ``fit.parameters['class_label']`` so the same figures work for any
 future variant of the shared-subspace fit without code changes here.
@@ -18,7 +18,7 @@ from typing import Dict, Optional, Sequence, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ephys.inter_brain_dynamics import SharedSubspaceFit
+from analysis.inter_brain_dynamics.inter_brain_dynamics import SharedSubspaceFit
 
 
 __all__ = [
@@ -33,7 +33,7 @@ __all__ = [
 
 
 # ---------------------------------------------------------------------------
-# Local title / label helpers (mirrors ephys/decoding_plots.py:34-39)
+# Local title / label helpers (mirrors analysis/event_decoding/decoding_plots.py:34-39)
 # ---------------------------------------------------------------------------
 
 def _analysis_title(

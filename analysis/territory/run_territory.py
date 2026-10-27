@@ -1,8 +1,8 @@
 """Territory-encoding runner: one focal rat, one recording, APT tracking chunks.
 
-    python -m ephys.run_territory --session_id 20251216 --animal_id 631 --gates_only
-    python -m ephys.run_territory --session_id 20251216 --animal_id 631 --smoke
-    python -m ephys.run_territory --session_id 20251216 --animal_id 631 --purpose exploratory
+    python -m analysis.territory.run_territory --session_id 20251216 --animal_id 631 --gates_only
+    python -m analysis.territory.run_territory --session_id 20251216 --animal_id 631 --smoke
+    python -m analysis.territory.run_territory --session_id 20251216 --animal_id 631 --purpose exploratory
 
 What it does
 ------------
@@ -46,9 +46,9 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from ephys._stats_utils import benjamini_hochberg, fdr_resolution
-from ephys import territory_encoding as te
-from ephys import territory_population as tp
+from analysis._common._stats_utils import benjamini_hochberg, fdr_resolution
+from analysis.territory import territory_encoding as te
+from analysis.territory import territory_population as tp
 from video.territory import (UNCLAIMED, build_territory_map_loo, compute_territory_map, exclusivity_map,
                              label_positions, territory_stability)
 
@@ -91,7 +91,7 @@ def load_chunk(path: str, sync) -> Dict[str, pd.DataFrame]:
 def git_commit() -> Optional[str]:
     try:
         return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True,
-                                       cwd=Path(__file__).resolve().parents[1]).strip()
+                                       cwd=Path(__file__).resolve().parents[2]).strip()
     except Exception:
         return None
 

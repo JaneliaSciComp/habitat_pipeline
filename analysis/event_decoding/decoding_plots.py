@@ -1,8 +1,8 @@
 """
 Shared plotting functions for the ephys decoding modules.
 
-Both ``ephys/decode_opponent_identity.py`` and
-``ephys/decode_event_outcome.py`` produce result dicts in a unified schema
+Both ``analysis/event_decoding/decode_opponent_identity.py`` and
+``analysis/event_decoding/decode_event_outcome.py`` produce result dicts in a unified schema
 and re-export the plot functions defined here. Plot titles and axis labels
 are driven by two cosmetic strings that the wrappers stash on the result:
 
@@ -24,7 +24,7 @@ from typing import Dict, List, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ephys._lda_decoding import align_spikes_to_events
+from analysis.event_decoding._lda_decoding import align_spikes_to_events
 
 
 # ---------------------------------------------------------------------------

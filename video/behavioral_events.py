@@ -3,23 +3,36 @@ Behavioral Events Import and Processing Module
 
 Provides BehavioralEventsData (a dataclass holding behavioral event records) and
 load_behavioral_events() to load it from CSV file(s) on disk.
+
+Every ``extract_*_labels`` method follows the same pipeline: restrict to the
+requested behaviour type(s) → keep events where the focal animal fills one of
+the relevant roles → keep events inside ``ephys_time_range`` → label each
+event → drop classes with too few events. The shared steps live in
+:meth:`BehavioralEventsData._focal_events`.
 """
 
 import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar, Dict, Iterable, List, Optional, Tuple, Union
+from typing import ClassVar, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
 
-from ingestion.ephys_sync import DataSyncManager
 from ingestion._conventions import (
     RAT_ID_COLUMNS, canonical_rat_id, normalize_object_name, uses_name_normalization,
 )
+from ingestion.ephys_sync import DataSyncManager
 
 logger = logging.getLogger(__name__)
+
+#: ``(start_times, end_times, labels)`` as returned by every ``extract_*_labels``.
+LabelArrays = Tuple[np.ndarray, np.ndarray, np.ndarray]
+
+
+def _no_events() -> LabelArrays:
+    return np.array([]), np.array([]), np.array([])
 
 
 # ---------------------------------------------------------------------------
@@ -67,47 +80,41 @@ class BehavioralEventsData:
     event_files: List[Path] = field(default_factory=list)
     synchronized: bool = False
 
-    # --- analysis methods (pure computation, no I/O) -----------------------
+    # --- lookups -------------------------------------------------------------
 
     def get_events_by_type(self, event_type: str) -> Optional[pd.DataFrame]:
-        """Return events whose ``type`` column equals the given abbreviation."""
+        """Events whose ``type`` equals *event_type*, or None if there are none."""
         if 'type' not in self.events_data.columns:
-            print("No 'type' column found in behavioral events data")
+            logger.warning("No 'type' column found in behavioral events data")
             return None
 
         filtered = self.events_data[self.events_data['type'] == event_type].copy()
         if len(filtered) == 0:
-            print(f"No events found for type: {event_type}")
+            logger.warning("No events found for type: %s", event_type)
             return None
         return filtered
 
     def get_events_by_rat(self, rat_id: str, role: str = 'any') -> Optional[pd.DataFrame]:
-        """Return events involving a specific rat in any or a given role."""
-        if not rat_id.startswith('rat'):
-            rat_id = f"rat{rat_id}"
-
-        rat_columns = ['initiator', 'victim', 'winner', 'loser']
-        available = [c for c in rat_columns if c in self.events_data.columns]
+        """Events involving *rat_id* in any role (or the given one), or None if there are none."""
+        rat_id = canonical_rat_id(rat_id)
+        available = [c for c in RAT_ID_COLUMNS if c in self.events_data.columns]
         if not available:
-            print("No rat identity columns found in data")
+            logger.warning("No rat identity columns found in data")
             return None
 
         if role == 'any':
-            mask = pd.concat(
-                [self.events_data[c] == rat_id for c in available], axis=1
-            ).any(axis=1)
-            filtered = self.events_data[mask].copy()
+            mask = self.events_data[available].eq(rat_id).any(axis=1)
         elif role in available:
-            filtered = self.events_data[self.events_data[role] == rat_id].copy()
+            mask = self.events_data[role] == rat_id
         else:
-            print(f"Role '{role}' not found. Available roles: {available}")
+            logger.warning("Role '%s' not found. Available roles: %s", role, available)
             return None
 
+        filtered = self.events_data[mask].copy()
         if len(filtered) == 0:
-            print(f"No events found for rat {rat_id} in role {role}")
+            logger.warning("No events found for rat %s in role %s", rat_id, role)
             return None
-
-        print(f"Found {len(filtered)} events for rat {rat_id} (role: {role})")
+        logger.info("Found %d events for rat %s (role: %s)", len(filtered), rat_id, role)
         return filtered
 
     def get_behavior_type_mapping(self) -> Dict[str, str]:
@@ -126,9 +133,8 @@ class BehavioralEventsData:
 
     def get_available_rats(self) -> List[str]:
         """Sorted list of rat identifiers seen in any role column."""
-        rat_columns = ['initiator', 'victim', 'winner', 'loser']
         ids = set()
-        for col in rat_columns:
+        for col in RAT_ID_COLUMNS:
             if col in self.events_data.columns:
                 ids.update(self.events_data[col].dropna().unique())
         return sorted(ids)
@@ -156,10 +162,11 @@ class BehavioralEventsData:
         rat_columns = [c for c in RAT_ID_COLUMNS if c in df.columns]
         if rat_columns:
             for rat_id in self.get_available_rats():
-                mask = pd.concat([df[c] == rat_id for c in rat_columns], axis=1).any(axis=1)
-                print(f"  {rat_id}: {int(mask.sum())}")
+                print(f"  {rat_id}: {int(df[rat_columns].eq(rat_id).any(axis=1).sum())}")
         else:
             print("  No rat identity columns found")
+
+    # --- shared filtering steps --------------------------------------------
 
     @staticmethod
     def _filter_by_behavior_type(
@@ -202,13 +209,44 @@ class BehavioralEventsData:
                   f"ephys_time_range [{lo:.1f}, {hi:.1f}]s")
         return df[in_range]
 
+    @staticmethod
+    def _require_columns(df: pd.DataFrame, first: str, second: str) -> None:
+        if first not in df.columns or second not in df.columns:
+            raise ValueError(f"Behavioral data must have '{first}' and '{second}' columns")
+
+    def _focal_events(
+        self,
+        df: pd.DataFrame,
+        animal: str,
+        roles: Sequence[str],
+        ephys_time_range: Optional[Tuple[float, float]],
+    ) -> pd.DataFrame:
+        """Rows of *df* where *animal* fills one of *roles*, inside *ephys_time_range*.
+
+        Requires ``synchronize_with_ephys`` to have run (``ts_*_ephys``
+        columns) unless no row involves *animal*.
+        """
+        df = df[df[list(roles)].eq(animal).any(axis=1)]
+        if len(df) == 0:
+            return df
+        if 'ts_start_ephys' not in df.columns:
+            raise ValueError("No ephys-synchronized timestamp columns found in behavioral data")
+        return self._filter_to_ephys_range(df, ephys_time_range)
+
+    @staticmethod
+    def _opponents(df: pd.DataFrame, animal: str) -> np.ndarray:
+        """For each initiator/victim event, the animal on the other side of *animal*."""
+        return np.where(df['initiator'].values == animal, df['victim'].values, df['initiator'].values)
+
+    # --- label extraction --------------------------------------------------
+
     def extract_opponent_labels(
         self,
         animal_of_interest: str,
         behavior_type: Optional[Union[str, Iterable[str]]] = None,
         min_events_per_class: int = 5,
         ephys_time_range: Optional[Tuple[float, float]] = None,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> LabelArrays:
         """
         Extract (start_times, end_times, opponent_labels) for events involving
         ``animal_of_interest``, using ephys-synchronized timestamps.
@@ -228,40 +266,21 @@ class BehavioralEventsData:
         ``duration_disagrees_with_window`` gotcha in CLAUDE.md).
         """
         df = self._filter_by_behavior_type(self.events_data, behavior_type)
-
-        if 'initiator' not in df.columns or 'victim' not in df.columns:
-            raise ValueError("Behavioral data must have 'initiator' and 'victim' columns")
-
-        if not animal_of_interest.startswith('rat'):
-            animal_of_interest = f"rat{animal_of_interest}"
-
-        is_init = df['initiator'] == animal_of_interest
-        is_vict = df['victim'] == animal_of_interest
-        df = df[is_init | is_vict]
-
+        self._require_columns(df, 'initiator', 'victim')
+        animal = canonical_rat_id(animal_of_interest)
+        df = self._focal_events(df, animal, ('initiator', 'victim'), ephys_time_range)
         if len(df) == 0:
-            return np.array([]), np.array([]), np.array([])
-
-        if 'ts_start_ephys' not in df.columns:
-            raise ValueError("No ephys-synchronized timestamp columns found in behavioral data")
-
-        df = self._filter_to_ephys_range(df, ephys_time_range)
-        if len(df) == 0:
-            return np.array([]), np.array([]), np.array([])
+            return _no_events()
 
         event_start_times = df['ts_start_ephys'].values
         event_end_times = df['ts_end_ephys'].values
-        opponent_labels = np.where(
-            df['initiator'].values == animal_of_interest,
-            df['victim'].values,
-            df['initiator'].values,
-        )
+        opponent_labels = self._opponents(df, animal)
 
         if min_events_per_class > 1:
             unique_opponents, counts = np.unique(opponent_labels, return_counts=True)
             valid_opponents = unique_opponents[counts >= min_events_per_class]
             if len(valid_opponents) == 0:
-                return np.array([]), np.array([]), np.array([])
+                return _no_events()
             valid_mask = np.isin(opponent_labels, valid_opponents)
             event_start_times = event_start_times[valid_mask]
             event_end_times = event_end_times[valid_mask]
@@ -306,10 +325,8 @@ class BehavioralEventsData:
         else:
             middle_id = sorted_ids[half]
             middle_num = sorted_nums[half]
-            low_candidates = sorted_nums[:half]
-            high_candidates = sorted_nums[half + 1:]
-            low_median = float(np.median(low_candidates))
-            high_median = float(np.median(high_candidates))
+            low_median = float(np.median(sorted_nums[:half]))
+            high_median = float(np.median(sorted_nums[half + 1:]))
             if abs(middle_num - low_median) <= abs(middle_num - high_median):
                 low_ids = sorted_ids[:half] + [middle_id]
                 high_ids = sorted_ids[half + 1:]
@@ -317,11 +334,8 @@ class BehavioralEventsData:
                 low_ids = sorted_ids[:half]
                 high_ids = [middle_id] + sorted_ids[half + 1:]
 
-        mapping: Dict[str, str] = {}
-        for rid in low_ids:
-            mapping[rid] = 'low'
-        for rid in high_ids:
-            mapping[rid] = 'high'
+        mapping = {rid: 'low' for rid in low_ids}
+        mapping.update({rid: 'high' for rid in high_ids})
         return mapping
 
     def extract_group_labels(
@@ -330,7 +344,7 @@ class BehavioralEventsData:
         behavior_type: Optional[Union[str, Iterable[str]]] = None,
         min_events_per_class: int = 5,
         ephys_time_range: Optional[Tuple[float, float]] = None,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> LabelArrays:
         """
         Extract (start_times, end_times, group_labels) where group_labels are
         ``'self'`` / ``'others'`` based on whether the opponent falls on the
@@ -347,42 +361,23 @@ class BehavioralEventsData:
         ``extract_opponent_labels``, applied before that group-level check.
         """
         df = self._filter_by_behavior_type(self.events_data, behavior_type)
-
-        if 'initiator' not in df.columns or 'victim' not in df.columns:
-            raise ValueError("Behavioral data must have 'initiator' and 'victim' columns")
-
-        if not animal_of_interest.startswith('rat'):
-            animal_of_interest = f"rat{animal_of_interest}"
-
-        is_init = df['initiator'] == animal_of_interest
-        is_vict = df['victim'] == animal_of_interest
-        df = df[is_init | is_vict]
-
+        self._require_columns(df, 'initiator', 'victim')
+        animal = canonical_rat_id(animal_of_interest)
+        df = self._focal_events(df, animal, ('initiator', 'victim'), ephys_time_range)
         if len(df) == 0:
-            return np.array([]), np.array([]), np.array([])
-
-        if 'ts_start_ephys' not in df.columns:
-            raise ValueError("No ephys-synchronized timestamp columns found in behavioral data")
-
-        df = self._filter_to_ephys_range(df, ephys_time_range)
-        if len(df) == 0:
-            return np.array([]), np.array([]), np.array([])
+            return _no_events()
 
         event_start_times = df['ts_start_ephys'].values
         event_end_times = df['ts_end_ephys'].values
-        opponent_ids = np.where(
-            df['initiator'].values == animal_of_interest,
-            df['victim'].values,
-            df['initiator'].values,
-        )
+        opponent_ids = self._opponents(df, animal)
 
         unique_opponents = np.unique(opponent_ids)
         if len(unique_opponents) < 2:
-            return np.array([]), np.array([]), np.array([])
+            return _no_events()
 
-        all_rats = sorted(set(unique_opponents.tolist()) | {animal_of_interest})
+        all_rats = sorted(set(unique_opponents.tolist()) | {animal})
         half_map = self._assign_id_groups(all_rats)
-        self_half = half_map[animal_of_interest]
+        self_half = half_map[animal]
         group_map = {
             rid: ('self' if half == self_half else 'others')
             for rid, half in half_map.items()
@@ -391,11 +386,11 @@ class BehavioralEventsData:
 
         unique_groups, counts = np.unique(group_labels, return_counts=True)
         if len(unique_groups) < 2 or int(np.min(counts)) < min_events_per_class:
-            return np.array([]), np.array([]), np.array([])
+            return _no_events()
 
         composition = {op: group_map[op] for op in unique_opponents}
         print(f"[OK] Found {len(event_start_times)} {behavior_type} events with group labels")
-        print(f"[OK] Group composition (relative to {animal_of_interest}): {composition}")
+        print(f"[OK] Group composition (relative to {animal}): {composition}")
         return event_start_times, event_end_times, group_labels
 
     def extract_outcome_labels(
@@ -404,7 +399,7 @@ class BehavioralEventsData:
         behavior_type: Optional[Union[str, Iterable[str]]] = None,
         min_events_per_class: int = 5,
         ephys_time_range: Optional[Tuple[float, float]] = None,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> LabelArrays:
         """
         Extract (start_times, end_times, outcome_labels) for events where
         ``animal_of_interest`` is either the winner or the loser. Labels are
@@ -418,52 +413,35 @@ class BehavioralEventsData:
         Mirrors ``extract_opponent_labels`` (including ``ephys_time_range``)
         and requires ``synchronize_with_ephys`` to have been called.
         """
-        if 'winner' not in self.events_data.columns or 'loser' not in self.events_data.columns:
-            raise ValueError("Behavioral data must have 'winner' and 'loser' columns")
-
+        self._require_columns(self.events_data, 'winner', 'loser')
         df = self._filter_by_behavior_type(self.events_data, behavior_type)
 
         winner_str = df['winner'].astype('string').str.strip()
         loser_str = df['loser'].astype('string').str.strip()
         has_outcome = winner_str.notna() & loser_str.notna() & (winner_str != '') & (loser_str != '')
         df = df[has_outcome]
-
         if len(df) == 0:
-            return np.array([]), np.array([]), np.array([])
+            return _no_events()
 
-        if not animal_of_interest.startswith('rat'):
-            animal_of_interest = f"rat{animal_of_interest}"
-
-        is_winner = df['winner'].values == animal_of_interest
-        is_loser = df['loser'].values == animal_of_interest
-        df = df[is_winner | is_loser]
-
+        animal = canonical_rat_id(animal_of_interest)
+        df = self._focal_events(df, animal, ('winner', 'loser'), ephys_time_range)
         if len(df) == 0:
-            return np.array([]), np.array([]), np.array([])
-
-        if 'ts_start_ephys' not in df.columns:
-            raise ValueError("No ephys-synchronized timestamp columns found in behavioral data")
-
-        df = self._filter_to_ephys_range(df, ephys_time_range)
-        if len(df) == 0:
-            return np.array([]), np.array([]), np.array([])
+            return _no_events()
 
         event_start_times = df['ts_start_ephys'].values
         event_end_times = df['ts_end_ephys'].values
-        outcome_labels = np.where(
-            df['winner'].values == animal_of_interest,
-            'winner',
-            'loser',
-        )
+        outcome_labels = np.where(df['winner'].values == animal, 'winner', 'loser')
 
         unique_outcomes, counts = np.unique(outcome_labels, return_counts=True)
         if len(unique_outcomes) < 2 or int(np.min(counts)) < min_events_per_class:
-            return np.array([]), np.array([]), np.array([])
+            return _no_events()
 
         scope = behavior_type if behavior_type is not None else 'aggressive'
         print(f"[OK] Found {len(event_start_times)} {scope} events with outcome labels")
         print(f"[OK] Outcome counts: {dict(zip(unique_outcomes, counts))}")
         return event_start_times, event_end_times, outcome_labels
+
+    # --- clock synchronisation ---------------------------------------------
 
     def synchronize_with_ephys(
         self,
@@ -474,21 +452,22 @@ class BehavioralEventsData:
         Convert ts_start / ts_end (Linux ns) to ephys time (seconds).
 
         With create_new_columns=True (default) writes ts_start_ephys /
-        ts_end_ephys; otherwise overwrites the originals.
+        ts_end_ephys; otherwise overwrites the originals. Returns False (and
+        logs why) if there is nothing to convert or the conversion fails.
         """
         if 'ts_start' not in self.events_data.columns:
-            print("No 'ts_start' column found in behavioral events data")
+            logger.warning("No 'ts_start' column found in behavioral events data")
             return False
 
         try:
             self._convert_timestamp_column('ts_start', create_new_columns, sync_manager)
             if 'ts_end' in self.events_data.columns:
                 self._convert_timestamp_column('ts_end', create_new_columns, sync_manager)
-            self.synchronized = True
-            return True
-        except Exception as e:
-            print(f"Error during timestamp synchronization: {e}")
+        except Exception:
+            logger.exception("Error during timestamp synchronization")
             return False
+        self.synchronized = True
+        return True
 
     def _convert_timestamp_column(
         self,
@@ -541,6 +520,8 @@ def load_behavioral_events(
     ----------
     files : str, Path, or list of paths
         A single CSV path, a directory containing CSVs, or a list of CSV paths.
+        Every file given is read and concatenated, so pass only the canonical
+        ``<date>/<date>_behavior_event_df.csv`` (``HZ-DATA-007``).
     session_id : str
         Session identifier (stored on the returned object).
 

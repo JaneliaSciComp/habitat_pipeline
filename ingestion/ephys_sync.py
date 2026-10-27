@@ -1,6 +1,22 @@
+"""
+Ephys <-> behaviour clock synchronisation.
+
+The same irregular pulse train is logged twice: on the ephys side as rising
+edges on a DIO channel (sample counts, so ``/ SAMPLE_RATE`` gives ephys
+seconds), and on the behaviour side as one Linux-nanosecond timestamp per line
+in a running pulse log shared by every session on the ephys root.
+:func:`find_sync_mapping` finds the run of pulses whose inter-pulse intervals
+agree on both sides and fits ``behavior_s = slope * ephys_s + intercept``.
+:class:`DataSyncManager` does this for one session (or, for cohort 9, uses the
+Greyware SysClock fit instead; see :mod:`ingestion.greyware_sync`).
+"""
+
 import logging
+from pathlib import Path
+from typing import Dict, Tuple
 
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 from scipy import stats
 
 from ingestion._conventions import SAMPLE_RATE
@@ -9,48 +25,75 @@ from ingestion.trodes_to_python import read_trodes_dat
 
 logger = logging.getLogger(__name__)
 
+#: Parsed pulse logs keyed by ``(path, mtime_ns, size)``. A log holds every
+#: pulse ever recorded under its ephys root (~400k lines for cohort 7), and a
+#: multi-animal session builds one sync per animal from the same file.
+_PULSE_LOG_CACHE: Dict[Tuple[str, int, int], np.ndarray] = {}
+
+
+def load_pulse_log(pulse_log_path) -> np.ndarray:
+    """Behaviour-side pulse times in seconds: one ns integer per line after a header line."""
+    path = Path(pulse_log_path)
+    stat = path.stat()
+    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    if key not in _PULSE_LOG_CACHE:
+        nanoseconds = np.loadtxt(path, dtype=np.int64, skiprows=1, ndmin=1)
+        _PULSE_LOG_CACHE.clear()          # keep only the latest log in memory
+        _PULSE_LOG_CACHE[key] = nanoseconds / 1e9
+    return _PULSE_LOG_CACHE[key].copy()
 
 
 def load_ephys_sync(data_manager, dio_channel=1):
-    """
-    Load and process ephys synchronization data using a DataStorageManager.
+    """Load both sides of the sync pulse train for one recording.
 
     Parameters:
     - data_manager: DataStorageManager instance containing session paths
     - dio_channel: int, DIO channel number to load (default is 1)
 
     Returns:
-    - TSESync: np.ndarray, ephys sync timestamps (seconds)
+    - TSESync: np.ndarray, ephys sync timestamps (seconds) — rising edges only
     - TSBSync: np.ndarray, behavioral sync timestamps (seconds)
-    - system_time_at_creation: float, system time when recording started (seconds)
+    - system_time_at_creation: float, wall-clock time the DIO file was created (seconds)
     """
     dio_path = data_manager.get_dio_path(channel=dio_channel)
     if dio_path is None:
         raise FileNotFoundError(f"DIO channel {dio_channel} not available in DataStorageManager")
 
     dio = read_trodes_dat(dio_path)
-    dio_data = dio.data
     system_time_at_creation = int(dio.header['system_time_at_creation']) / 1e3
-
-    time = dio_data['time']
-    state = dio_data['state']
-    TSESync = np.array(time[state == 1]) / SAMPLE_RATE
+    rising = dio.data['state'] == 1
+    TSESync = dio.data['time'][rising] / SAMPLE_RATE
 
     pulse_log_path = data_manager.get_pulse_log_path()
     if pulse_log_path is None:
         raise FileNotFoundError("Pulse log path not available in DataStorageManager")
-
-    with open(pulse_log_path, 'r') as f:
-        lines = f.readlines()
-    TSBSync = np.array([int(line) / 1e9 for line in lines[1:]])
+    TSBSync = load_pulse_log(pulse_log_path)
 
     return TSESync, TSBSync, system_time_at_creation
+
+
+def _first_matching_window(windows: np.ndarray, sequence: np.ndarray, tolerance: float) -> int:
+    """Index of the first row of *windows* within *tolerance* of *sequence* everywhere, or -1."""
+    # Cheap pre-filter on the first element, then check the survivors in full.
+    candidates = np.flatnonzero(np.abs(windows[:, 0] - sequence[0]) <= tolerance)
+    if len(candidates) == 0:
+        return -1
+    ok = np.all(np.abs(windows[candidates] - sequence) <= tolerance, axis=1)
+    return int(candidates[np.argmax(ok)]) if ok.any() else -1
 
 
 def find_sync_mapping(TSESync, TSBSync, system_time_at_creation, search_window=300,
                       interval_tolerance=0.02, min_sequence_length=10):
     """
     Find the best linear mapping between ephys and behavior timestamps using inter-pulse intervals.
+
+    Starting from the first behaviour pulse inside ``system_time_at_creation
+    ± search_window/2`` (or from the start of the log if there is none), each
+    run of ``min_sequence_length`` behaviour intervals is compared against
+    every run of ephys intervals; the first behaviour run that some ephys run
+    matches within ``interval_tolerance`` (taking the earliest such ephys run)
+    is extended pulse by pulse while intervals keep agreeing, and the matched
+    pulses are fitted by linear regression.
 
     Parameters:
     - TSESync: array of ephys sync timestamps (seconds)
@@ -61,46 +104,47 @@ def find_sync_mapping(TSESync, TSBSync, system_time_at_creation, search_window=3
     - min_sequence_length: minimum length of matching sequences to consider
 
     Returns:
-    - dict with 'slope', 'intercept', 'r_squared', 'n_matches', matched arrays, and
-      'ephys_to_behavior' / 'behavior_to_ephys' conversion functions.
+    - dict with 'slope', 'intercept', 'r_squared', 'n_matches', 'p_value',
+      'std_err', 'matched_ephys' and 'matched_behavior'.
     """
     TSE = np.asarray(TSESync)
     TSB = np.asarray(TSBSync)
     intervals_E = np.diff(TSE)
     intervals_B = np.diff(TSB)
+    L = min_sequence_length
 
     start_time = system_time_at_creation - search_window / 2
     end_time = system_time_at_creation + search_window / 2
-    valid_indices = np.where((TSB >= start_time) & (TSB <= end_time))[0]
+    valid_indices = np.flatnonzero((TSB >= start_time) & (TSB <= end_time))
+    if len(valid_indices) > 0:
+        search_start = int(valid_indices[0])
+    else:
+        search_start = 0
+        logger.warning("No behaviour pulses within %.0f s of the DIO creation time; "
+                       "searching the pulse log from its start.", search_window / 2)
 
-    def find_matching_sequence(intervals_ref, intervals_target, start_ref):
-        seq_ref = intervals_ref[start_ref:start_ref + min_sequence_length]
-        for start_target in range(len(intervals_target) - min_sequence_length + 1):
-            seq_target = intervals_target[start_target:start_target + min_sequence_length]
-            if np.all(np.abs(seq_ref - seq_target) <= interval_tolerance):
-                return start_target
-        return -1
-
-    search_start = int(valid_indices[0]) if len(valid_indices) > 0 else 0
     matches = []
-    for start_b in range(search_start, len(intervals_B) - min_sequence_length + 1):
-        match_e = find_matching_sequence(intervals_B, intervals_E, start_b)
-        if match_e == -1:
-            continue
+    if len(intervals_E) >= L:
+        windows_E = sliding_window_view(intervals_E, L)       # every run of L ephys intervals
+        for start_b in range(search_start, len(intervals_B) - L + 1):
+            match_e = _first_matching_window(windows_E, intervals_B[start_b:start_b + L],
+                                             interval_tolerance)
+            if match_e == -1:
+                continue
 
-        for i in range(min_sequence_length):
-            matches.append((TSE[match_e + i + 1], TSB[start_b + i + 1]))
-        logger.info("Found sync sequence match: B[%d] -> E[%d]", start_b, match_e)
+            for i in range(L):
+                matches.append((TSE[match_e + i + 1], TSB[start_b + i + 1]))
+            logger.info("Found sync sequence match: B[%d] -> E[%d]", start_b, match_e)
 
-        b_idx = start_b + min_sequence_length
-        e_idx = match_e + min_sequence_length
-        while b_idx < len(intervals_B) and e_idx < len(intervals_E):
-            if abs(intervals_B[b_idx] - intervals_E[e_idx]) > interval_tolerance:
-                break
-            matches.append((TSE[e_idx + 1], TSB[b_idx + 1]))
-            b_idx += 1
-            e_idx += 1
-        break
+            b_idx = start_b + L
+            e_idx = match_e + L
+            while b_idx < len(intervals_B) and e_idx < len(intervals_E):
+                if abs(intervals_B[b_idx] - intervals_E[e_idx]) > interval_tolerance:
+                    break
+                matches.append((TSE[e_idx + 1], TSB[b_idx + 1]))
+                b_idx += 1
+                e_idx += 1
+            break
 
     if len(matches) < 2:
         raise ValueError("No sync match found within search window")
@@ -243,6 +287,10 @@ class DataSyncManager:
     ``mapping['r_squared']`` and ``mapping['n_matches']`` are None.
     """
 
+    #: Class-level default so instances made without ``__init__`` (test stubs,
+    #: pickles from before cohort 9's Greyware sync existed) read as pulse syncs.
+    method = "pulses"
+
     def __init__(self, data_manager: DataStorageManager, dio_channel: int = 1):
         self.data_manager = data_manager
         self.dio_channel = dio_channel
@@ -316,7 +364,7 @@ class DataSyncManager:
         the pulse cross-check to have succeeded.
         """
         mapping = self.mapping
-        if getattr(self, "method", "pulses") == "greyware":
+        if self.method == "greyware":
             mapping = self.mapping.get('pulse_mapping')
             if mapping is None:
                 raise ValueError("Greyware sync has no pulse match to plot: "
@@ -324,7 +372,7 @@ class DataSyncManager:
         return plot_sync_results(mapping, self.ephys_sync, self.behavior_sync, figsize)
 
     def __repr__(self) -> str:
-        detail = (f"n_matches={self.mapping['n_matches']}" if getattr(self, "method", "pulses") == "pulses"
+        detail = (f"n_matches={self.mapping['n_matches']}" if self.method == "pulses"
                   else f"greyware R={self.mapping['rate_hz']:.5f} Hz")
         return (f"DataSyncManager({self.data_manager.animal_id}/{self.data_manager.session_id}, "
                 f"DIO{self.dio_channel}, {detail})")

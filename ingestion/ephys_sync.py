@@ -4,7 +4,7 @@ import numpy as np
 from scipy import stats
 
 from ingestion.data_paths import DataStorageManager
-from ingestion.trodes_to_python import readTrodesExtractedDataFile
+from ingestion.trodes_to_python import read_trodes_dat
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +28,9 @@ def load_ephys_sync(data_manager, dio_channel=1):
     if dio_path is None:
         raise FileNotFoundError(f"DIO channel {dio_channel} not available in DataStorageManager")
 
-    fields = readTrodesExtractedDataFile(dio_path)
-    dio_data = np.array(fields['data'])
-    system_time_at_creation = int(fields['system_time_at_creation']) / 1e3
+    dio = read_trodes_dat(dio_path)
+    dio_data = dio.data
+    system_time_at_creation = int(dio.header['system_time_at_creation']) / 1e3
 
     time = dio_data['time']
     state = dio_data['state']

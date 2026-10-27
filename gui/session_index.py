@@ -50,7 +50,7 @@ import numpy as np
 import pandas as pd
 
 from ingestion.data_paths import (
-    _load_config,
+    load_config,
     get_animals_and_sessions,
     get_event_files_by_date,
     get_tracking_files_by_date,
@@ -501,7 +501,7 @@ def build_session_index(cohort: str, manifest_path: Optional[Path] = None,
             progress(msg)
 
     span_cache = span_cache if span_cache is not None else {}
-    config = _load_config(str(_config_file(cohort)))
+    config = load_config(str(_config_file(cohort)))
     sessions, generated_at = _manifest_sessions(manifest_path)
 
     say("listing recordings…")

@@ -515,8 +515,10 @@ def load_tracking_data(
 # Tracking on the ephys clock (canonical conversion)
 # ---------------------------------------------------------------------------
 
-def _compute_speed(t, x, y, smoothing_sec, gaussian_filter1d) -> np.ndarray:
+def _compute_speed(t, x, y, smoothing_sec) -> np.ndarray:
     """Gaussian-smoothed speed (units/s) from a position time series."""
+    from scipy.ndimage import gaussian_filter1d
+
     n = len(t)
     if n < 2:
         return np.zeros(n, dtype=np.float64)
@@ -576,8 +578,6 @@ def resolve_tracking_on_ephys_clock(
     speed_smoothing_sec : float
         Gaussian sigma (seconds) for smoothing position before differentiating.
     """
-    from scipy.ndimage import gaussian_filter1d
-
     if not tracking.synchronize_with_ephys(sync):
         raise RuntimeError(
             "Could not synchronize tracking with the ephys clock "
@@ -614,7 +614,7 @@ def resolve_tracking_on_ephys_clock(
         order = np.argsort(t, kind="stable")
         t, x, y = t[order], x[order], y[order]
 
-        speed = _compute_speed(t, x, y, speed_smoothing_sec, gaussian_filter1d)
+        speed = _compute_speed(t, x, y, speed_smoothing_sec)
 
         df = pd.DataFrame({"t": t, "x": x, "y": y, "speed": speed})
         if t_start_ephys is not None:

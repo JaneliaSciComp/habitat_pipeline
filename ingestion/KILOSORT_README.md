@@ -156,7 +156,8 @@ Behaviour:
 4. Otherwise loads raw data: spike times/clusters, `cluster_info.tsv` (if
    present, otherwise falls back to `cluster_KSLabel.tsv`),
    `channel_map.npy`, `channel_positions.npy`, and the
-   `*.timestamps.dat` file in the parent directory; selects "good"
+   `*.timestamps.dat` file in the parent directory (memory-mapped; only the
+   entries spikes point at are read); selects "good"
    clusters; and groups spikes by cluster (converted to seconds).
 
 Notes on raw loading:

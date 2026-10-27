@@ -58,7 +58,7 @@ Plain JSON files declaring root paths for `ephys`, `video`, `tracking`, and `eve
 | `.get_video_files()` / `.get_tracking_files()` / `.get_behavioral_event_files()` | Resolve behavior-side paths. |
 | `get_kilosort_path` / `get_dio_path` / `get_video_files_by_date` / `get_tracking_files_by_date` / `get_event_files_by_date` | Free functions returning `List[Path]`; used internally by the manager and re-exported. |
 | `get_animals_and_sessions(config_path=None)` ([ingestion/data_paths.py:375](ingestion/data_paths.py#L375)) | Scan ephys root and return a DataFrame of `(session, animal, kilosort_path)` rows. |
-| `verify_kilosort_path(path, check_files=True)` | Validate a kilosort4 directory has required files. |
+| `verify_kilosort_path(path, check_files=True, check_loadable=False)` | Validate a kilosort4 directory has its spike files; `check_loadable=True` also requires the `*.timestamps.dat`. |
 
 [ingestion/kilosort_data_import.py](ingestion/kilosort_data_import.py) — high-level Kilosort 4 loader (dataclass + functional loader).
 
@@ -74,8 +74,6 @@ Plain JSON files declaring root paths for `ephys`, `video`, `tracking`, and `eve
 | `load_kilosort_data(path, force_reload=False)` ([ingestion/kilosort_data_import.py:607](ingestion/kilosort_data_import.py#L607)) | Path-based loader with on-disk pickle cache and Kilosort-folder auto-discovery. |
 | `save_kilosort_data(...)` / `load_kilosort_from_file(...)` | Persist or reload a `KilosortData` instance to/from a pickle. |
 
-[ingestion/kilosort_data.py](ingestion/kilosort_data.py) — low-level Kilosort file parser used internally by the high-level loader.
-
 [ingestion/ephys_sync.py](ingestion/ephys_sync.py) — ephys↔behavior clock alignment via DIO inter-pulse intervals.
 
 | Symbol | Purpose |
@@ -85,7 +83,9 @@ Plain JSON files declaring root paths for `ephys`, `video`, `tracking`, and `eve
 | `DataSyncManager(data_manager, dio_channel=1)` ([ingestion/ephys_sync.py:230](ingestion/ephys_sync.py#L230)) | Stateful sync object exposing `convert_ephys_to_behavior(t)` / `convert_behavior_to_ephys(t)`. |
 | `plot_sync_results(mapping_dict, ...)` ([ingestion/ephys_sync.py:125](ingestion/ephys_sync.py#L125)) | 4-panel diagnostic plot for sync quality. |
 
-[ingestion/trodes_to_python.py](ingestion/trodes_to_python.py) — `readTrodesExtractedDataFile()` for SpikeGadgets binary DIO/LFP files.
+[ingestion/trodes_to_python.py](ingestion/trodes_to_python.py) — `read_trodes_dat(path, mmap=False)` for SpikeGadgets Trodes extracted files (DIO, timestamps, LFP); returns `(header, data)`.
+
+[ingestion/_conventions.py](ingestion/_conventions.py) — on-disk facts shared by every loader (`SAMPLE_RATE`, `SPIKE_TEMPLATE_OFFSET`, recording-stamp regexes, animal-id normalisation). [ingestion/errors.py](ingestion/errors.py) — `DataRootUnavailable`, `RecordingNotFound`, `MissingCompanionFile` (all `FileNotFoundError` subclasses).
 
 ### `video/` — Tracking and Behavioral Events
 

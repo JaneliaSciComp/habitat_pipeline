@@ -33,7 +33,8 @@ from video.tracking_import import load_tracking_data, resolve_tracking_on_ephys_
 
 logger = logging.getLogger(__name__)
 
-_CACHE_DIR = Path(".gui_cache") / "multi_animal"
+# Anchored to the repo root (like gui/explore_cache.py), not the working directory.
+_CACHE_DIR = Path(__file__).resolve().parent.parent / ".gui_cache" / "multi_animal"
 
 
 # ---------------------------------------------------------------------------
@@ -91,13 +92,7 @@ class MultiAnimalSession:
         if not self.animal_ids:
             raise ValueError("animal_ids must be non-empty")
         for aid in self.animal_ids:
-            dsm = DataStorageManager(aid, self.session_id, config_path=self.config_path)
-            if dsm.session_id != self.session_id:
-                raise ValueError(
-                    f"DSM session_id ({dsm.session_id}) does not match the requested "
-                    f"session_id ({self.session_id})"
-                )
-            self.dsm_by_animal[aid] = dsm
+            self.dsm_by_animal[aid] = DataStorageManager(aid, self.session_id, config_path=self.config_path)
         if self.sync_from_animal is None:
             self.sync_from_animal = self.animal_ids[0]
         elif self.sync_from_animal not in self.dsm_by_animal:

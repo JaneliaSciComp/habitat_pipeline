@@ -131,9 +131,44 @@ class TestMultiAnimalSession:
         self.sess = _make_session({"631": self.ks_a, "632": self.ks_b})
 
     def test_common_time_window_is_intersection(self):
-        t0, t1 = self.sess.get_common_time_window()
-        assert t0 == 0.0
-        assert t1 == pytest.approx(min(self.ks_a.duration_seconds, self.ks_b.duration_seconds))
+        t0, t1 = self.sess.get_common_time_window(LOOSE_FILTER)
+        a, b = self.ks_a.ephys_window, self.ks_b.ephys_window
+        assert t0 == max(a[0], b[0])
+        assert t1 == min(a[1], b[1])
+
+    def test_common_time_window_follows_recordings_that_start_late(self):
+        # An afternoon block: both animals record far from t = 0.
+        late = {}
+        for aid, offset in (("613", 19017.6), ("631", 19526.6)):
+            ks = _make_synthetic_ks(aid, "20251216", n_cells=5, duration_sec=1000.0,
+                                    firing_rate_hz=5.0, seed=int(aid))
+            ks.spike_times_by_cell = [st + offset for st in ks.spike_times_by_cell]
+            late[aid] = ks
+        t0, t1 = _make_session(late).get_common_time_window(LOOSE_FILTER)
+        assert 19526.6 <= t0 < 19527.0
+        assert 20016.6 < t1 <= 20017.6
+
+    def test_common_time_window_ignores_cells_that_fail_the_filter(self):
+        # A near-silent cell with one stray spike at 5000 s: it fails min_firing_rate,
+        # so it must not stretch the window.
+        self.ks_a.spike_times_by_cell[0] = np.array([1.0, 5000.0])
+        solo = _make_session({"631": self.ks_a})
+        rate_filter = dict(LOOSE_FILTER, min_firing_rate=0.5)
+        assert solo.get_common_time_window(LOOSE_FILTER)[1] == 5000.0
+        assert solo.get_common_time_window(rate_filter)[1] < 200.0
+        with pytest.raises(ValueError, match="no cells passing"):
+            solo.get_common_time_window(dict(LOOSE_FILTER, max_firing_rate=0.0))
+
+    def test_non_overlapping_recordings_raise(self):
+        self.ks_b.spike_times_by_cell = [st + 1000.0 for st in self.ks_b.spike_times_by_cell]
+        with pytest.raises(ValueError, match="do not overlap"):
+            self.sess.get_common_time_window(LOOSE_FILTER)
+        # An explicit window still works without consulting the overlap.
+        centers, _ = self.sess.get_common_binned_rates(
+            bin_size_sec=1.0, t_start_ephys=0.0, t_end_ephys=10.0,
+            filter_kwargs=LOOSE_FILTER, use_cache=False,
+        )
+        assert len(centers) == 10
 
     def test_common_binned_rates_identical_bins(self):
         centers, rates = self.sess.get_common_binned_rates(
@@ -145,7 +180,7 @@ class TestMultiAnimalSession:
         assert n_bins_a == n_bins_b == len(centers)
         assert rates["631"].shape[0] == 20
         assert rates["632"].shape[0] == 15
-        t0, t1 = self.sess.get_common_time_window()
+        t0, t1 = self.sess.get_common_time_window(LOOSE_FILTER)
         # All centers within the common window (allow a half-bin overshoot at the end
         # since np.arange may include an edge at t_end).
         assert centers[0] >= t0

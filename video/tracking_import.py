@@ -34,6 +34,9 @@ from typing import Dict, Iterable, List, Optional, Sequence, Union
 import numpy as np
 import pandas as pd
 
+from ingestion._conventions import (  # noqa: F401 - re-exported for callers
+    cohort_from_path, normalize_object_name, uses_name_normalization,
+)
 from ingestion.data_paths import DataStorageManager
 from ingestion.ephys_sync import DataSyncManager
 
@@ -207,47 +210,6 @@ TRACKING_FORMAT_UNKNOWN = 'unknown'
 #: The object part is greedy, so a name containing ``_center_x`` would still
 #: split at the last such suffix; APT names have no underscores in practice.
 _APT_COLUMN_RE = re.compile(r'^(?P<obj>.+)_(?P<field>center|kp\d+)_(?P<axis>[xy])$')
-
-#: APT names rat 635 as ``rat4635``. The leading ``4`` is a tracker-side prefix,
-#: not part of the animal id, and is stripped so object names match the
-#: ``rat635`` / ``635`` used by the configs, kilosort directories and events.
-_APT_ANIMAL_RE = re.compile(r'^rat4(\d{3})$', re.IGNORECASE)
-
-
-def normalize_object_name(name: str) -> str:
-    """``'rat4635'`` -> ``'rat635'``; any other name is returned unchanged."""
-    match = _APT_ANIMAL_RE.match(str(name).strip())
-    return f"rat{match.group(1)}" if match else str(name)
-
-
-#: A ``cohort<N>`` path component (``cohort7``, ``cohort1vs2_exp1``, ...).
-_COHORT_DIR_RE = re.compile(r'^cohort(\d+)', re.IGNORECASE)
-
-#: First cohort whose animal ids are four digits starting with 4 (``rat4678``),
-#: which :func:`normalize_object_name` would wrongly shorten to ``rat678``.
-_FIRST_COHORT_WITHOUT_NAME_NORMALIZATION = 9
-
-
-def cohort_from_path(path: Union[str, Path]) -> Optional[int]:
-    """Cohort number from the deepest ``cohort<N>`` directory in ``path``, or None."""
-    cohort = None
-    for part in Path(path).parts:
-        match = _COHORT_DIR_RE.match(part)
-        if match:
-            cohort = int(match.group(1))
-    return cohort
-
-
-def uses_name_normalization(path: Union[str, Path]) -> bool:
-    """Whether names in a file at ``path`` should go through :func:`normalize_object_name`.
-
-    True for cohorts before 9 and for paths naming no cohort (the old
-    behaviour). False from cohort 9 on, whose real ids (``rat4678``) match the
-    APT ``rat4<ddd>`` pattern.
-    """
-    cohort = cohort_from_path(path)
-    return cohort is None or cohort < _FIRST_COHORT_WITHOUT_NAME_NORMALIZATION
-
 
 def detect_tracking_format(columns: Iterable) -> str:
     """Identify a tracking file's layout from its column names alone.
@@ -553,8 +515,10 @@ def load_tracking_data(
 # Tracking on the ephys clock (canonical conversion)
 # ---------------------------------------------------------------------------
 
-def _compute_speed(t, x, y, smoothing_sec, gaussian_filter1d) -> np.ndarray:
+def _compute_speed(t, x, y, smoothing_sec) -> np.ndarray:
     """Gaussian-smoothed speed (units/s) from a position time series."""
+    from scipy.ndimage import gaussian_filter1d
+
     n = len(t)
     if n < 2:
         return np.zeros(n, dtype=np.float64)
@@ -614,8 +578,6 @@ def resolve_tracking_on_ephys_clock(
     speed_smoothing_sec : float
         Gaussian sigma (seconds) for smoothing position before differentiating.
     """
-    from scipy.ndimage import gaussian_filter1d
-
     if not tracking.synchronize_with_ephys(sync):
         raise RuntimeError(
             "Could not synchronize tracking with the ephys clock "
@@ -652,7 +614,7 @@ def resolve_tracking_on_ephys_clock(
         order = np.argsort(t, kind="stable")
         t, x, y = t[order], x[order], y[order]
 
-        speed = _compute_speed(t, x, y, speed_smoothing_sec, gaussian_filter1d)
+        speed = _compute_speed(t, x, y, speed_smoothing_sec)
 
         df = pd.DataFrame({"t": t, "x": x, "y": y, "speed": speed})
         if t_start_ephys is not None:

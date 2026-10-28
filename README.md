@@ -47,9 +47,10 @@ habitat_pipeline/
 ├── ingestion/                         # Data loading and preprocessing
 │   ├── data_paths.py                  # DataStorageManager + path discovery
 │   ├── kilosort_data_import.py        # Kilosort 4 loader + quality metrics (dataclass)
-│   ├── kilosort_data.py               # Low-level Kilosort file parser
 │   ├── ephys_sync.py                  # Ephys ↔ behavior clock synchronization
-│   └── trodes_to_python.py            # SpikeGadgets Trodes binary reader
+│   ├── trodes_to_python.py            # SpikeGadgets Trodes binary reader
+│   ├── _conventions.py                # Sample rate, id/stamp conventions
+│   └── errors.py                      # Typed load errors
 ├── video/                             # Behavioral tracking and events
 │   ├── tracking_import.py             # VideoTrackingData + loader
 │   ├── behavioral_events.py           # BehavioralEventsData + opponent/group/outcome labels
@@ -111,7 +112,7 @@ habitat_pipeline/
 | `find_sync_mapping(TSESync, TSBSync, system_time)` | Linear regression on matched IPIs; returns `{slope, intercept, r_squared, matched_ephys, matched_behavior, ...}`. |
 | `plot_sync_results(...)` | 4-panel sync quality diagnostic. |
 
-**`trodes_to_python.py`** — `readTrodesExtractedDataFile()` to parse SpikeGadgets Trodes binary files.
+**`trodes_to_python.py`** — `read_trodes_dat()` to parse SpikeGadgets Trodes binary files.
 
 ### video
 

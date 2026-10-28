@@ -197,18 +197,11 @@ def enumerate_targets(config_path: Optional[str] = None) -> Dict[str, Any]:
 
 def _scan_dates(config_path: Optional[str], root_key: str) -> List[str]:
     """Dates appearing under a configured non-ephys root."""
+    from ingestion.data_paths import load_config
     try:
-        from ingestion.data_paths import DataStorageManager
-        config = DataStorageManager._load_config(config_path) \
-            if hasattr(DataStorageManager, '_load_config') else None
+        config = load_config(config_path)
     except Exception:
-        config = None
-    if config is None:
-        try:
-            with open(config_path or 'config/default_paths.json', encoding='utf-8') as fh:
-                config = json.load(fh)
-        except Exception:
-            return []
+        return []
 
     roots = config.get(root_key)
     if isinstance(roots, str):
@@ -530,9 +523,8 @@ def probe_tracking(dsm, sync=None, *, durations: Optional[Mapping[str, float]] =
                 # Same helper the analyses use, so manifest speed and analysis
                 # speed cannot diverge.
                 with contextlib.suppress(Exception):
-                    from scipy.ndimage import gaussian_filter1d
                     t = np.arange(len(x), dtype=np.float64) / (out['frame_rate_hz'] or 40.0)
-                    speed = _compute_speed(t, x, y, 0.25, gaussian_filter1d)
+                    speed = _compute_speed(t, x, y, 0.25)
                     record['median_speed_px_s'] = round(float(np.median(speed)), 3)
         out['objects'][name] = record
 

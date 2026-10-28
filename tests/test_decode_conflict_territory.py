@@ -227,8 +227,8 @@ class TestBinning:
         conflicts = pd.DataFrame(dict(t=[20.0], t_end=[22.0], x=[20.0], y=[0.0], outcome=["winner"]))
         d = build_territory_binned_data(ks, df, conflicts, bin_size=DT, window=(0.0, 100.0),
                                         event_exclusion_sec=5.0, max_gap=1.0)
-        from ingestion.kilosort_data_import import _DEFAULT_QUALITY_THRESHOLDS
-        assert ks.calls == [dict(_DEFAULT_QUALITY_THRESHOLDS)]      # quality filter, not bin_spike_times
+        from ingestion.kilosort_data_import import DEFAULT_QUALITY_THRESHOLDS
+        assert ks.calls == [dict(DEFAULT_QUALITY_THRESHOLDS)]      # quality filter, not bin_spike_times
         bc = d["bin_centers"]
         assert not np.any((bc >= 15.0) & (bc <= 27.0))              # [t-5, t_end+5]
         assert not np.any((bc > 41.0) & (bc < 59.0))                # no tracked sample within 1 s

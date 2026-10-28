@@ -374,12 +374,12 @@ def find_apt_files(config_path=None):
     from ingestion.data_paths import (
         _DATELESS_TRACKING_FILENAMES,
         _DATELESS_TRACKING_SUBDIRS,
-        _load_config,
+        load_config,
         _tracking_roots,
     )
 
     found, seen = [], set()
-    for root in _tracking_roots(_load_config(config_path)):
+    for root in _tracking_roots(load_config(config_path)):
         if not root.exists():
             continue
         for child in sorted(root.iterdir(), key=lambda p: p.name):

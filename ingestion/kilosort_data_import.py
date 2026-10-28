@@ -119,7 +119,19 @@ class KilosortData:
 
     @property
     def duration_seconds(self) -> float:
-        """Total recording duration in seconds."""
+        """Total recording duration in seconds.
+
+        Taken from the span of Kilosort's raw spike *sample indices*, not
+        from the first/last spike on the absolute clock (``ephys_window``).
+        That is deliberate: the index span is set by the recording itself,
+        whereas ``ephys_window`` is moved by any single outlier spike in any
+        cluster. On rat631/20251216 one extra spike in noise cluster 227 of
+        the cached pkl stretches ``ephys_window`` to 18377 s against 9960 s
+        of real recording, and a window-based duration would fail every
+        cell's presence ratio (149 quality cells → 0). Measured 2026-10-28:
+        on six recordings across cohorts 7 and 9 the two definitions select
+        identical quality cells when loaded from the raw files.
+        """
         if self._duration_seconds is not None:
             return float(self._duration_seconds)
         if self.spike_times is not None and len(self.spike_times) > 0:
@@ -200,7 +212,16 @@ class KilosortData:
         return isi_stats
 
     def calculate_firing_pattern_metrics(self, time_bin_sec: float = 60.0) -> Dict[int, Dict]:
-        """Calculate firing-rate, presence-ratio, and CV-ISI per cluster."""
+        """Calculate firing-rate, presence-ratio, and CV-ISI per cluster.
+
+        Presence ratio is the fraction of ``time_bin_sec`` bins containing a
+        spike, over ``duration_seconds`` starting at *that cell's* first
+        spike. A cell that only starts firing late therefore has bins running
+        past the end of the recording and is penalised, which errs toward
+        excluding it. A common grid would be the textbook choice, but it
+        selected the same cells on every recording measured (see
+        ``duration_seconds``), so the published quality-cell sets are kept.
+        """
         metrics: Dict[int, Dict] = {}
         duration = self.duration_seconds
         if duration <= 0:

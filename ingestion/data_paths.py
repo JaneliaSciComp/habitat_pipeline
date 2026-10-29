@@ -45,7 +45,10 @@ logger = logging.getLogger(__name__)
 # strict subset of what v3 finds, so cached entries must be rebuilt.
 # v3 -> v4: the pulse log name became configurable (``"pulse_log"`` key), so a
 # v3 entry's ``pulse_log_path`` may name the hard-coded ``pulse_log.txt``.
-_CACHE_VERSION = 4
+# v4 -> v5: event resolution became strict (one ``<date>_behavior_event_df*.csv``
+# in the dated directory), so a v4 entry's ``behavioral_event_files`` may hold
+# files the resolver now rejects.
+_CACHE_VERSION = 5
 _DEFAULT_CACHE_DIR = Path(__file__).parent.parent / ".cache" / "data_paths"
 _CONFIG_DIR = Path(__file__).parent.parent / "config"
 
@@ -607,29 +610,21 @@ def get_tracking_files_by_date(session_id: str, config_path: Optional[str] = Non
     return list(found.values())
 
 
-def _event_search_dirs(events_base: Path, session_id: str, session_date: str) -> List[Path]:
-    """Subdirectories of the events root to search: the dated ones, else all of them.
-
-    An unreadable root falls back to searching the root itself.
-    """
-    try:
-        children = [d for d in events_base.iterdir() if d.is_dir()]
-    except OSError:
-        return [events_base]
-    dated = [d for d in children if session_id in d.name or session_date in d.name]
-    for d in dated:
-        logger.debug("Found matching events subfolder: %s", d.name)
-    return dated or children
-
-
 def get_event_files_by_date(session_id: str, config_path: Optional[str] = None,
                             subfolder: Optional[str] = None,
                             _config: Optional[dict] = None) -> List[Path]:
-    """Behavioural-event CSVs whose name contains the session id or date.
+    """The session's scored behavioural events: one ``<date>_behavior_event_df*.csv``.
 
-    Searched in the events root's date-named subdirectories (all of them if
-    none is dated, or only *subfolder* if given) and one level below each.
-    Returns paths sorted by filename; logs a warning when nothing is found.
+    Only directories directly under the events root whose name starts with
+    the date are searched (or only *subfolder*, if given), and not their
+    subdirectories: those hold older exports of the same scoring that must
+    not be mixed in (HZ-DATA-007). The prefix rather than the exact name
+    ``<date>_behavior_event_df.csv`` because cohort 5's only file is
+    ``20250819_behavior_event_df_hierarchy_diff.csv``.
+
+    Returns a one-element list, or an empty one (with a warning) if no file
+    matches. Raises ``ValueError`` if several do, rather than letting
+    ``load_behavioral_events`` concatenate two versions of one scoring.
     """
     config = _config or load_config(config_path)
     events_base = _root(config, 'events')
@@ -637,29 +632,28 @@ def get_event_files_by_date(session_id: str, config_path: Optional[str] = None,
         raise DataRootUnavailable(f"Events directory not found: {events_base}")
 
     session_date = _parse_session_date(session_id)
-    patterns = (f"*{session_id}*.csv", f"*{session_date}*.csv")
-
-    found: List[Path] = []
     try:
         if subfolder is not None:
             search_dirs = [events_base / subfolder]
             if not search_dirs[0].exists():
                 raise FileNotFoundError(f"Subfolder not found: {search_dirs[0]}")
         else:
-            search_dirs = _event_search_dirs(events_base, session_id, session_date)
-
-        for search_dir in search_dirs:
-            # The directory itself, then each of its subdirectories.
-            for directory in [search_dir, *(d for d in search_dir.iterdir() if d.is_dir())]:
-                for pattern in patterns:
-                    found.extend(f for f in directory.glob(pattern) if f.is_file())
+            search_dirs = [d for d in events_base.iterdir()
+                           if d.is_dir() and d.name.startswith(session_date)]
+        found = sorted((f for d in search_dirs
+                        for f in d.glob(f"{session_date}_behavior_event_df*.csv") if f.is_file()),
+                       key=lambda f: f.name)
     except OSError as e:
         raise RuntimeError(f"Error accessing events directory {events_base}: {e}")
 
-    matching_event_files = sorted(dict.fromkeys(found), key=lambda x: x.name)
-    if not matching_event_files:
+    if len(found) > 1:
+        raise ValueError(
+            f"Several behavioural event files for {session_date}; keep one canonical file "
+            f"in the dated directory or pass subfolder=: {[str(f) for f in found]}"
+        )
+    if not found:
         logger.warning("No behavioral event CSV files found for session %s in %s", session_id, events_base)
-    return matching_event_files
+    return found
 
 
 # ---------------------------------------------------------------------------

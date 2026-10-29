@@ -94,12 +94,15 @@ ks_data.filter_cells_by_firing_patterns(
     min_firing_rate=0.5,
     max_firing_rate=100.0,
     min_presence_ratio=0.8,
-    max_cv_isi=10.0,
+    max_cv_isi=5.0,
     time_bin_sec=60.0,
 )
 ```
 
-Computes metrics and applies thresholds. Returns (and stores in
+The defaults are `DEFAULT_QUALITY_THRESHOLDS` (plus `max_firing_rate`), the
+one definition of a quality cell. Before 2026-10-28 the default here was
+`max_cv_isi=10.0` while the decoders passed 5.0, so the two selected different
+cells. Computes metrics and applies thresholds. Returns (and stores in
 `self.filter_results`) a dict with:
 
 - `passed_clusters: List[int]`

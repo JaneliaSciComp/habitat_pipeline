@@ -45,9 +45,10 @@ class _StubSync:
 class _StubKilosort:
     """Minimal focal KilosortData stand-in for build_distance_binned_data.
 
-    Exposes the two methods the binner calls: ``filter_cells_by_firing_patterns``
-    (records its kwargs) and ``bin_spike_times`` (returns a fixed
-    ``(n_cells, n_bins)`` rate matrix + bin centers).
+    Exposes ``bin_spike_times``, the one method the binner calls: it records
+    the ``filter_kwargs`` it was given (the thresholds the binned cells were
+    selected with) and returns a fixed ``(n_cells, n_bins)`` rate matrix +
+    bin centers.
     """
 
     def __init__(self, rates, bin_centers):
@@ -55,12 +56,9 @@ class _StubKilosort:
         self._bin_centers = np.asarray(bin_centers, dtype=np.float64)
         self.filter_calls = []
 
-    def filter_cells_by_firing_patterns(self, **kwargs):
-        self.filter_calls.append(kwargs)
-        return {"passed_clusters": list(range(self._rates.shape[0]))}
-
     def bin_spike_times(self, bin_size_sec=1.0, t_start=None, t_end=None,
-                        filtered_only=True):
+                        filtered_only=True, filter_kwargs=None):
+        self.filter_calls.append(filter_kwargs)
         return self._rates, self._bin_centers
 
 
@@ -174,13 +172,13 @@ class TestBuildBinnedData:
         )
         assert ks.filter_calls == [{"min_firing_rate": 1.0}]
 
-    def test_no_filter_call_by_default(self):
+    def test_default_thresholds_when_none_given(self):
         ks, tracking, bin_size, _, _ = self._binner_inputs()
         build_distance_binned_data(
             ks, tracking, _StubSync(), "631", "632",
             pixels_per_cm=2.0, bin_size=bin_size,
         )
-        assert ks.filter_calls == []
+        assert ks.filter_calls == [None]
 
     def test_missing_partner_raises(self):
         ks, tracking, bin_size, _, _ = self._binner_inputs()

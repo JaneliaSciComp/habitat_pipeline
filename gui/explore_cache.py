@@ -38,7 +38,8 @@ from sklearn.decomposition import PCA
 
 logger = logging.getLogger(__name__)
 
-EXPLORE_CACHE_VERSION = 1
+# v2: the default quality filter tightened to max_cv_isi=5 (B4), changing the cells shown.
+EXPLORE_CACHE_VERSION = 2
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".gui_cache" / "explore"
 
 #: Bump when the cached trajectory's shape changes (2: every tracking format kept).

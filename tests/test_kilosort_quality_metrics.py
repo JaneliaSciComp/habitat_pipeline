@@ -41,3 +41,29 @@ def test_presence_bins_start_at_each_cells_first_spike():
     m = _ks([late], recording_sec=1000).calculate_firing_pattern_metrics(time_bin_sec=100)[0]
     # Bins run from 500.5 s for 1000 s, so half of them fall after the recording ends.
     assert m['presence_ratio'] == 0.5
+
+
+def _bursty(recording_sec=1000):
+    """Bursts of 50 spikes every 20 s: CV-ISI ≈ 7, so it passes the old default (10) only."""
+    st = np.cumsum(np.tile(np.r_[np.full(49, 0.002), 20.0], 200))
+    return st[st < recording_sec]
+
+
+def test_filter_defaults_are_the_quality_thresholds():
+    from ingestion.kilosort_data_import import DEFAULT_QUALITY_THRESHOLDS
+
+    steady = np.arange(0.5, 1000, 1.0)
+    ks = _ks([steady, _bursty()], recording_sec=1000)
+    cv = ks.calculate_firing_pattern_metrics()[1]['cv_isi']
+    assert 5 < cv < 10
+    assert ks.filter_cells_by_firing_patterns()['passed_clusters'] == \
+        ks.filter_cells_by_firing_patterns(**DEFAULT_QUALITY_THRESHOLDS)['passed_clusters'] == [0]
+
+
+def test_bin_spike_times_uses_the_thresholds_it_is_given():
+    steady = np.arange(0.5, 1000, 1.0)
+    ks = _ks([steady, _bursty()], recording_sec=1000)
+    # An earlier filter call with other thresholds must not leak into binning.
+    ks.filter_cells_by_firing_patterns(max_cv_isi=10.0)
+    assert ks.bin_spike_times(bin_size_sec=10.0)[0].shape[0] == 1
+    assert ks.bin_spike_times(bin_size_sec=10.0, filter_kwargs={'max_cv_isi': 10.0})[0].shape[0] == 2

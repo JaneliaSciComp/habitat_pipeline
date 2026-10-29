@@ -27,7 +27,9 @@ import pandas as pd
 
 from ingestion.data_paths import DataStorageManager
 from ingestion.ephys_sync import DataSyncManager
-from ingestion.kilosort_data_import import KilosortData, bin_spike_trains, load_kilosort_data
+from ingestion.kilosort_data_import import (
+    DEFAULT_QUALITY_THRESHOLDS, KilosortData, bin_spike_trains, load_kilosort_data,
+)
 from video.behavioral_events import BehavioralEventsData, load_behavioral_events
 from video.tracking_import import load_tracking_data, resolve_tracking_on_ephys_clock
 
@@ -231,7 +233,7 @@ class MultiAnimalSession:
                 "bin_size_sec": bin_size_sec,
                 "t_start": t_start_ephys,
                 "t_end": t_end_ephys,
-                "filter_kwargs": filter_kwargs or {},
+                "filter_kwargs": {**DEFAULT_QUALITY_THRESHOLDS, **(filter_kwargs or {})},
                 "smoothing_sigma_sec": smoothing_sigma_sec,
             })
             _CACHE_DIR.mkdir(parents=True, exist_ok=True)

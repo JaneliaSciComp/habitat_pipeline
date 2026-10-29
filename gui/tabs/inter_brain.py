@@ -29,6 +29,7 @@ from gui.runners import cached_step
 from gui.state import InterBrainParams, SessionKey
 from gui.widgets import plot_picker
 from ingestion.data_paths import get_animals_and_sessions
+from ingestion.kilosort_data_import import DEFAULT_QUALITY_THRESHOLDS
 from ingestion.multi_animal_session import MultiAnimalSession
 from video.behavior_features import build_behavior_feature_matrix
 from video.tracking_import import load_tracking_data
@@ -133,7 +134,7 @@ def render(key: SessionKey, params: InterBrainParams | None = None) -> None:
     result = cached_step(
         prefix="inter_brain",
         key=key,
-        params=ib_params.as_dict(),
+        params={**ib_params.as_dict(), "quality_thresholds": DEFAULT_QUALITY_THRESHOLDS},
         run_fn=lambda: _run(key, partner, ib_params),
         button_label="Run Inter-Brain Analysis",
         spinner_label="Fitting shared subspace + null + regression...",

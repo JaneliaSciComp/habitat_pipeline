@@ -11,6 +11,7 @@ from gui.plotting import show_fig
 from gui.runners import cached_step
 from gui.state import PopulationParams, SessionKey
 from gui.widgets import plot_picker
+from ingestion.kilosort_data_import import DEFAULT_QUALITY_THRESHOLDS
 
 
 VIEWS = [
@@ -79,6 +80,7 @@ def render(key: SessionKey, params: PopulationParams) -> None:
         top_n_cells = int(top_n) if top_n > 0 else None
         sim_params = {
             **params.as_dict(),
+            "quality_thresholds": DEFAULT_QUALITY_THRESHOLDS,
             "sim_window": (float(win_start), float(win_end)),
             "top_n_cells": top_n_cells,
         }
@@ -138,7 +140,7 @@ def render(key: SessionKey, params: PopulationParams) -> None:
     cached = cached_step(
         prefix="population",
         key=key,
-        params=params.as_dict(),
+        params={**params.as_dict(), "quality_thresholds": DEFAULT_QUALITY_THRESHOLDS},
         run_fn=_run,
         button_label="Run Geometry",
         spinner_label="Building population matrix and reducing dimensions...",

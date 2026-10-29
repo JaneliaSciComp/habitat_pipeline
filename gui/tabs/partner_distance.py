@@ -29,6 +29,7 @@ from gui.state import PartnerDistanceParams, SessionKey
 from gui.tabs.inter_brain import _session_animals
 from gui.widgets import plot_picker
 from ingestion.focal_session import load_focal_session_inputs
+from ingestion.kilosort_data_import import DEFAULT_QUALITY_THRESHOLDS
 
 log = logging.getLogger(__name__)
 
@@ -121,7 +122,7 @@ def render(key: SessionKey, params: PartnerDistanceParams | None = None) -> None
     result = cached_step(
         prefix="partner_distance",
         key=key,
-        params=pd_params.as_dict(),
+        params={**pd_params.as_dict(), "quality_thresholds": DEFAULT_QUALITY_THRESHOLDS},
         run_fn=lambda: _run(key, pd_params),
         button_label="Run Partner-Distance Decoding",
         spinner_label="Binning rates + distance, regressing, running null...",

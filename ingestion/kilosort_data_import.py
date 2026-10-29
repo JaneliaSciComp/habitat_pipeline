@@ -36,9 +36,13 @@ from ingestion.trodes_to_python import read_trodes_header
 
 logger = logging.getLogger(__name__)
 
-# Default firing-pattern thresholds used by downstream decoders (LDA, etc.)
-# when none are supplied. Stricter than the defaults of
-# ``filter_cells_by_firing_patterns`` itself (lower ``max_cv_isi``).
+# What "quality cell" means throughout the project: these are the defaults of
+# ``filter_cells_by_firing_patterns`` and what every analysis uses unless it
+# passes thresholds of its own. Until 2026-10-28 the filter's own default was
+# ``max_cv_isi=10``, so the decoders (which pass these) and the analyses that
+# relied on the bare default (inter-brain, population geometry, rastermap,
+# Explore, rest-distance, territory) selected different cells: 149 vs 223 on
+# rat631/20251216.
 DEFAULT_QUALITY_THRESHOLDS: Dict[str, float] = {
     'min_firing_rate': 0.5,
     'min_presence_ratio': 0.8,
@@ -260,10 +264,10 @@ class KilosortData:
 
     def filter_cells_by_firing_patterns(
         self,
-        min_firing_rate: float = 0.5,
+        min_firing_rate: float = DEFAULT_QUALITY_THRESHOLDS['min_firing_rate'],
         max_firing_rate: float = 100.0,
-        min_presence_ratio: float = 0.8,
-        max_cv_isi: float = 10.0,
+        min_presence_ratio: float = DEFAULT_QUALITY_THRESHOLDS['min_presence_ratio'],
+        max_cv_isi: float = DEFAULT_QUALITY_THRESHOLDS['max_cv_isi'],
         time_bin_sec: float = 60.0,
     ) -> Dict:
         """Filter clusters by firing-pattern quality metrics.
@@ -326,6 +330,7 @@ class KilosortData:
         t_start: Optional[float] = None,
         t_end: Optional[float] = None,
         filtered_only: bool = True,
+        filter_kwargs: Optional[Dict] = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Bin spike times into a firing-rate matrix (n_cells x n_bins).
 
@@ -339,8 +344,11 @@ class KilosortData:
             End time in seconds. Defaults to the latest spike.
         filtered_only : bool
             If True (default), use only cells that pass
-            ``filter_cells_by_firing_patterns()``.  Runs it with default
-            parameters if ``filter_results`` is not yet populated.
+            ``filter_cells_by_firing_patterns(**filter_kwargs)``.
+        filter_kwargs : dict, optional
+            Thresholds for that filter; ``DEFAULT_QUALITY_THRESHOLDS`` if
+            omitted. Filtering runs on every call, so an earlier
+            ``filter_cells_by_firing_patterns`` call does not carry over.
 
         Returns
         -------
@@ -350,9 +358,7 @@ class KilosortData:
             Time of each bin centre in seconds.
         """
         if filtered_only:
-            if self.filter_results is None:
-                self.filter_cells_by_firing_patterns()
-            _, spike_times_list = self.get_filtered_cells_spike_times()
+            _, spike_times_list = self.get_filtered_cells_spike_times(**(filter_kwargs or {}))
         else:
             spike_times_list = self.spike_times_by_cell
 

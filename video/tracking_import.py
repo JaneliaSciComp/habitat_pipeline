@@ -34,6 +34,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Union
 import numpy as np
 import pandas as pd
 
+from ingestion._conventions import canonical_rat_id
 from ingestion._conventions import (  # noqa: F401 - re-exported for callers
     cohort_from_path, normalize_object_name, uses_name_normalization,
 )
@@ -42,10 +43,14 @@ from ingestion.ephys_sync import DataSyncManager
 
 logger = logging.getLogger(__name__)
 
+#: An animal id as the analyses pass it: ``'631'`` or ``'rat631'``.
+_ANIMAL_ID_RE = re.compile(r'^(rat)?\d+$', re.IGNORECASE)
+
 
 # ---------------------------------------------------------------------------
 # VideoTrackingData dataclass
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class VideoTrackingData:
@@ -77,22 +82,28 @@ class VideoTrackingData:
         return list(self.parsed_data.keys())
 
     def get_object_data(self, object_name: str) -> Optional[pd.DataFrame]:
-        """Return the DataFrame for *object_name*, with substring fallback.
+        """Return the DataFrame for *object_name*, or ``None`` if no object matches.
 
-        If *object_name* is not an exact key, returns the data for the first
-        key that contains *object_name* as a substring (or vice-versa).
+        An animal id (``'631'``, ``'rat631'``, ``'rat4635'``) must name its key
+        exactly, after the same canonicalisation the keys get: a substring
+        match would let ``'63'`` silently pick one of rat630/631/634/635. Any
+        other name (an NWB series such as ``'mouse'`` for ``'mouse_center'``)
+        may match one key by substring. Several matches raise ``ValueError``.
         """
         if object_name in self.parsed_data:
             return self.parsed_data[object_name]
 
+        if _ANIMAL_ID_RE.match(object_name):
+            rat_id = canonical_rat_id(object_name.lower())
+            for candidate in (rat_id, normalize_object_name(rat_id)):
+                if candidate in self.parsed_data:
+                    return self.parsed_data[candidate]
+            return None
+
         matches = [k for k in self.parsed_data if object_name in k or k in object_name]
-        if len(matches) == 1:
-            return self.parsed_data[matches[0]]
         if len(matches) > 1:
-            logger.info("Ambiguous object name '%s', matched %s; returning first.",
-                        object_name, matches)
-            return self.parsed_data[matches[0]]
-        return None
+            raise ValueError(f"Object name {object_name!r} is ambiguous: it matches {matches}")
+        return self.parsed_data[matches[0]] if matches else None
 
     def get_object_trajectory(self, object_name: str) -> Optional[pd.DataFrame]:
         """Frame-sorted (frame, center_x, center_y, [timestamps], [ephys_timestamps]) view."""

@@ -30,7 +30,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from ingestion._conventions import SAMPLE_RATE, SPIKE_TEMPLATE_OFFSET
+from ingestion._conventions import RECORDING_STAMP_RE, SAMPLE_RATE, SPIKE_TEMPLATE_OFFSET
 from ingestion.errors import MissingCompanionFile
 from ingestion.trodes_to_python import read_trodes_header
 
@@ -434,25 +434,19 @@ def _locate_ks_folder(data_dir: Path) -> Optional[Path]:
 
 
 def _extract_ids_from_path(ks_folder: Path) -> tuple:
-    """Extract (animal_id, session_id) from the kilosort directory path."""
-    animal_id, session_id = "unknown_animal", "unknown_session"
-    if ks_folder.name.lower() == "kilosort4":
-        session_folder = ks_folder.parent
-        if session_folder.name.endswith("_merged.kilosort"):
-            session_id = session_folder.name.replace("_merged.kilosort", "")
-            animal_folder = session_folder.parent
-            if animal_folder.name:
-                animal_id = animal_folder.name
-    else:
-        parts = ks_folder.parts
-        for i, part in enumerate(reversed(parts)):
-            if part.endswith("_merged.kilosort"):
-                session_id = part.replace("_merged.kilosort", "")
-                idx = len(parts) - i - 2
-                if idx >= 0:
-                    animal_id = parts[idx]
-                break
-    return animal_id, session_id
+    """``(animal_id, session_id)`` from ``<animal>/<...stamp...>.kilosort/kilosort4``.
+
+    The session id is the recording stamp in the ``.kilosort`` directory's
+    name, whatever surrounds it: ``20251216_094334_merged``, cohort 5's
+    ``20250812_115448_merge`` or bare ``20250812_115448``, and the odd
+    ``rat613_20251209_160716_merge`` / ``rat20260927_103821_merged`` all name
+    their recording. Anything else gives ``'unknown_*'``.
+    """
+    recording_dir = ks_folder.parent
+    stamp = RECORDING_STAMP_RE.search(recording_dir.name)
+    if ks_folder.name.lower() != "kilosort4" or not recording_dir.name.endswith(".kilosort") or stamp is None:
+        return "unknown_animal", "unknown_session"
+    return recording_dir.parent.name or "unknown_animal", stamp.group(1)
 
 
 #: Hand-made timestamps files (the test fixtures) carry 25 plain-text header

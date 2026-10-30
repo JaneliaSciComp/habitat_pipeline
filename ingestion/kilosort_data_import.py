@@ -30,15 +30,19 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
-from ingestion._conventions import SAMPLE_RATE, SPIKE_TEMPLATE_OFFSET
+from ingestion._conventions import RECORDING_STAMP_RE, SAMPLE_RATE, SPIKE_TEMPLATE_OFFSET
 from ingestion.errors import MissingCompanionFile
 from ingestion.trodes_to_python import read_trodes_header
 
 logger = logging.getLogger(__name__)
 
-# Default firing-pattern thresholds used by downstream decoders (LDA, etc.)
-# when none are supplied. Stricter than the defaults of
-# ``filter_cells_by_firing_patterns`` itself (lower ``max_cv_isi``).
+# What "quality cell" means throughout the project: these are the defaults of
+# ``filter_cells_by_firing_patterns`` and what every analysis uses unless it
+# passes thresholds of its own. Until 2026-10-28 the filter's own default was
+# ``max_cv_isi=10``, so the decoders (which pass these) and the analyses that
+# relied on the bare default (inter-brain, population geometry, rastermap,
+# Explore, rest-distance, territory) selected different cells: 149 vs 223 on
+# rat631/20251216.
 DEFAULT_QUALITY_THRESHOLDS: Dict[str, float] = {
     'min_firing_rate': 0.5,
     'min_presence_ratio': 0.8,
@@ -119,7 +123,19 @@ class KilosortData:
 
     @property
     def duration_seconds(self) -> float:
-        """Total recording duration in seconds."""
+        """Total recording duration in seconds.
+
+        Taken from the span of Kilosort's raw spike *sample indices*, not
+        from the first/last spike on the absolute clock (``ephys_window``).
+        That is deliberate: the index span is set by the recording itself,
+        whereas ``ephys_window`` is moved by any single outlier spike in any
+        cluster. On rat631/20251216 one extra spike in noise cluster 227 of
+        the cached pkl stretches ``ephys_window`` to 18377 s against 9960 s
+        of real recording, and a window-based duration would fail every
+        cell's presence ratio (149 quality cells → 0). Measured 2026-10-28:
+        on six recordings across cohorts 7 and 9 the two definitions select
+        identical quality cells when loaded from the raw files.
+        """
         if self._duration_seconds is not None:
             return float(self._duration_seconds)
         if self.spike_times is not None and len(self.spike_times) > 0:
@@ -200,7 +216,16 @@ class KilosortData:
         return isi_stats
 
     def calculate_firing_pattern_metrics(self, time_bin_sec: float = 60.0) -> Dict[int, Dict]:
-        """Calculate firing-rate, presence-ratio, and CV-ISI per cluster."""
+        """Calculate firing-rate, presence-ratio, and CV-ISI per cluster.
+
+        Presence ratio is the fraction of ``time_bin_sec`` bins containing a
+        spike, over ``duration_seconds`` starting at *that cell's* first
+        spike. A cell that only starts firing late therefore has bins running
+        past the end of the recording and is penalised, which errs toward
+        excluding it. A common grid would be the textbook choice, but it
+        selected the same cells on every recording measured (see
+        ``duration_seconds``), so the published quality-cell sets are kept.
+        """
         metrics: Dict[int, Dict] = {}
         duration = self.duration_seconds
         if duration <= 0:
@@ -239,10 +264,10 @@ class KilosortData:
 
     def filter_cells_by_firing_patterns(
         self,
-        min_firing_rate: float = 0.5,
+        min_firing_rate: float = DEFAULT_QUALITY_THRESHOLDS['min_firing_rate'],
         max_firing_rate: float = 100.0,
-        min_presence_ratio: float = 0.8,
-        max_cv_isi: float = 10.0,
+        min_presence_ratio: float = DEFAULT_QUALITY_THRESHOLDS['min_presence_ratio'],
+        max_cv_isi: float = DEFAULT_QUALITY_THRESHOLDS['max_cv_isi'],
         time_bin_sec: float = 60.0,
     ) -> Dict:
         """Filter clusters by firing-pattern quality metrics.
@@ -305,6 +330,7 @@ class KilosortData:
         t_start: Optional[float] = None,
         t_end: Optional[float] = None,
         filtered_only: bool = True,
+        filter_kwargs: Optional[Dict] = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Bin spike times into a firing-rate matrix (n_cells x n_bins).
 
@@ -318,8 +344,11 @@ class KilosortData:
             End time in seconds. Defaults to the latest spike.
         filtered_only : bool
             If True (default), use only cells that pass
-            ``filter_cells_by_firing_patterns()``.  Runs it with default
-            parameters if ``filter_results`` is not yet populated.
+            ``filter_cells_by_firing_patterns(**filter_kwargs)``.
+        filter_kwargs : dict, optional
+            Thresholds for that filter; ``DEFAULT_QUALITY_THRESHOLDS`` if
+            omitted. Filtering runs on every call, so an earlier
+            ``filter_cells_by_firing_patterns`` call does not carry over.
 
         Returns
         -------
@@ -329,9 +358,7 @@ class KilosortData:
             Time of each bin centre in seconds.
         """
         if filtered_only:
-            if self.filter_results is None:
-                self.filter_cells_by_firing_patterns()
-            _, spike_times_list = self.get_filtered_cells_spike_times()
+            _, spike_times_list = self.get_filtered_cells_spike_times(**(filter_kwargs or {}))
         else:
             spike_times_list = self.spike_times_by_cell
 
@@ -407,25 +434,19 @@ def _locate_ks_folder(data_dir: Path) -> Optional[Path]:
 
 
 def _extract_ids_from_path(ks_folder: Path) -> tuple:
-    """Extract (animal_id, session_id) from the kilosort directory path."""
-    animal_id, session_id = "unknown_animal", "unknown_session"
-    if ks_folder.name.lower() == "kilosort4":
-        session_folder = ks_folder.parent
-        if session_folder.name.endswith("_merged.kilosort"):
-            session_id = session_folder.name.replace("_merged.kilosort", "")
-            animal_folder = session_folder.parent
-            if animal_folder.name:
-                animal_id = animal_folder.name
-    else:
-        parts = ks_folder.parts
-        for i, part in enumerate(reversed(parts)):
-            if part.endswith("_merged.kilosort"):
-                session_id = part.replace("_merged.kilosort", "")
-                idx = len(parts) - i - 2
-                if idx >= 0:
-                    animal_id = parts[idx]
-                break
-    return animal_id, session_id
+    """``(animal_id, session_id)`` from ``<animal>/<...stamp...>.kilosort/kilosort4``.
+
+    The session id is the recording stamp in the ``.kilosort`` directory's
+    name, whatever surrounds it: ``20251216_094334_merged``, cohort 5's
+    ``20250812_115448_merge`` or bare ``20250812_115448``, and the odd
+    ``rat613_20251209_160716_merge`` / ``rat20260927_103821_merged`` all name
+    their recording. Anything else gives ``'unknown_*'``.
+    """
+    recording_dir = ks_folder.parent
+    stamp = RECORDING_STAMP_RE.search(recording_dir.name)
+    if ks_folder.name.lower() != "kilosort4" or not recording_dir.name.endswith(".kilosort") or stamp is None:
+        return "unknown_animal", "unknown_session"
+    return recording_dir.parent.name or "unknown_animal", stamp.group(1)
 
 
 #: Hand-made timestamps files (the test fixtures) carry 25 plain-text header

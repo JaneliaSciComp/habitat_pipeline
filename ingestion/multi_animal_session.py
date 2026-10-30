@@ -27,7 +27,9 @@ import pandas as pd
 
 from ingestion.data_paths import DataStorageManager
 from ingestion.ephys_sync import DataSyncManager
-from ingestion.kilosort_data_import import KilosortData, bin_spike_trains, load_kilosort_data
+from ingestion.kilosort_data_import import (
+    DEFAULT_QUALITY_THRESHOLDS, KilosortData, bin_spike_trains, load_kilosort_data,
+)
 from video.behavioral_events import BehavioralEventsData, load_behavioral_events
 from video.tracking_import import load_tracking_data, resolve_tracking_on_ephys_clock
 
@@ -144,14 +146,39 @@ class MultiAnimalSession:
     # Common time grid
     # ----------------------------------------------------------------------
 
-    def get_common_time_window(self) -> Tuple[float, float]:
-        """Return ``(t_start, t_end)`` in ephys seconds.
+    def get_common_time_window(self, filter_kwargs: Optional[dict] = None) -> Tuple[float, float]:
+        """Return ``(t_start, t_end)`` in ephys seconds where every animal is recording.
 
-        Because all animals share one ephys clock, this is simply
-        ``(0.0, min_over_animals(duration_seconds))``.
+        The animals share one clock, but each recording covers its own span
+        of it and none starts at zero: on the 20251216 afternoon block rat613
+        and rat631 overlap in ``[19526.6, 20556.2]``. So this is the overlap
+        of each animal's ``[first spike, last spike]``, taken over the cells
+        ``filter_kwargs`` selects (the cells that get binned). Quality cells
+        rather than all clusters, because a single stray spike in a noise
+        cluster can stretch an animal's raw ``ephys_window`` far past its
+        recording.
+
+        Raises ``ValueError`` if an animal has no selected cells or the
+        recordings don't overlap.
         """
-        durations = [self.get_ks(aid).duration_seconds for aid in self.animal_ids]
-        return 0.0, float(min(durations))
+        kwargs = filter_kwargs or {}
+        windows = {}
+        for aid in self.animal_ids:
+            _, spike_times_list = self.get_ks(aid).get_filtered_cells_spike_times(**kwargs)
+            spiking = [st for st in spike_times_list if len(st) > 0]
+            if not spiking:
+                raise ValueError(
+                    f"Animal {aid} has no cells passing the quality filter in session "
+                    f"{self.session_id}, so there is no common time window"
+                )
+            windows[aid] = (min(st[0] for st in spiking), max(st[-1] for st in spiking))
+
+        t_start = max(w[0] for w in windows.values())
+        t_end = min(w[1] for w in windows.values())
+        if t_end <= t_start:
+            spans = ", ".join(f"{aid} [{w[0]:.1f}, {w[1]:.1f}]" for aid, w in windows.items())
+            raise ValueError(f"Recordings in session {self.session_id} do not overlap: {spans}")
+        return float(t_start), float(t_end)
 
     def get_common_binned_rates(
         self,
@@ -173,8 +200,9 @@ class MultiAnimalSession:
         bin_size_sec : float
             Width of each bin in seconds.
         t_start_ephys, t_end_ephys : float, optional
-            Time window in ephys seconds. Defaults to the intersection of
-            all animals' durations.
+            Time window in ephys seconds. A missing bound comes from
+            ``get_common_time_window(filter_kwargs)``, the span where every
+            animal is recording.
         filter_kwargs : dict, optional
             Forwarded to ``KilosortData.filter_cells_by_firing_patterns`` to
             choose quality cells per animal. Defaults to module-default
@@ -186,11 +214,12 @@ class MultiAnimalSession:
             If True, read/write a pickle under ``.gui_cache/multi_animal/``
             keyed on all of the above arguments.
         """
-        t0, t1 = self.get_common_time_window()
-        if t_start_ephys is None:
-            t_start_ephys = t0
-        if t_end_ephys is None:
-            t_end_ephys = t1
+        if t_start_ephys is None or t_end_ephys is None:
+            t0, t1 = self.get_common_time_window(filter_kwargs)
+            if t_start_ephys is None:
+                t_start_ephys = t0
+            if t_end_ephys is None:
+                t_end_ephys = t1
         if t_end_ephys <= t_start_ephys:
             raise ValueError(
                 f"t_end_ephys ({t_end_ephys}) must be > t_start_ephys ({t_start_ephys})"
@@ -204,7 +233,7 @@ class MultiAnimalSession:
                 "bin_size_sec": bin_size_sec,
                 "t_start": t_start_ephys,
                 "t_end": t_end_ephys,
-                "filter_kwargs": filter_kwargs or {},
+                "filter_kwargs": {**DEFAULT_QUALITY_THRESHOLDS, **(filter_kwargs or {})},
                 "smoothing_sigma_sec": smoothing_sigma_sec,
             })
             _CACHE_DIR.mkdir(parents=True, exist_ok=True)

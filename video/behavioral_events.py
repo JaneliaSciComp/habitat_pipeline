@@ -238,6 +238,19 @@ class BehavioralEventsData:
         """For each initiator/victim event, the animal on the other side of *animal*."""
         return np.where(df['initiator'].values == animal, df['victim'].values, df['initiator'].values)
 
+    def _with_opponent(self, df: pd.DataFrame, animal: str) -> pd.DataFrame:
+        """Drop events with nobody on the other side of *animal*.
+
+        Environmental events such as ``I`` (introduce) and ``RM`` (remove)
+        name only one animal; left in, their missing opponent is a NaN label
+        that ``np.unique`` cannot sort against the rat ids.
+        """
+        has_opponent = pd.notna(self._opponents(df, animal))
+        n_skipped = int((~has_opponent).sum())
+        if n_skipped:
+            logger.info("Skipping %d event(s) with no opponent for %s", n_skipped, animal)
+        return df[has_opponent]
+
     # --- label extraction --------------------------------------------------
 
     def extract_opponent_labels(
@@ -269,6 +282,7 @@ class BehavioralEventsData:
         self._require_columns(df, 'initiator', 'victim')
         animal = canonical_rat_id(animal_of_interest)
         df = self._focal_events(df, animal, ('initiator', 'victim'), ephys_time_range)
+        df = self._with_opponent(df, animal)
         if len(df) == 0:
             return _no_events()
 
@@ -364,6 +378,7 @@ class BehavioralEventsData:
         self._require_columns(df, 'initiator', 'victim')
         animal = canonical_rat_id(animal_of_interest)
         df = self._focal_events(df, animal, ('initiator', 'victim'), ephys_time_range)
+        df = self._with_opponent(df, animal)
         if len(df) == 0:
             return _no_events()
 

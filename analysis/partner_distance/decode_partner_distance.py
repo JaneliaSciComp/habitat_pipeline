@@ -762,10 +762,9 @@ def build_distance_binned_data(ks_focal, tracking, sync, focal: str, partner: st
     from video.behavior_features import _interp
     from video.tracking_import import resolve_tracking_on_ephys_clock
 
-    if filter_kwargs:
-        ks_focal.filter_cells_by_firing_patterns(**filter_kwargs)
     rates, bin_centers = ks_focal.bin_spike_times(
         bin_size_sec=bin_size, t_start=t_start, t_end=t_end, filtered_only=True,
+        filter_kwargs=filter_kwargs,
     )
     if smoothing_sigma_sec is not None and smoothing_sigma_sec > 0:
         from scipy.ndimage import gaussian_filter1d

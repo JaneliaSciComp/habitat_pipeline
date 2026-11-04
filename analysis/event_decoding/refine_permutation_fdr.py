@@ -89,6 +89,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--target", type=violins._target, action="append", dest="targets",
                    metavar="ANIMAL:SESSION",
                    help="Repeatable; defaults to violins.DEFAULT_TARGETS.")
+    p.add_argument("--events_file", default=None,
+                   help="The --events_file the cached decode was run with "
+                        "(part of its cache key). Pair with the matching --cache_dir.")
     p.add_argument("--alpha", type=float, default=0.05, help="Final BH level.")
     p.add_argument("--screen_p", type=float, default=0.02,
                    help="Stage-0 cut on the cached 100-shuffle p-value.")
@@ -108,7 +111,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def decode_params(label_mode: str) -> Dict:
+def decode_params(label_mode: str, events_file: str = None) -> Dict:
     """The cached decode's params. Must match violins.main exactly, or the key misses."""
     params = {"behavior_type": "EC", "max_opponents": 2, "use_quality_cells": True,
               "alignment": "start", "time_window": [-1.0, 2.0], "time_bin_size": 0.5,
@@ -122,6 +125,8 @@ def decode_params(label_mode: str) -> Dict:
     if label_mode == "group":
         params["label_mode"] = "group"
         params["max_opponents"] = None
+    if events_file:
+        params["events_file"] = str(events_file)
     return params
 
 
@@ -282,7 +287,7 @@ def refine(animal: str, session: str, results: Dict, params: Dict, args,
 def main(argv=None) -> int:
     args = _build_parser().parse_args(argv)
     targets = args.targets or list(violins.DEFAULT_TARGETS)
-    params = decode_params(args.label_mode)
+    params = decode_params(args.label_mode, args.events_file)
     cache_dir = REPO_ROOT / args.cache_dir
     out_dir = REPO_ROOT / args.out_dir / args.label_mode
     out_dir.mkdir(parents=True, exist_ok=True)

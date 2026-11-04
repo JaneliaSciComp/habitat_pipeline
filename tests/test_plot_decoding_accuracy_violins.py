@@ -168,6 +168,64 @@ class TestCacheKey:
         assert a == b
 
 
+class TestEventsOverride:
+    """``--events_file``: FERAL-style multi-day CSV read in place of the dated file."""
+
+    @staticmethod
+    def _feral_csv(tmp_path):
+        import pandas as pd
+        path = tmp_path / "cohort7" / "FERAL" / "feral.csv"
+        path.parent.mkdir(parents=True)
+        pd.DataFrame({
+            "type": ["EC", "EC", "EC"],
+            "initiator": ["rat4631", "rat4631", "rat4613"],
+            "victim": ["rat4613", "rat4615", "rat4631"],
+            "ts_start": [1, 2, 3], "ts_end": [2, 3, 4],
+            "session": ["cohort7_20251216_0959", "cohort7_20251217_1129",
+                        "cohort7_20251216_1459"],
+        }).to_csv(path, index=False)
+        return path
+
+    def test_rows_are_cut_to_the_targets_date(self, tmp_path):
+        be = violins.load_events_override(str(self._feral_csv(tmp_path)), "20251216")
+        assert len(be.events_data) == 2
+        assert set(be.events_data["session"]) == {"cohort7_20251216_0959",
+                                                  "cohort7_20251216_1459"}
+
+    def test_a_full_recording_stamp_selects_the_same_date(self, tmp_path):
+        be = violins.load_events_override(str(self._feral_csv(tmp_path)),
+                                          "20251216_144334")
+        assert len(be.events_data) == 2
+
+    def test_cohort7_path_rewrites_rat4635_style_ids(self, tmp_path):
+        be = violins.load_events_override(str(self._feral_csv(tmp_path)), "20251216")
+        assert set(be.get_available_rats()) == {"rat613", "rat631"}
+
+    def test_file_without_a_session_column_is_not_filtered(self, tmp_path):
+        import pandas as pd
+        path = tmp_path / "cohort7" / "plain.csv"
+        path.parent.mkdir()
+        pd.DataFrame({"type": ["EC"], "initiator": ["rat631"], "victim": ["rat613"],
+                      "ts_start": [1], "ts_end": [2]}).to_csv(path, index=False)
+        assert len(violins.load_events_override(str(path), "20251216").events_data) == 1
+
+    def test_events_file_changes_the_cache_key_only_when_set(self):
+        base = {"behavior_type": "EC", "max_opponents": 2}
+        assert (violins._cache_key("rat631", "20251216", base)
+                != violins._cache_key("rat631", "20251216",
+                                      {**base, "events_file": "feral.csv"}))
+
+    def test_refine_params_match_violins_params_with_and_without_the_file(self):
+        spec = importlib.util.spec_from_file_location(
+            "refine_permutation_fdr",
+            REPO_ROOT / "analysis" / "event_decoding" / "refine_permutation_fdr.py")
+        refine = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = refine
+        spec.loader.exec_module(refine)
+        assert "events_file" not in refine.decode_params("opponent")
+        assert refine.decode_params("opponent", "f.csv")["events_file"] == "f.csv"
+
+
 class TestCohortConfig:
     def test_explicit_override_wins(self):
         assert violins.resolve_cohort_config(

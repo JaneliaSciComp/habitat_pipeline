@@ -181,6 +181,12 @@ def _build_parser() -> argparse.ArgumentParser:
                         "shuffles, P=0.05 keeps cells whose accuracy beats "
                         "more than 95 of their own 100 shuffles; expect ~P "
                         "of cells to pass by chance alone.")
+    p.add_argument("--events_file", type=str, default=None,
+                   help="Read behavioural events from this CSV instead of the "
+                        "date-resolved canonical file (HZ-DATA-007 exception, "
+                        "e.g. FERAL automated annotations). Rows are limited "
+                        "to the target's date via the file's 'session' column "
+                        "when it has one. Use a separate --cache_dir.")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--output", type=str,
                    default="results/event_decoding/decoding_accuracy_violins.png",
@@ -325,6 +331,25 @@ def _cache_key(animal_id: str, session_id: str, params: Dict) -> str:
     return f"{animal_id}_{session_id}_{digest}.pkl"
 
 
+def load_events_override(events_file: str, session_id: str):
+    """Load events from an explicit CSV rather than the date-resolved one.
+
+    A file covering several days (FERAL) is cut to the target's date through
+    its ``session`` column (``cohort7_20251216_1459``), mirroring what the
+    per-date canonical file gives the resolver. Which of the day's recordings an
+    event belongs to is still decided by that recording's own sync and ephys
+    window downstream, not here.
+    """
+    behavior_data = load_behavioral_events(Path(events_file), session_id=session_id)
+    df = behavior_data.events_data
+    if "session" in df.columns:
+        date = session_id[:8]
+        keep = df["session"].astype(str).str.contains(f"_{date}_", regex=False)
+        print(f"  events      {events_file}: {int(keep.sum())}/{len(df)} rows on {date}")
+        behavior_data.events_data = df[keep].reset_index(drop=True)
+    return behavior_data
+
+
 def run_group(animal_id: str, session_id: str, args, params: Dict,
               cache_dir: Path) -> Optional[Dict]:
     """Decode one animal/session, with a disk cache keyed on the parameters."""
@@ -341,8 +366,11 @@ def run_group(animal_id: str, session_id: str, args, params: Dict,
           f"on date: {', '.join(dm.recording_ids_on_date) or 'n/a'})")
 
     ks_data = load_kilosort_data(dm.get_kilosort_path())
-    behavior_data = load_behavioral_events(dm.get_behavioral_event_files(),
-                                           session_id=dm.session_id)
+    if params.get("events_file"):
+        behavior_data = load_events_override(params["events_file"], dm.session_id)
+    else:
+        behavior_data = load_behavioral_events(dm.get_behavioral_event_files(),
+                                               session_id=dm.session_id)
     # Calling the wrapper in-process means we must sync ourselves; only the
     # decoder CLIs' main() does it for you.
     sync = DataSyncManager(dm, dio_channel=1)
@@ -743,6 +771,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         "alpha": args.alpha,
         "seed": args.seed,
     }
+    if args.events_file:
+        # Same rule as label_mode: only present when set, so keys for the
+        # canonical event files are untouched.
+        params["events_file"] = str(args.events_file)
     if args.label_mode == "group":
         # Only added when not the default, so opponent-mode cache keys (and
         # the pickles behind them) stay valid.
@@ -761,7 +793,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("  holdout     SKIPPED by --skip_holdout_check")
     else:
         assert_targets_not_held_out(targets)
-    runnable = [t for t in targets if report_feasibility(t[0], t[1], behavior_type)]
+    if args.events_file:
+        # The manifest's event facts describe the canonical per-date file, so it
+        # would refuse (or wave through) the wrong data. The decoder's own
+        # min_events_per_class / n_classes checks are what gate this run.
+        print(f"  feasibility SKIPPED: manifest describes the canonical events, "
+              f"not {args.events_file}")
+        runnable = list(targets)
+    else:
+        runnable = [t for t in targets if report_feasibility(t[0], t[1], behavior_type)]
     if not runnable:
         print("No target is testable for these parameters; nothing to plot.")
         return 1

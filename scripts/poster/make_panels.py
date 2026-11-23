@@ -178,6 +178,10 @@ def manifest_facts():
             "n_quality_c57": int(sum(p["n_quality_cells"] or 0 for p in loadable)),
             "hours_c57": float(sum(p["duration_seconds"] or 0 for p in loadable) / 3600),
             "animals_c57": sorted(animals),
+            "c7_days": len({v["session_date"] for v in m["sessions"].values()
+                            if v.get("cohort") == "cohort7"}),
+            "c7_max_sim": max(len(v["ephys"]["animals"]) for v in m["sessions"].values()
+                              if v.get("cohort") == "cohort7"),
             "tracked_manifest": sorted(tracked)}
 
 
@@ -244,6 +248,8 @@ def build_facts(refresh=False):
     _expect("recordings with spike files", mf["n_spike_files"], 94)
     _expect("loadable recordings", mf["n_loadable"], 63)
     _expect("quality cells cohorts 5+7", mf["n_quality_c57"], 12227)
+    _expect("cohort 7 recording days", mf["c7_days"], 14)
+    _expect("cohort 7 rats recorded at once", mf["c7_max_sim"], 4)
 
     fdr = pd.read_csv(REPO / "results" / "event_decoding" / "refined_fdr_opponent.csv")
     dec = _cached("decode_summary", load_decode_summary, refresh)
@@ -308,6 +314,9 @@ def build_facts(refresh=False):
         "max_shuffles": max(v["max_shuffles"] for v in per_rat.values()),
         "n_q_631": per_rat["rat631"]["n_cells"],
         "n_frames_631": 74985,
+        "c7_days": mf["c7_days"], "c7_max_sim": mf["c7_max_sim"],
+        "n_sig_all": sum(v["n_sig"] for v in per_rat.values()),
+        "n_cells_all": sum(v["n_cells"] for v in per_rat.values()),
         "per_rat": per_rat, "barcode": bcd,
         "bc631_obs": 100 * bcd["rat631"]["obs"], "bc631_null": 100 * bcd["rat631"]["null_mean"],
         "bc631_p_free": bcd["rat631"]["p_free"], "bc631_p_block": bcd["rat631"]["p_block"],
@@ -315,10 +324,12 @@ def build_facts(refresh=False):
         "bc631_rep_p": rep["rep_p"],
         "event_files": ev,
     }
+    _expect("pooled cells", facts["n_cells_all"], 2101)
+    _expect("pooled FDR-significant cells", facts["n_sig_all"], 62)
     sig = [f"{a} {v['n_sig']}/{v['n_cells']}" for a, v in per_rat.items() if v["n_sig"]]
     none = [a for a, v in per_rat.items() if not v["n_sig"]]
     facts["decode_sig_sentence"] = (
-        "FDR-significant cells (q < 0.05): " + ", ".join(sig) + "; none in "
+        "FDR-significant cells (q < 0.05): " + "; ".join(sig) + ". None in "
         + ", ".join(none[:-1]) + " or " + none[-1] + ".")
     (spec.DATA / "facts.json").write_text(json.dumps(facts, indent=1, default=float))
     print("  facts.json written")
@@ -482,7 +493,7 @@ def panel_gui_browser(facts):
     fig, w, h = _fig("gui_browser")
     ax = fig.add_axes([0, 0, 1, 1])
     size = _shot(ax, spec.GUI / "panel_browser_c2.png")
-    _callouts(ax, size, [(0.028, 0.155), (0.61, 0.225), (0.61, 0.69), (0.865, 0.705)])
+    _callouts(ax, size, [(0.36, 0.30), (0.75, 0.40), (0.855, 0.765), (0.95, 0.80)])
     _save(fig, "gui_browser")
 
 
@@ -490,7 +501,7 @@ def panel_gui_explore(facts):
     fig, w, h = _fig("gui_explore")
     ax = fig.add_axes([0, 0, 1, 1])
     size = _shot(ax, spec.GUI / "panel_explore_clean_2.png")
-    _callouts(ax, size, [(0.213, 0.097), (0.213, 0.281), (0.21, 0.593), (0.598, 0.598)])
+    _callouts(ax, size, [(0.213, 0.046), (0.213, 0.241), (0.21, 0.57), (0.598, 0.575)])
     _save(fig, "gui_explore")
 
 
@@ -584,6 +595,74 @@ def panel_decode_by_rat(facts):
     _save(fig, "decode_by_rat")
 
 
+# FDR-significant rat631 cells that do not separate the partners before onset (|d| < 0.3 on
+# the [-1, 0] s rate) but do after it (|d| > 0.6 on [0, 2] s); see _onset_d.
+EXAMPLE_CELLS = (1119, 626)
+NAME_TAG_CELL, NAME_TAG_OPP = 1016, "rat635"   # passes rat635 only (d 1.19; next best 0.07)
+
+
+def _onset_d(spikes, t, lab, names, lo, hi):
+    """Partner-vs-partner d' of the mean rate in [lo, hi) s around onset."""
+    s = np.sort(spikes)
+    x, y = [(np.searchsorted(s, t[lab == n] + hi) - np.searchsorted(s, t[lab == n] + lo))
+            / (hi - lo) for n in names[:2]]
+    return float((x.mean() - y.mean()) / np.sqrt((x.var(ddof=1) + y.var(ddof=1)) / 2))
+HIST_ALL, HIST_SIG = "#8fb3e3", "#d73027"   # as in results/event_decoding/*_hist_fdr_*.png
+
+
+def panel_decode_examples(facts, dec):
+    fdr = pd.read_csv(REPO / "results" / "event_decoding" / "refined_fdr_opponent.csv")
+    fig, w, h = _fig("decode_examples")
+    t = dec[EXAMPLE_RAT]["event_times"]
+    lab = dec[EXAMPLE_RAT]["labels"]
+    names = list(facts["per_rat"][EXAMPLE_RAT]["class_counts"])
+    lo, hi, bw = -1.0, 2.0, 0.1
+    edges = np.arange(lo, hi + 1e-9, bw)
+    cen = edges[:-1] + bw / 2
+    row = fdr[(fdr.animal_id == EXAMPLE_RAT)].set_index("cluster_id")
+    for j, cid in enumerate(EXAMPLE_CELLS):
+        spikes = _cached(f"spikes_{EXAMPLE_RAT}_{cid}", lambda c=cid: load_example_spikes(c))
+        _expect(f"cell {cid} FDR-significant", bool(row.loc[cid, "significant"]), True)
+        _expect(f"cell {cid} silent pre-onset", abs(_onset_d(spikes, t, lab, names, -1, 0)) < 0.3, True)
+        _expect(f"cell {cid} splits post-onset", abs(_onset_d(spikes, t, lab, names, 0, 2)) > 0.6, True)
+        ax = fig.add_axes([0.075 + j * 0.285, 0.2, 0.22, 0.62])
+        for k, name in enumerate(names):
+            tt = np.sort(t[lab == name])
+            c = np.array([np.histogram(spikes[(spikes >= t0 + lo) & (spikes < t0 + hi)] - t0,
+                                       edges)[0] / bw for t0 in tt])
+            m, se = c.mean(0), c.std(0) / np.sqrt(len(c))
+            ax.fill_between(cen, m - se, m + se, color=OPP[k], alpha=0.25, lw=0)
+            ax.plot(cen, m, color=OPP[k], lw=3.2, label=f"vs {name} (n = {len(tt)})")
+        ax.axvline(0, color=MUTED, lw=1.8, ls="--")
+        ax.set_xlim(lo, hi)
+        if j == 0:          # one shared label under both PSTHs (two would collide)
+            fig.text(0.075 + (0.285 + 0.22) / 2, 0.075, "Time from encounter onset (s)",
+                     ha="center", va="center", fontsize=FIG_LABEL_PT)
+            ax.set_ylabel("Rate (Hz)")
+        r = row.loc[cid]
+        ax.set_title(f"Cell {cid}: acc {r.accuracy:.2f}, q = {r.q_value:.3f}", loc="left",
+                     fontsize=FIG_TICK_PT - 2)
+        ax.legend(loc="upper left", fontsize=SMALL_PT - 6, handlelength=1.0,
+                  borderaxespad=0.1, frameon=True, facecolor="white", edgecolor="none",
+                  framealpha=1)
+        ymax = ax.get_ylim()[1]
+        ax.set_ylim(0, ymax * 1.35)
+    # pooled distribution, all cells vs FDR-significant
+    axh = fig.add_axes([0.70, 0.2, 0.285, 0.62])
+    bins = np.arange(0.3, 0.875, 0.025)
+    axh.hist(fdr.accuracy, bins=bins, color=HIST_ALL, edgecolor="white", lw=1.2, label="All cells")
+    axh.hist(fdr.accuracy[fdr.significant], bins=bins, color=HIST_SIG, edgecolor="white", lw=1.2,
+             label=f"q < 0.05 (BH), {100 * facts['n_sig_all'] / facts['n_cells_all']:.0f}%")
+    axh.axvline(0.5, color=INK, lw=1.6, ls=":")
+    axh.set_xlabel("Accuracy (opponent)")
+    axh.set_ylabel("Cells")
+    axh.set_title(f"{len(TARGETS)} rats pooled, n = {facts['n_cells_all']:,}", loc="left",
+                  fontsize=FIG_TICK_PT - 2)
+    axh.legend(loc="upper right", fontsize=SMALL_PT - 6, frameon=False, handlelength=1.0,
+               borderaxespad=0.1)
+    _save(fig, "decode_examples")
+
+
 def panel_example_cell(facts, dec):
     fdr = pd.read_csv(REPO / "results" / "event_decoding" / "refined_fdr_opponent.csv")
     d = fdr[(fdr.animal_id == EXAMPLE_RAT) & fdr.significant].sort_values("accuracy", ascending=False)
@@ -627,54 +706,172 @@ def panel_example_cell(facts, dec):
     _save(fig, "example_cell")
 
 
+
+def _coupling_schematic(fig, ax, w, h, ccg_rect):
+    """Two cells, A excites B; their cross-correlogram peaks 1-4 ms after A spikes."""
+    A, B = "#0072B2", "#009E73"
+    # neurons
+    for (cx, col, name) in ((0.9, A, "A"), (3.1, B, "B")):
+        ax.add_patch(plt.Polygon([[cx - 0.42, h - 1.75], [cx + 0.42, h - 1.75], [cx, h - 0.95]],
+                                 closed=True, fc=col, ec="none", zorder=3))
+        ax.text(cx, h - 1.5, name, ha="center", va="center", color="white",
+                fontsize=FIG_TICK_PT, fontweight="bold", zorder=4)
+    ax.add_patch(FancyArrowPatch((1.4, h - 1.38), (2.6, h - 1.38), arrowstyle="-|>",
+                                 mutation_scale=34, color=INK, lw=3, zorder=2))
+    ax.text(2.0, h - 1.2, "excites", ha="center", va="bottom", fontsize=SMALL_PT - 4, color=INK)
+    ax.text(0, h - 0.35, "If co-tuned cells are coupled ...", fontsize=FIG_TICK_PT - 2,
+            fontweight="bold", color=NAVY, va="center")
+    # spike trains: B follows A by ~2 ms
+    rng = np.random.default_rng(3)
+    ta = np.sort(rng.uniform(0.6, 3.9, 9))
+    tb = np.sort(np.r_[ta[rng.random(9) < 0.7] + 0.09, rng.uniform(0.6, 3.9, 3)])
+    for y0, tt, col, name in ((h - 2.35, ta, A, "A"), (h - 2.85, tb, B, "B")):
+        ax.vlines(tt, y0 - 0.17, y0 + 0.17, color=col, lw=3)
+        ax.text(0.05, y0, name, ha="left", va="center", fontsize=SMALL_PT - 4, color=col,
+                fontweight="bold")
+    for x in ta[:3]:
+        ax.plot([x, x + 0.09], [h - 2.52, h - 2.68], color=MUTED, lw=1.2)
+    # cross-correlogram (schematic, not data)
+    axc = fig.add_axes(ccg_rect)
+    lags = np.arange(-10, 10.5, 1.0)
+    pred = 20 + 3 * np.exp(-(lags / 7) ** 2)
+    obs = pred + rng.normal(0, 1.6, lags.size)
+    pk = (lags >= 1) & (lags <= 4)
+    obs[pk] += np.array([9, 13, 10, 6])
+    axc.bar(lags[~pk], obs[~pk], width=0.9, color=NULL)
+    axc.bar(lags[pk], obs[pk], width=0.9, color=SIG)
+    axc.plot(lags, pred, color=INK, lw=2.4, ls="--", label="predictor")
+    axc.set_xlabel("Lag of B after A (ms)")
+    axc.set_ylabel("Count")
+    axc.set_yticks([])
+    axc.set_xlim(-10.6, 10.6)
+    axc.set_ylim(0, 40)
+    axc.annotate("peak at +1–4 ms", xy=(2.5, obs[pk].max()), xytext=(4.6, 37),
+                 fontsize=SMALL_PT - 5, color=SIG, va="center",
+                 arrowprops=dict(arrowstyle="-", color=SIG, lw=1.5))
+    axc.text(-10.2, 37, "z = (observed − predicted) / s.d.", fontsize=SMALL_PT - 5,
+             color=INK, va="center")
+    axc.legend(loc="lower left", fontsize=SMALL_PT - 6, frameon=False, borderaxespad=0.1,
+               handlelength=1.4)
+    axc.set_title("... their cross-correlogram (schematic)", loc="left", fontsize=FIG_TICK_PT - 4)
+
+
+def _load_nametag_events():
+    from analysis.opponent_barcode import opponent_barcode as ob
+    d = ob.load_events_and_responses(EXAMPLE_RAT, "20251216", "opponent", "evoked",
+                                     REPO / ".gui_cache" / "opponent_barcode")
+    return {"t": np.asarray(d["event_times"], float), "labels": np.asarray(d["labels"]).astype(str)}
+
+
+def _name_tag_psth(ax):
+    """Peri-encounter rate of one name-tag cell: every opponent, the preferred one highlighted."""
+    cells = pd.read_csv(REPO / "results" / "opponent_barcode" / "barcode_opponent_cells.csv")
+    r = cells[(cells.animal_id == EXAMPLE_RAT) & (cells.cluster_id == NAME_TAG_CELL)].iloc[0]
+    dv = r[[c for c in cells.columns if c.startswith("d_")]].dropna().astype(float)
+    _expect(f"cell {NAME_TAG_CELL} passes only {NAME_TAG_OPP}",
+            [c[2:] for c in dv.index[dv > 0.5]], [NAME_TAG_OPP])
+    ev = _cached(f"nametag_events_{EXAMPLE_RAT}", _load_nametag_events)
+    spikes = _cached(f"spikes_{EXAMPLE_RAT}_{NAME_TAG_CELL}",
+                     lambda: load_example_spikes(NAME_TAG_CELL))
+    lo, hi, bw = -1.0, 2.0, 0.1
+    edges = np.arange(lo, hi + 1e-9, bw)
+    cen = edges[:-1] + bw / 2
+
+    def psth(tt):
+        c = np.array([np.histogram(spikes[(spikes >= t0 + lo) & (spikes < t0 + hi)] - t0,
+                                   edges)[0] / bw for t0 in tt])
+        return c.mean(0), c.std(0) / np.sqrt(len(c))
+    names = sorted(set(ev["labels"]))
+    for n in names:
+        if n != NAME_TAG_OPP:
+            ax.plot(cen, psth(ev["t"][ev["labels"] == n])[0], color=NULL, lw=1.6, alpha=0.9)
+    m, se = psth(ev["t"][ev["labels"] != NAME_TAG_OPP])
+    ax.plot(cen, m, color=INK, lw=3, ls="--", label=f"other {len(names) - 1} opponents (mean)")
+    sel = ev["labels"] == NAME_TAG_OPP
+    m, se = psth(ev["t"][sel])
+    ax.fill_between(cen, m - se, m + se, color=SIG, alpha=0.25, lw=0)
+    ax.plot(cen, m, color=SIG, lw=3.6, label=f"vs {NAME_TAG_OPP} (n = {sel.sum()}), d = {dv['d_' + NAME_TAG_OPP]:.1f}")
+    ax.plot([], [], color=NULL, lw=1.6, label="each other opponent")
+    ax.axvline(0, color=MUTED, lw=1.8, ls="--")
+    ax.set_xlim(lo, hi)
+    ax.set_ylim(0, ax.get_ylim()[1] * 1.45)
+    ax.set_xlabel("Time from encounter onset (s)")
+    ax.set_ylabel("Rate (Hz)")
+    ax.set_title(f"Name-tag cell {NAME_TAG_CELL} ({EXAMPLE_RAT}): one opponent only", loc="left",
+                 fontsize=FIG_TICK_PT - 2)
+    ax.legend(loc="upper left", fontsize=SMALL_PT - 6, handlelength=1.2, borderaxespad=0.1,
+              frameon=True, facecolor="white", edgecolor="none", framealpha=1)
+
+
 def panel_barcode(facts, rep):
     fig, w, h = _fig("barcode")
-    ax = fig.add_axes([0.1, 0.27, 0.36, 0.6])
+    _name_tag_psth(fig.add_axes([0.085, 0.2, 0.43, 0.62]))
+    ax = fig.add_axes([0.64, 0.2, 0.34, 0.62])     # same baseline/height as the PSTH
     for i, (animal, _, cohort) in enumerate(TARGETS):
         b = facts["barcode"][animal]
-        ax.plot([i, i], [100 * b["null_lo"], 100 * b["null_hi"]], color=NULL, lw=14,
+        ax.plot([i, i], [100 * b["null_lo"], 100 * b["null_hi"]], color=NULL, lw=12,
                 solid_capstyle="butt", zorder=1)
         ax.plot([i - 0.22, i + 0.22], [100 * b["null_mean"]] * 2, color=MUTED, lw=3, zorder=2)
         both = b["p_free"] < 0.05 and b["p_block"] < 0.05
         free = b["p_free"] < 0.05
-        ax.scatter(i, 100 * b["obs"], s=230, zorder=3, color=SIG if free else "white",
+        ax.scatter(i, 100 * b["obs"], s=200, zorder=3, color=SIG if free else "white",
                    edgecolor=SIG if free else INK, lw=3, marker="o" if both else ("D" if free else "o"))
-        ax.text(i, -0.1, animal.replace("rat", ""), transform=ax.get_xaxis_transform(),
-                ha="center", va="top", fontsize=SMALL_PT, color=COHORT[cohort], fontweight="bold")
-    ax.set_xticks([])
+    ax.set_xticks(range(len(TARGETS)), [a.replace("rat", "") for a, _, _ in TARGETS],
+                  fontsize=FIG_TICK_PT - 5, fontweight="bold")
+    for lab, (_, _, cohort) in zip(ax.get_xticklabels(), TARGETS):
+        lab.set_color(COHORT[cohort])
     ax.set_xlim(-0.6, len(TARGETS) - 0.4)
+    ax.set_xlabel("Animal ID")
     ax.set_ylabel("Single-opponent\ncells (%)")
-    ax.set_title("Observed vs shuffle null", loc="left")
-    ax.text(0.5, -0.27, "rat (colour = cohort 5 / 7 / 9)", transform=ax.transAxes, ha="center",
-            va="top", fontsize=SMALL_PT - 2, color=MUTED)
+    ax.set_title("Name-tag cells vs shuffle null", loc="left", fontsize=FIG_TICK_PT - 2)
     ax.scatter([], [], s=150, color=SIG, label="p < .05, both nulls")
     ax.scatter([], [], s=120, color=SIG, marker="D", label="free null only")
-    ax.legend(loc="upper left", fontsize=SMALL_PT - 4, handletextpad=0.2, borderaxespad=0)
-    # heatmap: rat631 barcode cells, sorted on odd encounters, shown on even ones
-    names = np.array(rep["names"])
-    counts = np.array(rep["counts"])
-    col = np.argsort(-counts, kind="stable")
-    do, de = rep["d_odd"][:, col], rep["d_even"][:, col]
-    ok = np.isfinite(do).all(1) & np.isfinite(de).all(1)
-    pref = np.where(ok, np.nanargmax(np.where(ok[:, None], do, -np.inf), 1), -1)
-    bar = ok & (do[np.arange(len(do)), pref.clip(0)] > 0.5)
-    idx = np.flatnonzero(bar)
-    idx = idx[np.lexsort((-do[idx, pref[idx]], pref[idx]))]
-    axh = fig.add_axes([0.6, 0.27, 0.3, 0.6])
-    im = axh.imshow(de[idx], aspect="auto", cmap="RdBu_r", vmin=-1, vmax=1, interpolation="nearest")
-    for r in np.flatnonzero(np.diff(pref[idx])) + 0.5:
-        axh.axhline(r, color=INK, lw=1.2)
-    axh.set_xticks(range(len(col)))
-    axh.set_xticklabels([n.replace("rat", "") for n in names[col]], rotation=90, fontsize=SMALL_PT - 4)
-    axh.set_yticks([])
-    axh.set_ylabel(f"{idx.size} barcode cells", fontsize=SMALL_PT)
-    axh.set_xlabel("Opponent", fontsize=SMALL_PT, labelpad=2)
-    axh.set_title("rat631, held-out encounters", loc="left", fontsize=FIG_TICK_PT)
-    cax = fig.add_axes([0.915, 0.27, 0.015, 0.6])
-    cb = fig.colorbar(im, cax=cax)
-    cb.set_label("d (even)", fontsize=SMALL_PT - 2)
-    cb.ax.tick_params(labelsize=SMALL_PT - 4)
+    ax.legend(loc="upper left", fontsize=SMALL_PT - 5, handletextpad=0.2, borderaxespad=0,
+              frameon=False)
+    ax.set_ylim(top=ax.get_ylim()[1] * 1.12)
     _save(fig, "barcode")
+
+
+def _icon(ax, kind, cx, cy, s, col):
+    """Simple line icons, s = size in inches."""
+    from matplotlib.patches import Arc, Polygon
+    lw = 3.2
+    if kind == "run":
+        ax.add_patch(Circle((cx, cy), s * 0.5, fc="none", ec=col, lw=lw, zorder=3))
+        ax.add_patch(Polygon([[cx - s * 0.15, cy - s * 0.22], [cx - s * 0.15, cy + s * 0.22],
+                              [cx + s * 0.24, cy]], closed=True, fc=col, ec=col, zorder=3))
+    elif kind == "chart":
+        x0, y0 = cx - s * 0.45, cy - s * 0.4
+        ax.plot([x0, x0, x0 + s * 0.9], [y0 + s * 0.85, y0, y0], color=col, lw=lw, zorder=3)
+        for i, hh in enumerate((0.3, 0.55, 0.42, 0.75)):
+            ax.add_patch(Rectangle((x0 + s * (0.1 + 0.2 * i), y0), s * 0.13, s * hh,
+                                   fc=col, ec="none", zorder=3))
+    elif kind == "doc":
+        for dx, dy in ((0.1, -0.08), (0, 0)):
+            ax.add_patch(Rectangle((cx - s * 0.32 + s * dx, cy - s * 0.45 + s * dy), s * 0.6,
+                                   s * 0.85, fc="white", ec=col, lw=lw, zorder=3))
+        for i in range(4):
+            yy = cy + s * (0.25 - 0.17 * i)
+            ax.plot([cx - s * 0.2, cx + s * 0.18], [yy, yy], color=col, lw=2.2, zorder=4)
+    elif kind == "bulb":
+        ax.add_patch(Circle((cx, cy + s * 0.08), s * 0.3, fc="none", ec=col, lw=lw, zorder=3))
+        ax.add_patch(Rectangle((cx - s * 0.13, cy - s * 0.42), s * 0.26, s * 0.2, fc=col,
+                               ec="none", zorder=3))
+        for ang in (90, 30, 150, 0, 180):
+            a = np.deg2rad(ang)
+            ax.plot([cx + np.cos(a) * s * 0.4, cx + np.cos(a) * s * 0.52],
+                    [cy + s * 0.08 + np.sin(a) * s * 0.4, cy + s * 0.08 + np.sin(a) * s * 0.52],
+                    color=col, lw=2.4, zorder=3)
+    elif kind == "code":
+        ax.text(cx, cy, "</>", ha="center", va="center", fontsize=40, family="Consolas",
+                fontweight="bold", color=col, zorder=3)
+    elif kind == "rerun":
+        ax.add_patch(Arc((cx, cy), s * 0.85, s * 0.85, theta1=40, theta2=330, color=col, lw=lw,
+                         zorder=3))
+        a = np.deg2rad(40)
+        tx, ty = cx + np.cos(a) * s * 0.425, cy + np.sin(a) * s * 0.425
+        ax.add_patch(Polygon([[tx - s * 0.16, ty + s * 0.02], [tx + s * 0.12, ty + s * 0.1],
+                              [tx + s * 0.02, ty - s * 0.2]], closed=True, fc=col, ec=col, zorder=3))
 
 
 def panel_ai_loop(facts):
@@ -694,13 +891,15 @@ def panel_ai_loop(facts):
     bh = 1.62 + max(0.0, h - 4.3)                  # taller slot -> taller stage boxes
     by = h - 0.62 - 0.55 - bh
     gates = {1: "real?", 3: "which?", 4: "code OK?"}      # gate after stage i
+    icons = ["run", "chart", "doc", "bulb", "code", "rerun"]
     for i, (t, tag) in enumerate(stages):
         x = i * (bw + gap)
         ax.add_patch(FancyBboxPatch((x, by), bw, bh, boxstyle="round,pad=0,rounding_size=0.12",
-                                    fc=NAVY, ec=NAVY, zorder=2))
-        ax.text(x + bw / 2, by + bh - 0.38, f"{i + 1}  {t}", ha="center", va="center",
-                color="white", fontsize=S - 1, fontweight="bold", zorder=3)
-        ax.text(x + bw / 2, by + 0.55, tag, ha="center", va="center", color="#cfe0f2",
+                                    fc="white", ec=ACCENT, lw=3.5, zorder=2))
+        ax.text(x + bw / 2, by + bh - 0.36, f"{i + 1}  {t}", ha="center", va="center",
+                color=NAVY, fontsize=S - 1, fontweight="bold", zorder=3)
+        _icon(ax, icons[i], x + bw / 2, by + bh / 2 + 0.05, min(0.95, bh - 1.7), ACCENT)
+        ax.text(x + bw / 2, by + 0.45, tag, ha="center", va="center", color=MUTED,
                 fontsize=S - 6, family="Consolas", zorder=3, linespacing=1.05)
         if i < 5:
             xa, ya = x + bw, by + bh / 2
@@ -780,76 +979,116 @@ def panel_arena(facts):
     _save(fig, "arena")
 
 
+
 def panel_data_formats(facts):
+    from PIL import Image
     fig, w, h = _fig("data_formats")
     ax = _inch_axes(fig, w, h)
     S = SMALL_PT
+    vid = FIGS / "video_frame.jpg"
     rows = [
-        ("Electrophysiology: raw signals → sorted spikes", STREAM["ephys"],
-         [(FIGS / "deck_raw_signals.jpg", "multi-channel voltage\n(SpikeGadgets Trodes, 30 kHz)"),
-          (FIGS / "deck_kilosort.jpg", "Kilosort 4 assigns spikes\nto clusters (putative cells)")],
+        ("Electrophysiology", STREAM["ephys"],
+         (FIGS / "deck_raw_signals.jpg", "multi-channel voltage, 30 kHz", None),
+         (FIGS / "deck_kilosort.jpg", "Kilosort 4: spikes → clusters", None),
          [("spike_times.npy", "sample index per spike"),
           ("spike_clusters.npy", "cluster id per spike"),
           ("cluster_info.tsv", "quality label · channel · depth"),
           ("*.timestamps.dat", "sample → day clock")]),
-        ("Video: overhead camera → tracked positions", STREAM["video"],
-         [(FIGS / "video_frame.jpg", "timestamped frames,\none overhead camera"),
-          (FIGS / "rat_trajectories.png", "multi-animal tracking\n(APT keypoints)")],
+        ("Video tracking", STREAM["video"],
+         (vid, "overhead camera, timestamped", None),
+         (FIGS / "rat_trajectories.png", "multi-animal tracks (APT)", None),
          [("TQT_named.csv", "APT, wide: timestamp (ns),\n<rat>_center_x/y, kp0–3"),
           ("*_mask_metrics.csv", "manual, long: frame ·\nobject_name · center_x/y")]),
-        ("Behavior: human scoring → social events", STREAM["events"],
-         [(FIGS / "event_types.png", "scored event types (aggression subtypes, food robbery, …)")],
+        ("Behavior", STREAM["events"],
+         (FIGS / "video_frame_behavior.jpg", "video reviewed by scorers", None),
+         (FIGS / "event_types_2.png", "scored social events", None),
          [("<date>_behavior_event_df.csv",
-           "one row per event: type ·\ninitiator · victim · winner ·\nloser · location · duration ·\nts_start / ts_end (Linux ns)")]),
+           "one row per event: type · initiator ·\nvictim · winner · loser · location ·\n"
+           "duration · ts_start / ts_end (ns)")]),
     ]
-    from PIL import Image
-    label_h, gap_r, cap_h, ch_gap = 0.55, 0.3, 0.68, 0.1
-    card_w = 5.0
-    img_w = w - card_w - 0.55
+    colw = [4.35, 4.35]
     arrow_w = 0.5
+    xs = [0.0, colw[0] + arrow_w]
+    xc = xs[1] + colw[1] + arrow_w
+    card_w = w - xc
+    head_h, lab_h, gap_r, cap_h, ch_gap = 1.05, 0.5, 0.25, 0.42, 0.1
 
-    def card_h(desc):                       # Consolas name + desc lines, tight padding
+    def card_h(desc):
         return 0.5 + 0.29 * (desc.count(chr(10)) + 1) + 0.12
 
-    def row_h(imgs, cards):
-        each = (img_w - arrow_w * len(imgs)) / len(imgs)
-        need_img = max(min(each * Image.open(p_).size[1] / Image.open(p_).size[0], 2.3)
-                       for p_, _ in imgs) + cap_h
-        need_cards = sum(card_h(d) for _, d in cards) + ch_gap * (len(cards) - 1)
+    def load(path, crop):
+        im = Image.open(path).convert("RGBA")
+        if crop:
+            W, H = im.size
+            im = im.crop((int(crop[0] * W), int(crop[1] * H), int(crop[2] * W), int(crop[3] * H)))
+        # flatten onto white: transparent pixels can carry dark RGB that bleeds when resampled
+        bg = Image.new("RGBA", im.size, (255, 255, 255, 255))
+        return Image.alpha_composite(bg, im)
+
+    def row_h(r, cap=2.6):
+        need_img = max(min(colw[k] * load(p_, c_).size[1] / load(p_, c_).size[0], cap)
+                       for k, (p_, _, c_) in enumerate((r[2], r[3]))) + cap_h
+        need_cards = sum(card_h(d) for _, d in r[4]) + ch_gap * (len(r[4]) - 1)
         return max(need_img, need_cards)
 
-    rhs = [row_h(r[2], r[3]) for r in rows]
-    natural = sum(rhs) + 3 * label_h + 2 * gap_r
+    rhs = [row_h(r) for r in rows]
+    natural = head_h + sum(rhs) + 3 * lab_h + 2 * gap_r
+    cap = 2.6
+    while natural < h - 0.05 and cap < 8:       # grow the images into a taller slot
+        cap += 0.05
+        rhs = [row_h(r, cap) for r in rows]
+        natural = head_h + sum(rhs) + 3 * lab_h + 2 * gap_r
+    if natural > h:
+        cap -= 0.05
+        rhs = [row_h(r, cap) for r in rows]
+        natural = head_h + sum(rhs) + 3 * lab_h + 2 * gap_r
     print(f"  data_formats natural height {natural:.2f} in (slot {h:.2f})")
-    y = h - max(0.0, (h - natural) / 2)
-    for (title, col, imgs, cards), rh in zip(rows, rhs):
-        y -= label_h
-        ax.text(0, y + 0.22, title, fontsize=S, fontweight="bold", color=col, va="center")
-        y -= rh
-        n = len(imgs)
-        each = (img_w - arrow_w * n) / n
-        x = 0.0
-        for path, cap in imgs:
-            x0, y0, dw, dh = _img(ax, path, x, y + cap_h, each, rh - cap_h)
+    top = h - max(0.0, (h - natural) / 2)
+    # conceptual columns: shaded bands with a heading each
+    heads = [("1  RAW DATA", "as acquired"), ("2  PROCESSED", "sorted · tracked · scored"),
+             ("3  DIGITAL ARTIFACTS", "files the pipeline reads")]
+    for k, (x0, cw) in enumerate(((xs[0], colw[0]), (xs[1], colw[1]), (xc, card_w))):
+        ax.add_patch(FancyBboxPatch((x0 - 0.08, top - natural), cw + 0.16, natural,
+                                    boxstyle="round,pad=0,rounding_size=0.12", fc="#f2f5f9",
+                                    ec="none", zorder=0))
+        ax.text(x0 + cw / 2, top - 0.33, heads[k][0], ha="center", va="center",
+                fontsize=S - 1, fontweight="bold", color=NAVY)
+        ax.text(x0 + cw / 2, top - 0.75, heads[k][1], ha="center", va="center",
+                fontsize=S - 5, color=MUTED, style="italic")
+        if k < 2:
+            ax.add_patch(FancyArrowPatch((x0 + cw + 0.1, top - 0.33),
+                                         (x0 + cw + arrow_w - 0.1, top - 0.33),
+                                         arrowstyle="-|>", mutation_scale=30, color=NAVY, lw=3))
+    y = top - head_h
+    for (title, col, raw, proc, cards), rh in zip(rows, rhs):
+        ax.text(0.05, y - lab_h / 2, title, fontsize=S - 1, fontweight="bold", color=col,
+                va="center")
+        y -= lab_h + rh
+        for k, (path, cap, crop) in enumerate((raw, proc)):
+            im = np.asarray(load(path, crop))
+            iw, ih = im.shape[1], im.shape[0]
+            sc = min(colw[k] / iw, (rh - cap_h) / ih)
+            dw, dh = iw * sc, ih * sc
+            x0, y0 = xs[k] + (colw[k] - dw) / 2, y + cap_h + (rh - cap_h - dh) / 2
+            ax.imshow(im, extent=(x0, x0 + dw, y0, y0 + dh), interpolation="lanczos", zorder=2)
             ax.add_patch(Rectangle((x0, y0), dw, dh, fc="none", ec=RULE, lw=1.5, zorder=3))
-            ax.text(x + each / 2, y0 - 0.06, cap, fontsize=S - 6, color=MUTED,
-                    ha="center", va="top", linespacing=1.1)
-            x += each
-            _arrow(ax, x + 0.06, y + cap_h + (rh - cap_h) / 2, x + arrow_w - 0.06,
-                   y + cap_h + (rh - cap_h) / 2, color=col, lw=2.6)
-            x += arrow_w
+            ax.text(xs[k] + colw[k] / 2, y0 - 0.06, cap, fontsize=S - 6, color=MUTED,
+                    ha="center", va="top")
+            ya = y + cap_h + (rh - cap_h) / 2
+            _arrow(ax, xs[k] + colw[k] + 0.06, ya, xs[k] + colw[k] + arrow_w - 0.06, ya,
+                   color=col, lw=2.6)
         need_cards = sum(card_h(d) for _, d in cards) + ch_gap * (len(cards) - 1)
         cy = y + rh - (rh - need_cards) / 2
         for name, desc in cards:
             ch = card_h(desc)
             cy -= ch
-            ax.add_patch(FancyBboxPatch((x + 0.05, cy), card_w, ch,
+            ax.add_patch(FancyBboxPatch((xc, cy), card_w, ch,
                                         boxstyle="round,pad=0,rounding_size=0.08",
                                         fc="white", ec=RULE, lw=2, zorder=2))
-            ax.add_patch(Rectangle((x + 0.05, cy), 0.09, ch, fc=col, ec="none", zorder=3))
-            ax.text(x + 0.3, cy + ch - 0.1, name, fontsize=S - 3,
+            ax.add_patch(Rectangle((xc, cy), 0.09, ch, fc=col, ec="none", zorder=3))
+            ax.text(xc + 0.25, cy + ch - 0.1, name, fontsize=S - 3,
                     family="Consolas", fontweight="bold", color=col, va="top", zorder=3)
-            ax.text(x + 0.3, cy + ch - 0.5, desc, fontsize=S - 4,
+            ax.text(xc + 0.25, cy + ch - 0.5, desc, fontsize=S - 4,
                     color=INK, va="top", zorder=3, linespacing=1.12)
             cy -= ch_gap
         y -= gap_r
@@ -969,12 +1208,24 @@ def panel_connectivity(facts):
     pairs = pd.read_csv(REPO / "results" / "opponent_barcode" / "barcode_connectivity_rat631_pairs.csv")
     classes = [("co-tuned", "co-tuned", "#009E73"),
                ("competing", "competing", "#D55E00"),
-               ("barcode x non", "barcode\n× non", "#7f7f7f"),
+               ("barcode x non", "name-tag\n× non", "#7f7f7f"),
                ("non x non", "non × non", "#b9bec8")]
-    axl = fig.add_axes([0.1, 0.2, 0.49, 0.62])
+    ax0 = fig.add_axes([0, 0, 0.5, 1])
+    ax0.set_xlim(0, w * 0.5)
+    ax0.set_ylim(0, h)
+    ax0.axis("off")
+    _coupling_schematic(fig, ax0, w * 0.5, h, ccg_rect=[0.075, 0.17, 0.39, 0.34])
+    axl = fig.add_axes([0.6, 0.2, 0.385, 0.62])
     rng = np.random.default_rng(0)
     for i, (k, lab, col) in enumerate(classes):
         v = pairs.loc[pairs["class"] == k, "z"].to_numpy()
+        vp = axl.violinplot(v[(v > -4) & (v < 6.2)], positions=[i], widths=0.85,
+                            showextrema=False)
+        for b in vp["bodies"]:
+            b.set_facecolor(col)
+            b.set_alpha(0.22)
+            b.set_edgecolor(col)
+            b.set_linewidth(1.5)
         show = v if len(v) <= 600 else rng.choice(v, 600, replace=False)
         axl.scatter(i + rng.uniform(-0.28, 0.28, len(show)), show, s=10, color=col, alpha=0.45,
                     lw=0, rasterized=True)
@@ -984,27 +1235,14 @@ def panel_connectivity(facts):
     axl.set_ylim(-4, 7.3)
     axl.set_xticks(range(4), [c[1] for c in classes])
     axl.set_ylabel("Excess z, +1–4 ms")
-    axl.set_title("Short-lag coupling by pair class (rat631)", fontsize=FIG_TITLE_PT - 4, loc="left")
-    axr = fig.add_axes([0.72, 0.2, 0.26, 0.62])
-    rows = [("raw z", facts["conn_diff"], facts["conn_lo"], facts["conn_hi"], facts["conn_p"]),
-            ("residualised", facts["conn_diff_resid"], facts["conn_lo_resid"],
-             facts["conn_hi_resid"], facts["conn_p_resid"])]
-    for j, (lab, obs, lo, hi, p) in enumerate(rows):
-        yy = 1 - j
-        axr.plot([lo, hi], [yy, yy], color=NULL, lw=16, solid_capstyle="butt")
-        axr.scatter([obs], [yy], s=260, color=SIG, zorder=3, edgecolors="white", linewidths=2)
-        axr.text(hi + 0.03, yy, f"p = {p:.2f}", va="center", fontsize=SMALL_PT - 3, color=INK)
-    axr.axvline(0, color=MUTED, lw=1.2)
-    axr.set_yticks([1, 0], [r[0] for r in rows])
-    axr.set_ylim(-0.6, 1.6)
-    axr.set_xlim(-0.35, 0.62)
-    axr.set_xlabel("co-tuned − competing Δz")
-    axr.set_title("vs shuffle null (95%)", fontsize=FIG_TITLE_PT - 4, loc="left")
+    axl.set_title(f"... measured (rat631): co-tuned − competing p = {facts['conn_p']:.2f}",
+                  fontsize=FIG_TICK_PT - 4, loc="left")
+    axl.tick_params(axis="x", labelsize=SMALL_PT - 4)
     _save(fig, "connectivity")
 
 
 PANEL_FUNCS = ["qr", "logo", "arena", "data_formats", "architecture", "gui_browser",
-               "gui_explore", "ai_loop", "decode_method", "decode_by_rat", "barcode",
+               "gui_explore", "ai_loop", "decode_method", "decode_examples", "barcode",
                "connectivity"]
 
 
@@ -1018,7 +1256,8 @@ def main(argv=None) -> int:
     print("rendering panels ...")
     for name in todo:
         fn = globals()[f"panel_{name}"]
-        extra = {"sync": (sync,), "example_cell": (dec,), "barcode": (rep,)}.get(name, ())
+        extra = {"sync": (sync,), "example_cell": (dec,), "decode_examples": (dec,),
+                 "barcode": (rep,)}.get(name, ())
         fn(facts, *extra)
     (spec.DATA / "facts.json").write_text(json.dumps(facts, indent=1, default=float))
     return 0

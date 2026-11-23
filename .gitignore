@@ -219,3 +219,4 @@ reports/out/
 reports/figures/
 habitat_pipeline.db.bak_*
 /results
+/scripts/poster

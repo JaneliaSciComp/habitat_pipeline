@@ -74,74 +74,62 @@ OVERFLOW: Dict[int, float] = {}          # column -> inches past the bottom marg
 # --------------------------------------------------------------------------
 # Text
 # --------------------------------------------------------------------------
-TITLE = ("An open-source analysis framework for multi-animal extracellular "
-         "electrophysiology in freely interacting rodents")
-AUTHORS = "Mikhail Proskurin¹, Yuxin Pan¹, Gowan Tervo¹, Konrad Rokicki¹"
-AFFIL = "¹ Janelia Research Campus, HHMI, Ashburn, VA"
+TITLE = ("Polis toolkit: an analysis framework for multi-animal extracellular "
+         "electrophysiology in freely interacting rats")
+AUTHORS = "Mikhail Proskurin¹, Yuxin Pan¹, Konrad Rokicki¹\\*, Gowan Tervo¹\\*"
+AFFIL = "¹ Janelia Research Campus, HHMI, Ashburn, VA   ·   \\* Co-senior authors"
 
 ABSTRACT = (
-    "**Abstract.** Brains evolved for social life. Recognizing individuals, anticipating their "
-    "actions, cooperating, and competing all happen in the company of conspecifics. Yet systems "
-    "neuroscience has historically measured neural activity one animal at a time in isolated "
-    "chambers, leaving the brains-in-dialog that animals actually evolved to be largely "
-    "unexplored. Recent advances now allow simultaneous extracellular recordings from many "
-    "neurons across several freely-behaving animals interacting in a shared arena. The "
-    "bottleneck has shifted to analysis. Each session yields electrophysiology data, "
-    "multi-animal location tracking, and scored behavioral events from distinct acquisition "
-    "systems on independent clocks. We introduce Polis toolkit, an open-source Python framework "
-    "that ingests spike-sorted data, animal-resolved location tracking, and scored events; "
-    "aligns electrophysiology and behavioral clocks; and exposes every animal's data through a "
-    "unified shared-clock interface. Modules cover decoding of opponent identity, interaction "
-    "outcome, and spatial position; PCA/UMAP/Rastermap population geometry; allocentric "
-    "\"social place fields\" testing whether individual neurons encode the position of "
-    "specific conspecifics; and a shared/unique subspace decomposition that captures "
-    "coordinated dynamics neither brain shows alone. A Python API and interactive GUI provide "
-    "scripted and point-and-click access. By unifying the multi-animal data plane and bundling "
-    "cross-brain analyses that previously required custom implementation, Polis toolkit "
-    "shortens analysis time. Applied to a 12-rat cohort (4 with wireless chronic Neuropixels) "
-    "in a large arena, it supports analyses spanning quality control, partner-specific spatial "
-    "coding, and inter-brain coupling. We are extending it to include analysis of social "
-    "vocalizations, unsupervised social-behavior segmentation linked to neural activity, and "
-    "detection of social-experience replay during rest as well as support of NWB data format. "
-    "By making cohort-scale analysis routine, Polis toolkit aims to shift the field from "
-    "studying isolated brains to studying brains as they evolved — in interaction with each "
-    "other."
+    "Brains evolved for social life, yet systems neuroscience has mostly recorded "
+    "one animal at a time, leaving **brains in dialog** largely unexplored. Simultaneous "
+    "extracellular recordings from several freely interacting animals are now possible, and "
+    "**the bottleneck has shifted to analysis**: each session yields spikes, multi-animal "
+    "tracking and scored behavior from separate systems on independent clocks. **Polis "
+    "toolkit** is an open-source Python framework that **ingests and aligns all three streams** "
+    "and exposes every animal's data through **one shared-clock interface**. Its modules decode "
+    "opponent identity, interaction outcome and position, map population geometry "
+    "(PCA/UMAP/Rastermap), test **social place fields** for specific conspecifics, and extract "
+    "**shared and unique inter-brain subspaces**. A Python API and an interactive GUI give "
+    "scripted and point-and-click access. We applied it to a **12-rat colony (4 with wireless chronic "
+    "Neuropixels)** in a large arena, for analyses ranging from quality control to "
+    "partner-specific coding and inter-brain coupling."
 )
 
 INTRO = (
-    "Rats live together continuously in a shared, enriched arena under overhead cameras. "
-    "Several colony members carry chronic implants and are recorded **simultaneously** for "
-    "hours, while every animal is tracked and human scorers annotate chases, fights and "
-    "other social encounters. Brain, video and behavior each arrive on their own clock, in "
-    "their own formats, across cohorts, days and recording blocks."
+    "**Multimodal data from many animals, across weeks.** A colony of rats lived together in "
+    "a shared, enriched arena. Up to {c7_max_sim} implanted rats were recorded "
+    "**simultaneously** for {c7_days} consecutive days, while overhead "
+    "cameras tracked every animal and human scorers annotated social encounters. The result is "
+    "one record of spikes, positions and behavior from the same interacting individuals: "
+    "{n_animal_recordings} animal-recordings and {hours_c57:.0f} h of loadable "
+    "electrophysiology so far."
 )
 
 AI_INTRO = (
     "An AI coding agent (Claude Code) drives the same CLIs and loaders as the GUI, through "
     "four repo skills and two subagents. It works *within* a stage; a scientist decides "
-    "*between* stages (red ♦ gates), where agents fail most often (Horstmann et al. 2026)."
+    "*between* stages (red ♦ gates), where human input is most necessary."
 )
 
 AI_GUARDS = (
-    "**Guard-rails, built into the code the agent calls:**\n"
-    "- **Add-one permutation p-values**, (1+k)/(n+1), and **majority-class baselines**, "
-    "not 1/n.\n"
-    "- **Resolution check.** 200 shuffles over 149 cells cap the best BH q at "
-    "{q_floor_200_149:.2f}, so \"0 significant cells\" was set by the budget. "
-    "`fdr_resolution` now flags it.\n"
-    "- **Declared-test ledger.** The FDR denominator is fixed before running. *Caught:* a "
-    "{fam4_n_declared}-target location sweep reported at m = {fam4_m_logged} gave q = "
-    "{fam4_q_logged:.3f}; at the honest m = {fam4_m_declared}, q = {fam4_q_declared:.3f}, "
-    "not significant.\n"
-    "- **Holdout registry + derived evidence tier.** All {n_hypotheses} hypotheses are "
-    "*exploratory* until a reserved session confirms them."
+    "**Guard-rails:**\n"
+    "- **Held-out session:** at least one recording stays hidden from the agent until a "
+    "hypothesis is pre-registered; confirmation runs only on held-out data.\n"
+    "- **Multiple-comparison control, tracked:** the notebook counts every test in a "
+    "campaign, records the family and applies BH-FDR or Bonferroni automatically.\n"
+    "- **Power / effect-size sanity:** required N is estimated before an analysis is "
+    "proposed, and under-powered designs are flagged.\n"
+    "- **Assumptions stated:** every agent-written module writes its statistical assumptions "
+    "into its docstring and the notebook.\n"
+    "- **Domain guard-rails as tests:** agent-written modules must pass domain-invariant "
+    "checks, not just run."
 )
 
 ARCH_CAPTION = (
-    "**Architecture.** Per-cohort JSON configs, not code, locate the data. Path discovery "
-    "feeds three data classes and one sync object (sync-pulse matching; Greyware clock fit "
-    "for cohort 9; NWB arrives pre-synchronized). Every module consumes the same aligned "
-    "objects, caches results keyed on parameters, and backs the GUI, notebooks and AI agent."
+    "**Architecture.** Per-cohort JSON configs give the network-share roots for spikes, "
+    "video, tracking and scored events, from which each recording's files are discovered; three data classes and one sync object "
+    "form a single aligned session model, shared by every analysis module, the GUI, notebooks "
+    "and the AI agent."
 )
 
 MANIFEST = (
@@ -152,8 +140,8 @@ MANIFEST = (
 )
 
 GUI_INTRO = (
-    "A **Panel/Bokeh** app, built on the pipeline's own loaders and caches, browses every "
-    "recording block and links neural, behavioral and positional views on one time cursor."
+    "A **Panel/Bokeh** app, built on the pipeline's own loaders and caches, allows a researcher to "
+    "browse every recording block and links neural, behavioral and positional views on one time cursor."
 )
 
 BROWSER_CAPTION = (
@@ -174,45 +162,47 @@ EXPLORE_CAPTION = (
 DECODE_INTRO = (
     "Each analysis was run, checked and corrected through the agent loop and logged in the "
     "lab notebook. **Opponent decoding:** does a single neuron's activity tell *which* rat "
-    "the focal animal is meeting? Partner identity (two most frequent partners per rat) is "
-    "decoded from each cell separately."
+    "the focal animal is meeting? Partner identity (two most frequent partners per rat) "
+    "was decoded from each cell separately."
 )
 
 DECODE_RESULT = (
-    "**Result.** {decode_sig_sentence} Identity is carried by individual cells in some rats "
-    "but not all. Slow state changes could mimic it, so the barcode test adds a time-block null."
+    "**Result.** Two example rat631 cells (left) fire alike before onset and split by partner "
+    "only after it. Pooled over {n_cells_all:,} cells, the significant ones (red) sit in the "
+    "upper tail. {decode_sig_sentence} Slow state changes could mimic identity coding, so the "
+    "name-tag test adds a time-block null."
 )
 
 BARCODE_TEXT = (
-    "**Opponent barcodes.** Using all partners, a cell *passes* an opponent when its evoked "
-    "response to that opponent exceeds the others' by d > 0.5. If identity is coded by "
-    "partner-specific cell sets, cells that pass exactly one opponent should be "
+    "**Opponent name tags.** A cell *passes* an opponent when its evoked response to that "
+    "opponent exceeds the others' by d > 0.5; a name-tag cell passes exactly one (example "
+    "below, left). If identity is coded by partner-specific cell sets, name-tag cells should be "
     "over-represented relative to shuffled labels. In rat631: {bc631_obs:.0f}% observed vs "
     "{bc631_null:.0f}% expected (p = {bc631_p_free:.3f} free, {bc631_p_block:.3f} time-block "
-    "null). The preferred opponent replicates on held-out encounters in {bc631_rep:.0f}% of "
-    "cells (chance {bc631_rep_chance:.1f}%, p = {bc631_rep_p:.3f}). Only rat630 also passes, "
-    "and only under the free null."
+    "null), and the preferred opponent replicated on held-out encounters ({bc631_rep:.0f}% vs "
+    "{bc631_rep_chance:.1f}% chance, p = {bc631_rep_p:.3f}). Only rat630 also passed, under the "
+    "free null only."
 )
 
 CONNECT_TEXT = (
-    "**Negative result: are co-tuned cells coupled?** Short-lag cross-correlograms for all "
-    "{conn_n_pairs:,} ordered pairs of rat631 quality cells, with a hollowed-Gaussian "
-    "predictor (Stark & Abeles 2012). Pairs tuned to the same opponent show slightly more "
-    "excess coupling than pairs tuned to different ones (Δz = +{conn_diff:.2f}), but inside "
-    "the label-shuffle null (95% [{conn_lo:.2f}, +{conn_hi:.2f}], p = {conn_p:.2f}; "
-    "p = {conn_p_resid:.2f} after regressing out distance and rate). Connection rates: "
-    "{conn_exc_co:.1f}% vs {conn_exc_comp:.1f}% (Fisher p = {conn_fisher:.2f}). **Not "
-    "significant**, and reported as such."
+    "**Negative result: are co-tuned cells coupled?** If name-tag cells for one opponent "
+    "excite one another, their cross-correlogram should peak 1–4 ms after the reference spike "
+    "(schematic below, left). We tested all {conn_n_pairs:,} ordered pairs of rat631 quality cells "
+    "against a hollowed-Gaussian predictor (Stark & Abeles 2012). Pairs tuned to the same "
+    "opponent showed slightly more excess coupling than pairs tuned to different ones "
+    "(Δz = +{conn_diff:.2f}), but inside the label-shuffle null (95% [{conn_lo:.2f}, "
+    "+{conn_hi:.2f}], p = {conn_p:.2f}; p = {conn_p_resid:.2f} after regressing out distance "
+    "and rate). Connection rates: {conn_exc_co:.1f}% vs {conn_exc_comp:.1f}% (Fisher p = "
+    "{conn_fisher:.2f}). **Not significant**, and reported as such."
 )
 
 CONCLUSIONS = (
-    "- One config-driven pipeline turns three unsynchronized streams into one aligned "
-    "session model, browsable in interactive dashboards.\n"
+    "- The **Polis toolkit** permits analysis of **multimodal data** recorded from **multiple "
+    "animals simultaneously** across **many days**.\n"
     "- An AI agent runs analyses in the loop; a scientist gates each step, guard-rails live "
     "in the code, and every run is logged.\n"
-    "- Some neurons carry opponent identity in some rats, and in rat631 they form "
-    "opponent-specific sets; a coupling link between co-tuned cells was **not** found. All "
-    "**exploratory**: each cohort has one scored session, so held-out confirmation is next."
+    "- Some neurons carried **opponent identity** in some rats, and in one rat they "
+    "formed **opponent-specific sets**; a coupling link between co-tuned cells was **not** found."
 )
 
 REFS = (
@@ -221,7 +211,7 @@ REFS = (
     "subspace: Zhang, Phi, Li et al., *Nature* 2025 · BH-FDR: Benjamini & Hochberg 1995 · "
     "CCG coupling: Stark & Abeles, *J. Neurosci. Methods* 2012 · AI agents in a neuroscience "
     "pipeline: Horstmann et al., arXiv 2606.07718.\n"
-    "**Code:** github.com/JaneliaSciComp/habitat_pipeline · [Acknowledgments and funding]"
+    "**Code:** github.com/JaneliaSciComp/habitat_pipeline · Funding: Howard Hughes Medical Institute"
 )
 
 
@@ -272,40 +262,42 @@ def layout() -> List[Item]:
         Item("figure", name="qr", x=POSTER_W - MARGIN - 5.4, y=0.9, w=5.4, h=5.2),
     ]
     els += _stack(0, [
-        Item("box", h=11.75, text=ABSTRACT, size=CAPTION_PT, fill="#e8eef6"),
-        _header(1, "A rat colony, recorded"),
-        Item("figure", h=9.5, name="arena"),
-        Item("text", h=2.25, text=INTRO, size=CAPTION_PT),
-        _header(2, "Data: three streams, three formats"),
-        Item("figure", h=12.05, name="data_formats"),
+        Item("header", h=1.15, text="Abstract", size=HEADER_PT),
+        Item("box", h=8.45, text=ABSTRACT, size=BODY_PT, fill="#e8eef6"),
+        _header(1, "Rats recorded together for weeks"),
+        Item("figure", h=8.7, name="arena"),
+        Item("text", h=0.55, text="*Schematic illustration.*", size=SMALL_PT,
+             color="#5b6475", align="center"),
+        Item("text", h=3.4, text=INTRO, size=BODY_PT),
+        _header(2, "Multimodal data streams"),
+        Item("figure", h=12.55, name="data_formats"),
     ])
     els += _stack(1, [
         _header(3, "Pipeline architecture"),
         Item("figure", h=14.6, name="architecture"),
-        Item("text", h=2.0, text=ARCH_CAPTION, size=CAPTION_PT),
+        Item("text", h=1.4, text=ARCH_CAPTION, size=CAPTION_PT),
         _header(4, "AI agent in the loop"),
         Item("text", h=1.35, text=AI_INTRO, size=CAPTION_PT),
         Item("figure", h=5.8, name="ai_loop"),
-        Item("box", h=5.4, text=AI_GUARDS, size=CAPTION_PT, fill="#e8eef6"),
+        Item("box", h=6.6, text=AI_GUARDS, size=CAPTION_PT, fill="#e8eef6"),
         Item("box", h=2.9, text=MANIFEST, size=CAPTION_PT, fill="#e8eef6"),
     ])
     els += _stack(2, [
         _header(5, "Results from the loop"),
         Item("text", h=1.4, text=DECODE_INTRO, size=CAPTION_PT),
         Item("figure", h=2.3, name="decode_method"),
-        Item("figure", h=9.6, name="decode_by_rat"),
-        Item("text", h=1.4, text=DECODE_RESULT, size=CAPTION_PT),
-        Item("figure", h=8.4, name="barcode"),
+        Item("figure", h=8.6, name="decode_examples"),
         Item("text", h=2.25, text=BARCODE_TEXT, size=CAPTION_PT),
-        Item("figure", h=7.4, name="connectivity"),
-        Item("text", h=2.25, text=CONNECT_TEXT, size=CAPTION_PT),
+        Item("figure", h=9.4, name="barcode"),
+        Item("text", h=2.7, text=CONNECT_TEXT, size=CAPTION_PT),
+        Item("figure", h=9.2, name="connectivity"),
     ])
     els += _stack(3, [
         _header(6, "Interactive exploration"),
         Item("text", h=1.1, text=GUI_INTRO, size=CAPTION_PT),
-        Item("figure", h=10.3, name="gui_browser"),
+        Item("figure", h=9.0, name="gui_browser"),
         Item("text", h=1.8, text=BROWSER_CAPTION, size=CAPTION_PT),
-        Item("figure", h=11.5, name="gui_explore"),
+        Item("figure", h=11.0, name="gui_explore"),
         Item("text", h=1.8, text=EXPLORE_CAPTION, size=CAPTION_PT),
         _header(7, "Conclusions"),
         Item("box", h=4.3, text=CONCLUSIONS, size=CAPTION_PT, fill="#fdf1e6"),

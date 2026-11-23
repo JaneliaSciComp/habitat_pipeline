@@ -88,7 +88,7 @@ def _margins(tf, pad):
     tf.margin_top = tf.margin_bottom = _in(pad)
 
 
-def main(name: str = "poster_v6") -> int:
+def main(name: str = "poster_v10") -> int:
     facts = json.loads((spec.DATA / "facts.json").read_text())
     prs = Presentation()
     prs.slide_width, prs.slide_height = _in(POSTER_W), _in(POSTER_H)
@@ -134,5 +134,5 @@ def main(name: str = "poster_v6") -> int:
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument("--name", default="poster_v6", help="output stem")
+    ap.add_argument("--name", default="poster_v10", help="output stem")
     sys.exit(main(ap.parse_args().name))

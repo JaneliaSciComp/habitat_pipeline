@@ -1,7 +1,7 @@
 """Minimal rich-text model shared by the PDF and PPTX builders.
 
-Markup: ``**bold**``, ``*italic*``, ```code```; a paragraph (line) starting with
-``- `` is a bullet with a hanging indent. That is all the poster needs, and it
+Markup: ``**bold**``, ``*italic*``, ```code```, a backslash-escaped
+asterisk for a literal one; a paragraph (line) starting with ``- `` is a bullet with a hanging indent. That is all the poster needs, and it
 keeps both renderers honest: the PDF engine below measures every word with the
 same Arial metrics PowerPoint uses, so line breaks come out (nearly) the same.
 """
@@ -38,11 +38,12 @@ class Para:
 
 
 _TOKEN = re.compile(r"(\*\*.+?\*\*|`[^`]+`|\*[^*]+\*)")
+_STAR = "\ue000"           # stands in for an escaped \\* while tokenizing
 
 
 def parse(text: str, bold_all: bool = False) -> List[Para]:
     paras = []
-    for line in text.split("\n"):
+    for line in text.replace("\\*", _STAR).split("\n"):
         bullet = line.startswith("- ")
         if bullet:
             line = line[2:]
@@ -58,6 +59,7 @@ def parse(text: str, bold_all: bool = False) -> List[Para]:
                 runs.append(Run(tok[1:-1], italic=True, bold=bold_all))
             else:
                 runs.append(Run(tok, bold=bold_all))
+        runs = [Run(r.text.replace(_STAR, "*"), r.bold, r.italic, r.code) for r in runs]
         paras.append(Para(runs, bullet))
     return paras
 

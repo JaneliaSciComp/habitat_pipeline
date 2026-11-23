@@ -58,7 +58,7 @@ def draw_text(ax, x, y, w, text, size, color=INK, align="left", bold_all=False):
         base += PARA_GAP * lh
 
 
-def main(name: str = "poster_v6") -> int:
+def main(name: str = "poster_v10") -> int:
     apply_mpl_style()
     facts = json.loads((spec.DATA / "facts.json").read_text())
     els = spec.layout()
@@ -122,5 +122,5 @@ def main(name: str = "poster_v6") -> int:
 if __name__ == "__main__":
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument("--name", default="poster_v6", help="output stem")
+    ap.add_argument("--name", default="poster_v10", help="output stem")
     sys.exit(main(ap.parse_args().name))

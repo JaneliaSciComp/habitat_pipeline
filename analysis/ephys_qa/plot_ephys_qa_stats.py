@@ -29,7 +29,12 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 from ingestion.kilosort_data_import import load_kilosort_data
 from ingestion.data_paths import get_kilosort_path
 
-def plot_firing_pattern_histograms(metrics, results=None, figsize=(15, 5)):
+def _finite_values(metrics, key):
+    """Finite values of ``key`` (older metric dicts may lack it)."""
+    return [m[key] for m in metrics.values() if np.isfinite(m.get(key, np.inf))]
+
+
+def plot_firing_pattern_histograms(metrics, results=None, figsize=(20, 5)):
     """
     Plot histogram distributions for firing pattern quality metrics.
     
@@ -39,15 +44,16 @@ def plot_firing_pattern_histograms(metrics, results=None, figsize=(15, 5)):
         Dictionary with cluster metrics from calculate_firing_pattern_metrics()
     results : dict, optional
         Results from filter_cells_by_firing_patterns() to show pass/fail split
-    figsize : tuple, default=(15, 5)
+    figsize : tuple, default=(20, 5)
         Figure size (width, height)
     """
     # Extract metric values
     firing_rates = [m['firing_rate'] for m in metrics.values()]
     presence_ratios = [m['presence_ratio'] for m in metrics.values()]
     cv_isis = [m['cv_isi'] for m in metrics.values() if np.isfinite(m['cv_isi'])]
-    
-    fig, axes = plt.subplots(1, 3, figsize=figsize)
+    fano_factors = _finite_values(metrics, 'fano_factor')
+
+    fig, axes = plt.subplots(1, 4, figsize=figsize)
     fig.suptitle('Firing Pattern Quality Metrics Distributions', fontsize=16, fontweight='bold')
     
     # Color scheme
@@ -113,7 +119,28 @@ def plot_firing_pattern_histograms(metrics, results=None, figsize=(15, 5)):
         ax.text(0.5, 0.5, 'No valid CV ISI data', transform=ax.transAxes,
                 horizontalalignment='center', verticalalignment='center')
         ax.set_title('CV ISI Distribution (No Data)')
-    
+
+    # 4. Fano factor histogram
+    ax = axes[3]
+    if len(fano_factors) > 0:
+        ff = np.array(fano_factors)
+        ff_clipped = ff[ff < np.percentile(ff, 95)]
+        ax.hist(ff_clipped, bins=30, alpha=0.7, color=hist_color,
+                edgecolor=edge_color, linewidth=0.5)
+        ax.axvline(1.0, color='k', linestyle='--', linewidth=1, label='Poisson (1.0)')
+        ax.set_xlabel('Fano Factor (1 s bins)')
+        ax.set_ylabel('Number of Clusters')
+        ax.set_title('Fano Factor Distribution')
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc='center right')
+        ax.text(0.65, 0.95, f'Mean: {np.mean(ff):.3f}\nStd: {np.std(ff):.3f}\nN: {len(ff)}',
+                transform=ax.transAxes, verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    else:
+        ax.text(0.5, 0.5, 'No valid Fano factor data', transform=ax.transAxes,
+                horizontalalignment='center', verticalalignment='center')
+        ax.set_title('Fano Factor Distribution (No Data)')
+
     plt.tight_layout()
     
     # If filter results provided, create a second figure showing pass/fail split
@@ -122,7 +149,7 @@ def plot_firing_pattern_histograms(metrics, results=None, figsize=(15, 5)):
     
     return fig
 
-def plot_pass_fail_histograms(metrics, results, figsize=(15, 5)):
+def plot_pass_fail_histograms(metrics, results, figsize=(20, 5)):
     """
     Plot histograms showing pass vs fail distributions for each metric.
     
@@ -132,9 +159,9 @@ def plot_pass_fail_histograms(metrics, results, figsize=(15, 5)):
         Dictionary with cluster metrics from calculate_firing_pattern_metrics()
     results : dict
         Results from filter_cells_by_firing_patterns()
-    figsize : tuple, default=(15, 5)
+    figsize : tuple, default=(20, 5)
         Figure size (width, height)
-    
+
     Returns:
     --------
     matplotlib.Figure : The created figure object
@@ -146,7 +173,7 @@ def plot_pass_fail_histograms(metrics, results, figsize=(15, 5)):
     pass_metrics = {k: v for k, v in metrics.items() if k in passed_ids}
     fail_metrics = {k: v for k, v in metrics.items() if k in failed_ids}
     
-    fig, axes = plt.subplots(1, 3, figsize=figsize)
+    fig, axes = plt.subplots(1, 4, figsize=figsize)
     fig.suptitle('Quality Metrics: Pass vs Fail Distributions', fontsize=16, fontweight='bold')
     
     pass_color = 'green'
@@ -203,7 +230,25 @@ def plot_pass_fail_histograms(metrics, results, figsize=(15, 5)):
     ax.set_title('CV ISI: Pass vs Fail')
     ax.legend()
     ax.grid(True, alpha=0.3)
-    
+
+    # 4. Fano factor
+    ax = axes[3]
+    pass_ff = np.array(_finite_values(pass_metrics, 'fano_factor'))
+    fail_ff = np.array(_finite_values(fail_metrics, 'fano_factor'))
+    if pass_ff.size > 0:
+        clipped = pass_ff[pass_ff < np.percentile(pass_ff, 95)]
+        ax.hist(clipped, bins=20, alpha=alpha, color=pass_color, label=f'Pass (n={pass_ff.size})')
+    if fail_ff.size > 0:
+        clipped = fail_ff[fail_ff < np.percentile(fail_ff, 95)]
+        ax.hist(clipped, bins=20, alpha=alpha, color=fail_color, label=f'Fail (n={fail_ff.size})')
+    ax.axvline(1.0, color='k', linestyle='--', linewidth=1)
+    ax.set_xlabel('Fano Factor (1 s bins)')
+    ax.set_ylabel('Number of Clusters')
+    ax.set_title('Fano Factor: Pass vs Fail')
+    if pass_ff.size > 0 or fail_ff.size > 0:
+        ax.legend()
+    ax.grid(True, alpha=0.3)
+
     plt.tight_layout()
     return fig
 
@@ -228,6 +273,9 @@ def test_threshold_combinations(ks_data):
         {"name": "Very Strict (Default)", "min_firing_rate": 0.5, "min_presence_ratio": 0.8, "max_cv_isi": 2.0},
         {"name": "Moderate", "min_firing_rate": 0.1, "min_presence_ratio": 0.5, "max_cv_isi": 5.0},
         {"name": "Lenient", "min_firing_rate": 0.05, "min_presence_ratio": 0.3, "max_cv_isi": 10.0},
+        # Fano factor is opt-in; this shows what adding it does to the default criteria.
+        {"name": "Default + Fano<=5", "min_firing_rate": 0.5, "min_presence_ratio": 0.8,
+         "max_cv_isi": 5.0, "max_fano_factor": 5.0},
     ]
     
     moderate_results = None

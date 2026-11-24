@@ -215,8 +215,38 @@ class KilosortData:
                 }
         return isi_stats
 
-    def calculate_firing_pattern_metrics(self, time_bin_sec: float = 60.0) -> Dict[int, Dict]:
-        """Calculate firing-rate, presence-ratio, and CV-ISI per cluster.
+    def calculate_fano_factor(self, bin_size_sec: float = 1.0) -> Dict[int, float]:
+        """Fano factor (variance / mean of spike counts per bin) for every cluster.
+
+        Counts are taken in ``bin_size_sec`` bins over ``duration_seconds``
+        starting at *that cell's* first spike — the same window convention as
+        the presence ratio, so one stray late spike cannot stretch the grid.
+        A Poisson process gives ~1; regular firing is < 1; bursting or
+        non-stationary firing (including a cell that goes silent for part of
+        the recording) is > 1. Silent cells and cells with no spikes in the
+        window return ``inf``, like ``cv_isi`` for cells with too few spikes.
+
+        The value depends on ``bin_size_sec``, so compare cells only at one bin
+        size. Variance is the population variance (``ddof=0``).
+        """
+        fano: Dict[int, float] = {}
+        duration = self.duration_seconds
+        for i, cid in enumerate(self.ks_ids):
+            st = self.spike_times_by_cell[i]
+            n_bins = int(np.ceil(duration / bin_size_sec)) if duration > 0 else 0
+            if len(st) == 0 or n_bins < 2:
+                fano[cid] = float('inf')
+                continue
+            edges = st[0] + bin_size_sec * np.arange(n_bins + 1)
+            counts, _ = np.histogram(st, bins=edges)
+            mean = counts.mean()
+            fano[cid] = float(counts.var() / mean) if mean > 0 else float('inf')
+        return fano
+
+    def calculate_firing_pattern_metrics(
+        self, time_bin_sec: float = 60.0, fano_bin_sec: float = 1.0,
+    ) -> Dict[int, Dict]:
+        """Calculate firing-rate, presence-ratio, CV-ISI and Fano factor per cluster.
 
         Presence ratio is the fraction of ``time_bin_sec`` bins containing a
         spike, over ``duration_seconds`` starting at *that cell's* first
@@ -225,6 +255,8 @@ class KilosortData:
         excluding it. A common grid would be the textbook choice, but it
         selected the same cells on every recording measured (see
         ``duration_seconds``), so the published quality-cell sets are kept.
+
+        ``fano_factor`` uses ``fano_bin_sec`` bins (see ``calculate_fano_factor``).
         """
         metrics: Dict[int, Dict] = {}
         duration = self.duration_seconds
@@ -232,10 +264,13 @@ class KilosortData:
             logger.warning("Recording duration is 0 — cannot calculate metrics")
             return metrics
 
+        fano = self.calculate_fano_factor(bin_size_sec=fano_bin_sec)
+
         for i, cid in enumerate(self.ks_ids):
             st = self.spike_times_by_cell[i]
             if len(st) == 0:
-                metrics[cid] = {'firing_rate': 0.0, 'presence_ratio': 0.0, 'cv_isi': float('inf')}
+                metrics[cid] = {'firing_rate': 0.0, 'presence_ratio': 0.0,
+                                'cv_isi': float('inf'), 'fano_factor': float('inf')}
                 continue
 
             firing_rate = len(st) / duration
@@ -259,6 +294,7 @@ class KilosortData:
                 'firing_rate': firing_rate,
                 'presence_ratio': presence_ratio,
                 'cv_isi': cv_isi,
+                'fano_factor': fano[cid],
             }
         return metrics
 
@@ -269,13 +305,22 @@ class KilosortData:
         min_presence_ratio: float = DEFAULT_QUALITY_THRESHOLDS['min_presence_ratio'],
         max_cv_isi: float = DEFAULT_QUALITY_THRESHOLDS['max_cv_isi'],
         time_bin_sec: float = 60.0,
+        max_fano_factor: Optional[float] = None,
+        fano_bin_sec: float = 1.0,
     ) -> Dict:
         """Filter clusters by firing-pattern quality metrics.
+
+        ``max_fano_factor`` is opt-in: ``None`` (default) applies no Fano
+        criterion, so the published quality-cell sets
+        (``DEFAULT_QUALITY_THRESHOLDS``) are unchanged. When set, clusters whose
+        Fano factor at ``fano_bin_sec`` exceeds it fail (silent cells are
+        ``inf`` and fail).
 
         Returns a dict with keys: passed_clusters, failed_clusters, metrics, summary.
         Also stores the result in ``self.filter_results``.
         """
-        metrics = self.calculate_firing_pattern_metrics(time_bin_sec=time_bin_sec)
+        metrics = self.calculate_firing_pattern_metrics(
+            time_bin_sec=time_bin_sec, fano_bin_sec=fano_bin_sec)
         passed, failed = [], {}
 
         for cid, m in metrics.items():
@@ -288,6 +333,8 @@ class KilosortData:
                 reasons.append(f"presence_ratio_too_low ({m['presence_ratio']:.3f} < {min_presence_ratio})")
             if m['cv_isi'] > max_cv_isi:
                 reasons.append(f"cv_isi_too_high ({m['cv_isi']:.3f} > {max_cv_isi})")
+            if max_fano_factor is not None and m['fano_factor'] > max_fano_factor:
+                reasons.append(f"fano_factor_too_high ({m['fano_factor']:.3f} > {max_fano_factor})")
             if reasons:
                 failed[cid] = reasons
             else:
@@ -394,6 +441,10 @@ class KilosortData:
             print(f"  Presence Ratio: {np.mean(prs):.3f} +/- {np.std(prs):.3f}")
             if cvs:
                 print(f"  CV ISI: {np.mean(cvs):.3f} +/- {np.std(cvs):.3f}")
+            ffs = [m['fano_factor'] for m in metrics.values()
+                   if np.isfinite(m.get('fano_factor', float('inf')))]
+            if ffs:
+                print(f"  Fano Factor: {np.mean(ffs):.3f} +/- {np.std(ffs):.3f}")
 
             if filter_results['failed_clusters']:
                 print(f"\nFailure reasons:")

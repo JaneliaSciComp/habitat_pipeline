@@ -67,3 +67,34 @@ def test_bin_spike_times_uses_the_thresholds_it_is_given():
     ks.filter_cells_by_firing_patterns(max_cv_isi=10.0)
     assert ks.bin_spike_times(bin_size_sec=10.0)[0].shape[0] == 1
     assert ks.bin_spike_times(bin_size_sec=10.0, filter_kwargs={'max_cv_isi': 10.0})[0].shape[0] == 2
+
+
+# --- Fano factor (opt-in criterion) ----------------------------------------
+
+def test_fano_factor_regular_poisson_and_bursty():
+    rng = np.random.default_rng(0)
+    regular = np.arange(0.5, 1000, 1.0)                       # exactly 1 spike per 1 s bin
+    poisson = np.sort(rng.uniform(0, 1000, 20000))            # 20 Hz Poisson
+    ks = _ks([regular, poisson, _bursty()], recording_sec=1000)
+    ff = ks.calculate_fano_factor(bin_size_sec=1.0)
+    assert ff[0] == 0.0
+    assert 0.85 < ff[1] < 1.15
+    assert ff[2] > 5
+
+
+def test_fano_factor_silent_cell_is_inf_and_in_metrics():
+    ks = _ks([np.arange(0.5, 1000, 1.0), []], recording_sec=1000)
+    m = ks.calculate_firing_pattern_metrics()
+    assert m[1]['fano_factor'] == float('inf')
+    assert m[0]['fano_factor'] == 0.0
+
+
+def test_fano_filter_is_opt_in_and_default_selection_unchanged():
+    steady = np.arange(0.5, 1000, 1.0)
+    bursty = _bursty()
+    ks = _ks([steady, bursty], recording_sec=1000)
+    baseline = ks.filter_cells_by_firing_patterns(max_cv_isi=10.0)['passed_clusters']
+    assert baseline == [0, 1]                                 # no Fano criterion by default
+    res = ks.filter_cells_by_firing_patterns(max_cv_isi=10.0, max_fano_factor=2.0)
+    assert res['passed_clusters'] == [0]
+    assert res['failed_clusters'][1][0].startswith('fano_factor_too_high')

@@ -257,22 +257,41 @@ class TestApt4DigitSiblingDirectories:
         with pytest.raises(ValueError, match='Multiple animal directories'):
             get_kilosort_path('631', '20251216', config_path=cohort7)
 
+    def test_analog_only_directory_is_not_listed(self, cohort7):
+        self._add_sibling(cohort7)
+        frame = get_animals_and_sessions(config_path=cohort7)
+        assert 'rat4631' not in set(frame['animal'])
+        assert len(frame) == 11
+
+    def test_resolve_recordings_ignores_the_analog_only_directory(self, cohort7):
+        self._add_sibling(cohort7)
+        found = resolve_recordings('631', '20251216', config_path=cohort7)
+        assert len(found) == 3 and {r.animal_dir.name for r in found} == {'rat631'}
+
+    def test_naming_the_analog_only_directory_raises(self, cohort7):
+        self._add_sibling(cohort7)
+        with pytest.raises(FileNotFoundError, match='kilosort output'):
+            get_kilosort_path('rat4631', '20251216', config_path=cohort7)
+
 
 class TestNoKilosortOutputAtAll:
-    def test_a_path_that_does_not_exist_comes_back_rather_than_raising(
-            self, tmp_path):
-        """Callers report 'no ephys here'; they do not crash.
+    """An animal directory without ``*.kilosort`` output is not an ephys animal."""
 
-        The capability-manifest probe depends on this: it records
-        ``path_exists=False`` and a load error, which is a fact worth having.
-        """
+    def test_resolving_it_raises_recording_not_found(self, tmp_path):
+        from ingestion.errors import RecordingNotFound
         ephys = tmp_path / 'ephys'
-        animal_dir = ephys / '20251222_094643.rec' / 'rat630'
-        animal_dir.mkdir(parents=True)
+        (ephys / '20251222_094643.rec' / 'rat630').mkdir(parents=True)
         config = _write_config(tmp_path, ephys)
-        path = get_kilosort_path('rat630', '20251222', config_path=config)[0]
-        assert path.exists() is False
-        assert path.parent.name == '20251222_094643_merged.kilosort'
+        with pytest.raises(RecordingNotFound, match='kilosort output'):
+            get_kilosort_path('rat630', '20251222', config_path=config)
+
+    def test_data_storage_manager_reports_no_ephys(self, tmp_path):
+        ephys = tmp_path / 'ephys'
+        (ephys / '20251222_094643.rec' / 'rat630').mkdir(parents=True)
+        config = _write_config(tmp_path, ephys)
+        dsm = DataStorageManager('rat630', '20251222', config_path=config, use_cache=False)
+        assert dsm.kilosort_path is None and dsm.dio_paths == {}
+        assert dsm.is_primary_recording is None
 
     def test_discover_returns_empty_for_an_empty_directory(self, tmp_path):
         animal_dir = tmp_path / 'rat630'
@@ -310,13 +329,15 @@ class TestEnumeration:
         assert len(frame) == 3
         assert all(p.exists() for p in frame['kilosort_path'])
 
-    def test_an_animal_with_no_kilosort_stays_visible(self, tmp_path):
+    def test_an_animal_with_no_kilosort_is_excluded(self, tmp_path):
         ephys = tmp_path / 'ephys'
-        (ephys / '20251222_094643.rec' / 'rat630').mkdir(parents=True)
+        day = ephys / '20251222_094643.rec'
+        (day / 'rat630').mkdir(parents=True)
+        (day / 'rat4630' / '20251222_094643_merged.analog').mkdir(parents=True)
+        _make_recording(day / 'rat613', '20251222_094643_merged')
         config = _write_config(tmp_path, ephys)
         frame = get_animals_and_sessions(config_path=config)
-        assert len(frame) == 1
-        assert frame['kilosort_path'][0].exists() is False
+        assert list(frame['animal']) == ['rat613']
 
 
 class TestDataStorageManagerRecordingMetadata:

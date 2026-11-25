@@ -52,7 +52,10 @@ logger = logging.getLogger(__name__)
 # v5 -> v6: the APT tree was re-exported (2026-11) with ``solution_keypoints.csv``
 # in each chunk directory and no ``solution/TQT_named.csv``, so a v5 entry's
 # APT tracking paths no longer exist.
-_CACHE_VERSION = 6
+# v6 -> v7: animal directories without ``*.kilosort`` output are no longer ephys
+# animals, so a v6 entry may hold a placeholder ``<date>_merged.kilosort`` path
+# where the resolver now gives ``None``.
+_CACHE_VERSION = 7
 _DEFAULT_CACHE_DIR = Path(__file__).parent.parent / ".cache" / "data_paths"
 _CONFIG_DIR = Path(__file__).parent.parent / "config"
 
@@ -61,12 +64,6 @@ _CONFIG_DIR = Path(__file__).parent.parent / "config"
 #: ``python -m ingestion.apt_frame_clock --build``; read by
 #: :func:`video.tracking_import.load_apt_frame_timestamps` as the last resort.
 APT_FRAME_TS_DIR = Path(__file__).parent.parent / ".cache" / "apt_frame_ts"
-
-#: Prefix assumed when an animal directory holds no ``*.kilosort`` directory at
-#: all. Preserves the pre-recording-discovery behaviour of returning a path
-#: that does not exist rather than raising, which callers rely on to report
-#: "no ephys here" instead of crashing.
-_LEGACY_STEM_SUFFIX = '_merged'
 
 _VIDEO_EXTENSIONS = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v']
 _TRACKING_EXTENSIONS = ['.csv', '.h5', '.hdf5', '.mat', '.pkl', '.npz', '.json', '.txt']
@@ -260,15 +257,19 @@ def _discover_recordings(animal_dir: Path, session_dir_id: str) -> List[Recordin
     return recordings
 
 
-def _legacy_recording(animal_dir: Path, session_dir_id: str) -> Recording:
-    """The recording assumed when an animal directory holds no kilosort output.
+def _animal_dirs_with_kilosort(session_dir: Path, animal_id: str) -> List[Path]:
+    """Animal directories in *session_dir* matching *animal_id* that hold kilosort output.
 
-    Its paths do not exist; returning them (rather than raising) is what lets
-    callers report "no ephys here".
+    A directory with no ``*.kilosort`` directory is not an ephys animal and is
+    excluded everywhere ephys paths are parsed. Since 2026-11 each cohort-7
+    day also holds ``rat4613``/``rat4615``/``rat4630``/``rat4631`` directories
+    with only ``.analog``/``.timestampoffset`` exports (cohort 9 has the same
+    for unsorted ``rat4678``/``rat4679``/``rat5675`` days). ``'631'`` matches
+    ``rat4631`` as well as ``rat631``, and listing those directories would
+    show animals that have no spikes.
     """
-    return Recording(animal_dir=animal_dir, stem=f"{session_dir_id}{_LEGACY_STEM_SUFFIX}",
-                     recording_id=session_dir_id, session_dir_id=session_dir_id,
-                     is_primary=True)
+    return [d for d in sorted(_find_matching_directories(session_dir, animal_id))
+            if _find_matching_directories(d, '', '.kilosort')]
 
 
 def _select_recording(recordings: List[Recording], session_id: str,
@@ -346,11 +347,7 @@ def _matching_session_dirs(ephys_base: Path, session_id: str) -> List[Path]:
 
 
 class _ResolvedRecording(NamedTuple):
-    """A selected recording plus every recording found beside it.
-
-    ``siblings`` is empty when the animal directory has no kilosort output and
-    ``recording`` is the :func:`_legacy_recording` placeholder.
-    """
+    """A selected recording plus every recording found beside it (itself included)."""
     recording: Recording
     siblings: List[Recording]
 
@@ -366,6 +363,10 @@ def _resolve_session_animal(animal_id: str, session_id: str, config: dict) -> Li
     Callers must build paths from ``Recording.stem``, never as
     ``f"{session}_merged"``: that string is wrong for cohort 5 and for every
     non-primary recording.
+
+    Only animal directories holding ``*.kilosort`` output are considered
+    (:func:`_animal_dirs_with_kilosort`); one without it raises
+    :class:`RecordingNotFound` like a missing directory.
     """
     ephys_base = _root(config, 'ephys')
     session_matches = _matching_session_dirs(ephys_base, session_id)
@@ -378,28 +379,17 @@ def _resolve_session_animal(animal_id: str, session_id: str, config: dict) -> Li
     results: List[_ResolvedRecording] = []
     for session_dir in session_matches:
         session_dir_id = session_dir.name.replace('.rec', '')
-        animal_matches = _find_matching_directories(session_dir, animal_id)
+        animal_matches = _animal_dirs_with_kilosort(session_dir, animal_id)
         if not animal_matches:
             if only_one_day_dir:
-                raise RecordingNotFound(f"No animal directory found matching '{animal_id}' in {session_dir}")
+                raise RecordingNotFound(
+                    f"No animal directory with kilosort output matching '{animal_id}' in {session_dir}")
             continue
         if len(animal_matches) > 1:
-            # Since 2026-11 each cohort-7 day also holds ``rat4631``-style
-            # directories with only ``.analog``/``.timestampoffset`` exports, so
-            # '631' matches both. Prefer the one directory with kilosort output.
-            with_spikes = [d for d in animal_matches
-                           if _find_matching_directories(d, '', '.kilosort')]
-            if len(with_spikes) != 1:
-                raise ValueError(f"Multiple animal directories found matching '{animal_id}': {animal_matches}")
-            logger.debug("'%s' matched %s; using %s, the only one with kilosort output",
-                         animal_id, [d.name for d in animal_matches], with_spikes[0].name)
-            animal_matches = with_spikes
+            raise ValueError(f"Multiple animal directories found matching '{animal_id}': {animal_matches}")
         animal_dir = animal_matches[0]
 
         recordings = _discover_recordings(animal_dir, session_dir_id)
-        if not recordings:
-            results.append(_ResolvedRecording(_legacy_recording(animal_dir, session_dir_id), []))
-            continue
         try:
             selected = _select_recording(recordings, session_id, session_dir)
         except (ValueError, RecordingNotFound):
@@ -429,7 +419,7 @@ def resolve_recordings(animal_id: str, session_id: str,
     config = _config or load_config(config_path)
     found: List[Recording] = []
     for session_dir in _matching_session_dirs(_root(config, 'ephys'), session_id):
-        animal_matches = _find_matching_directories(session_dir, animal_id)
+        animal_matches = _animal_dirs_with_kilosort(session_dir, animal_id)
         if len(animal_matches) == 1:
             found.extend(_discover_recordings(animal_matches[0], session_dir.name.replace('.rec', '')))
     return found
@@ -496,8 +486,8 @@ def get_animals_and_sessions(config_path: Optional[str] = None,
     back to :class:`DataStorageManager`. For a primary recording the recording
     id equals the ``.rec`` directory name, so every id this function returned
     before it enumerated recordings is still returned, unchanged. An animal
-    directory with no kilosort output still gets a row (with the legacy
-    path), so "no ephys here" stays visible rather than silently absent.
+    directory with no ``*.kilosort`` output gets no row: it is not an ephys
+    animal (see :func:`_animal_dirs_with_kilosort`).
     """
     config = _config or load_config(config_path)
     ephys_base = _root(config, 'ephys')
@@ -513,9 +503,7 @@ def get_animals_and_sessions(config_path: Optional[str] = None,
             for animal_dir in sorted(session_dir.iterdir()):
                 if not (animal_dir.is_dir() and animal_dir.name.startswith('rat')):
                     continue
-                recordings = (_discover_recordings(animal_dir, session_dir_id)
-                              or [_legacy_recording(animal_dir, session_dir_id)])
-                for recording in recordings:
+                for recording in _discover_recordings(animal_dir, session_dir_id):
                     rows.append({
                         'session': recording.recording_id,
                         'animal': animal_dir.name,
@@ -846,8 +834,7 @@ class DataStorageManager:
         match = _RECORDING_STAMP_RE.search(recording.stem)
         self.recording_id = match.group(1) if match else None
         self.recording_ids_on_date = sorted({r.recording_id for r in siblings})
-        # None for the legacy placeholder: there is no recording on disk to be primary.
-        self.is_primary_recording = recording.is_primary if siblings else None
+        self.is_primary_recording = recording.is_primary
 
     def _report(self):
         self._warn_if_date_resolved_files_may_not_belong()

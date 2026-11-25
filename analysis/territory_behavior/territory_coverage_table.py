@@ -24,7 +24,8 @@ CACHE = "results/territory_behavior/cache"
 
 
 def chunk_window(path, sync):
-    ts = pd.read_csv(path, usecols=["timestamp"], encoding="utf-8-sig")["timestamp"].to_numpy()
+    from video.tracking_import import load_timestamps
+    ts = load_timestamps(path)
     e = sync.convert_behavior_to_ephys(np.array([ts.min(), ts.max()]) / 1e9)
     return float(e[0]), float(e[1])
 
@@ -47,16 +48,16 @@ def main():
     ap.add_argument("--dio_channel", type=int, default=1)
     a = ap.parse_args()
 
-    from ingestion.data_paths import DataStorageManager
+    from ingestion.data_paths import DataStorageManager, apt_chunk_tracking_file
     from ingestion.ephys_sync import DataSyncManager
     from ingestion.kilosort_data_import import load_kilosort_data
 
     chunks = {}
     for name in sorted(os.listdir(ROOT)):
         m = re.fullmatch(r"cohort7_(\d{8})_(\d{4})", name)
-        p = os.path.join(ROOT, name, "solution", "TQT_named.csv")
-        if m and os.path.exists(p):
-            chunks.setdefault(m.group(1), []).append((name, p))
+        p = apt_chunk_tracking_file(os.path.join(ROOT, name)) if m else None
+        if p is not None:
+            chunks.setdefault(m.group(1), []).append((name, str(p)))
     tracks = {n: pickle.load(open(f"{CACHE}/{n}.pkl", "rb")) for d in chunks for n, _ in chunks[d]}
     b = arena_bounds(list(tracks.values()))
     radius = a.hub_frac_diag * float(np.hypot(b[1] - b[0], b[3] - b[2]))

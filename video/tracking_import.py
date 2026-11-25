@@ -5,8 +5,8 @@ Provides VideoTrackingData (a dataclass holding parsed multi-object tracking
 data and frame timestamps) and load_tracking_data() to load it from a
 DataStorageManager or directly from a tracking CSV path.
 
-Two on-disk tracking formats are supported; :func:`detect_tracking_format`
-picks between them from the header row alone, and both land in the same
+Three on-disk tracking formats are supported; :func:`detect_tracking_format`
+picks between them from the header row alone, and all land in the same
 :class:`VideoTrackingData`:
 
 ``mask_metrics`` (long)
@@ -23,6 +23,16 @@ picks between them from the header row alone, and both land in the same
     ``rat635`` used everywhere else in the pipeline. Frames where an animal was
     not detected are blank and are dropped from that animal's DataFrame, which
     reproduces the long format's "no row for a missing detection".
+
+``apt_keypoints`` (long, the APT re-export of 2026-11)
+    ``<root>/cohort7_<date>_<HHMM>/solution_keypoints.csv``, space-separated,
+    one row per ``(t, tracklet_id)`` with the centre as ``x``/``y`` and
+    keypoints ``kp<i>_{x,y}`` in the same pixel space as ``apt_tqt``. It has
+    **no names and no timestamps**: tracklet ids map to names through the
+    cohort config's ``apt_tracklet_names``, and frame times come from a
+    ``<movie>_ts.npy`` (see :func:`load_apt_frame_timestamps`). An undetected
+    frame is a placeholder row (every keypoint ``-1``, ``original_id == -1``,
+    position carried forward) and is dropped, like a blank ``apt_tqt`` cell.
 """
 
 import logging
@@ -38,7 +48,10 @@ from ingestion._conventions import canonical_rat_id
 from ingestion._conventions import (  # noqa: F401 - re-exported for callers
     cohort_from_path, normalize_object_name, uses_name_normalization,
 )
-from ingestion.data_paths import DataStorageManager
+from ingestion.data_paths import (
+    APT_FRAME_TS_DIR, DataStorageManager, apt_tracklet_names, config_for_tracking_file,
+)
+from ingestion.errors import MissingCompanionFile
 from ingestion.ephys_sync import DataSyncManager
 
 logger = logging.getLogger(__name__)
@@ -74,6 +87,12 @@ class VideoTrackingData:
     #: tracked on differently-sized video, so they do **not** share a
     #: ``pixels_per_cm``.
     tracking_format: str = 'unknown'
+    #: Where ``timestamps`` came from: ``'column'`` (the file's own
+    #: ``timestamp`` column), ``'sidecar'`` (the mask-metrics ``*_ts.npy``),
+    #: ``'apt_ts_npy'`` (the APT video's real ``<movie>_ts.npy``),
+    #: ``'feral_anchor'`` (a frame clock rebuilt from FERAL bout boundaries:
+    #: median 0.5 ms, worst ~125 ms off), or None when none were loaded.
+    timestamp_source: Optional[str] = None
 
     # --- accessors ---------------------------------------------------------
 
@@ -186,6 +205,8 @@ def _read_tracking_csv(path: Path, **kwargs) -> pd.DataFrame:
     :func:`pandas.read_csv`.
     """
     suffix = path.suffix.lower()
+    if suffix == '.csv' and _header_is_space_separated(path):
+        return pd.read_csv(path, sep=' ', encoding='utf-8-sig', **kwargs)
     if suffix == '.csv':
         try:
             return pd.read_csv(path, encoding='utf-8-sig', **kwargs)
@@ -204,6 +225,20 @@ def _read_tracking_csv(path: Path, **kwargs) -> pd.DataFrame:
     raise ValueError(f"Unsupported tracking file format: {suffix}")
 
 
+def _header_is_space_separated(path: Path) -> bool:
+    """True if the first line has spaces and no comma (the APT keypoints export).
+
+    pandas would otherwise read such a ``.csv`` as one wide column without
+    raising, and the format would come out as ``unknown``.
+    """
+    try:
+        with open(path, 'r', encoding='utf-8-sig', errors='replace') as f:
+            first = f.readline()
+    except OSError:
+        return False
+    return ',' not in first and ' ' in first.strip()
+
+
 # ---------------------------------------------------------------------------
 # Tracking file formats
 # ---------------------------------------------------------------------------
@@ -214,8 +249,42 @@ TRACKING_FORMAT_MASK_METRICS = 'mask_metrics'
 #: Wide format: one row per frame, one column group per animal (APT/TQT).
 TRACKING_FORMAT_APT_TQT = 'apt_tqt'
 
-#: Header matched neither of the above.
+#: Long APT re-export: one row per (frame ``t``, numeric ``tracklet_id``),
+#: no names, no timestamps (``solution_keypoints.csv``).
+TRACKING_FORMAT_APT_KEYPOINTS = 'apt_keypoints'
+
+#: Header matched none of the above.
 TRACKING_FORMAT_UNKNOWN = 'unknown'
+
+#: Both APT generations. They share one pixel space (positions are identical
+#: where a movie was not re-solved), so a calibration, display label or
+#: trajectory group that applies to one applies to the other.
+APT_FORMATS = frozenset({TRACKING_FORMAT_APT_TQT, TRACKING_FORMAT_APT_KEYPOINTS})
+
+
+def is_apt_format(fmt: Optional[str]) -> bool:
+    """True for either APT export format."""
+    return fmt in APT_FORMATS
+
+
+def tracking_source(fmt: Optional[str]) -> str:
+    """The tracker behind a format: ``'apt'``, ``'manual'``, or the format itself.
+
+    Use this, not the raw format, to group or label trajectories: a day can
+    mix both APT generations, and they belong together.
+    """
+    if is_apt_format(fmt):
+        return 'apt'
+    if fmt == TRACKING_FORMAT_MASK_METRICS:
+        return 'manual'
+    return str(fmt)
+
+
+#: Columns that identify the APT keypoints export.
+_APT_KEYPOINTS_REQUIRED = frozenset({'t', 'tracklet_id', 'x', 'y'})
+
+#: A keypoints-export keypoint column: ``kp0_x`` ... ``kp3_y``.
+_APT_KP_COLUMN_RE = re.compile(r'^kp(?P<idx>\d+)_(?P<axis>[xy])$')
 
 #: A wide-format position column: ``rat4635_center_x``, ``rat4635_kp2_y``, ...
 #: The object part is greedy, so a name containing ``_center_x`` would still
@@ -233,6 +302,8 @@ def detect_tracking_format(columns: Iterable) -> str:
         return TRACKING_FORMAT_MASK_METRICS
     if 'timestamp' in cols and any(_APT_COLUMN_RE.match(c) for c in cols):
         return TRACKING_FORMAT_APT_TQT
+    if _APT_KEYPOINTS_REQUIRED <= cols:
+        return TRACKING_FORMAT_APT_KEYPOINTS
     return TRACKING_FORMAT_UNKNOWN
 
 
@@ -266,16 +337,25 @@ def _apt_column_groups(columns: Iterable) -> Dict[str, Dict[str, str]]:
 # Public loaders
 # ---------------------------------------------------------------------------
 
-def parse_tracking(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+def parse_tracking(df: pd.DataFrame, *,
+                   tracklet_names: Optional[Dict[int, str]] = None,
+                   timestamps: Optional[np.ndarray] = None,
+                   normalize_names: bool = True) -> Dict[str, pd.DataFrame]:
     """Split a tracking DataFrame into one DataFrame per tracked object.
 
     Dispatches on :func:`detect_tracking_format`: wide APT/TQT frames go to
-    :func:`parse_apt_tracking`, long mask-metrics frames are grouped by
-    ``object_name`` (with ``object_id`` / ``object_name`` dropped and the index
-    reset), which is the historical behaviour.
+    :func:`parse_apt_tracking`, APT keypoints frames to
+    :func:`parse_apt_keypoints` (which needs *tracklet_names*), and long
+    mask-metrics frames are grouped by ``object_name`` (with ``object_id`` /
+    ``object_name`` dropped and the index reset), which is the historical
+    behaviour.
     """
-    if detect_tracking_format(df.columns) == TRACKING_FORMAT_APT_TQT:
+    fmt = detect_tracking_format(df.columns)
+    if fmt == TRACKING_FORMAT_APT_TQT:
         return parse_apt_tracking(df)
+    if fmt == TRACKING_FORMAT_APT_KEYPOINTS:
+        return parse_apt_keypoints(df, tracklet_names, timestamps=timestamps,
+                                   normalize_names=normalize_names)
 
     required = ['object_name', 'object_id']
     missing = [c for c in required if c not in df.columns]
@@ -366,7 +446,172 @@ def parse_apt_tracking(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
     return result
 
 
-def read_tracking_centers(path: Union[str, Path]) -> pd.DataFrame:
+def _apt_keypoint_columns(columns: Iterable) -> List[str]:
+    """Keypoint columns ordered ``kp0_x, kp0_y, kp1_x, ...`` (the ``apt_tqt`` order)."""
+    found = [(int(m.group('idx')), m.group('axis'), c) for c in map(str, columns)
+             for m in [_APT_KP_COLUMN_RE.match(c)] if m]
+    return [c for _, _, c in sorted(found)]
+
+
+def apt_placeholder_mask(df: pd.DataFrame) -> pd.Series:
+    """Rows of a keypoints export that are fillers for an undetected frame.
+
+    The export writes a row for every ``(t, tracklet)``; where APT found
+    nothing, every keypoint is ``-1``, ``original_id`` is ``-1`` and ``x``/``y``
+    repeat an earlier position. Those positions are not observations — the
+    ``TQT_named.csv`` export of the same movies left exactly these frames
+    blank — so they must not reach an analysis.
+    """
+    mask = pd.Series(False, index=df.index)
+    kp_cols = _apt_keypoint_columns(df.columns)
+    if kp_cols:
+        mask |= (df[kp_cols] == -1).all(axis=1)
+    if 'original_id' in df.columns:
+        mask |= df['original_id'] == -1
+    return mask
+
+
+def parse_apt_keypoints(
+    df: pd.DataFrame,
+    tracklet_names: Optional[Dict[int, str]],
+    *,
+    timestamps: Optional[np.ndarray] = None,
+    normalize_names: bool = True,
+    source: str = 'APT keypoints file',
+) -> Dict[str, pd.DataFrame]:
+    """Split an APT keypoints export into one DataFrame per animal.
+
+    Each returned DataFrame has the ``apt_tqt`` layout: ``frame``,
+    ``timestamp`` (only if *timestamps* is given), ``center_x``, ``center_y``
+    and ``kp<i>_x``, ``kp<i>_y``.
+
+    Assumptions:
+        - **``frame`` is the file's ``t``, unchanged.** ``t`` is the 0-based
+          frame of the APT video, the same index ``VideoTrackingData.timestamps``
+          is looked up by, so nothing is renumbered.
+        - **Placeholder rows are dropped** (:func:`apt_placeholder_mask`), so an
+          undetected frame has no row, as in the other formats.
+        - **Every tracklet present must be named in *tracklet_names*.** An
+          unnamed one raises rather than passing through as a bare number,
+          which downstream code would turn into a fake ``rat<N>``.
+        - Names are passed through :func:`normalize_object_name` when
+          *normalize_names* is True (``rat4635`` -> ``rat635``).
+    """
+    missing = _APT_KEYPOINTS_REQUIRED - set(map(str, df.columns))
+    if missing:
+        raise ValueError(f"{source}: missing APT keypoints columns {sorted(missing)}")
+    if not tracklet_names:
+        raise ValueError(
+            f"{source}: the APT keypoints export names animals only by tracklet id, "
+            "and no tracklet->name map was given. Add 'apt_tracklet_names' to the "
+            "cohort config (config/*.json) or pass tracklet_names=.")
+    names = {int(k): str(v) for k, v in tracklet_names.items()}
+    if len(set(names.values())) != len(names):
+        raise ValueError(f"apt_tracklet_names maps two tracklets to one name: {names}")
+
+    df = df[~apt_placeholder_mask(df)]
+    present = sorted(int(t) for t in pd.unique(df['tracklet_id']))
+    unnamed = [t for t in present if t not in names]
+    if unnamed:
+        raise ValueError(
+            f"{source}: tracklet(s) {unnamed} have no entry in apt_tracklet_names "
+            f"(known: {sorted(names)}).")
+
+    kp_cols = _apt_keypoint_columns(df.columns)
+    frames_all = df['t'].to_numpy(dtype=np.int64)
+    if timestamps is not None and len(frames_all) and frames_all.max() >= len(timestamps):
+        raise ValueError(
+            f"{source}: frame {int(frames_all.max())} is beyond the {len(timestamps)} "
+            "frame timestamps; the timestamps file belongs to a different video.")
+
+    result: Dict[str, pd.DataFrame] = {}
+    for tracklet, rows in df.groupby('tracklet_id', sort=True):
+        raw = names[int(tracklet)]
+        name = normalize_object_name(raw) if normalize_names else raw
+        if name in result:
+            raise ValueError(f"Tracklets map to the same animal name {name!r}")
+        rows = rows.sort_values('t', kind='stable')
+        frames = rows['t'].to_numpy(dtype=np.int64)
+        columns: Dict[str, np.ndarray] = {'frame': frames}
+        if timestamps is not None:
+            columns['timestamp'] = np.asarray(timestamps)[frames]
+        columns['center_x'] = rows['x'].to_numpy(dtype=np.float64)
+        columns['center_y'] = rows['y'].to_numpy(dtype=np.float64)
+        for col in kp_cols:
+            columns[col] = rows[col].to_numpy(dtype=np.float64)
+        result[name] = pd.DataFrame(columns)
+    return result
+
+
+def _apt_movie_name(path: Path) -> str:
+    """``cohort7_<date>_<HHMM>`` for a file in a chunk dir (or its ``solution/``)."""
+    parent = path.parent
+    return parent.parent.name if parent.name.lower() == 'solution' else parent.name
+
+
+def apt_frame_timestamp_candidates(path: Union[str, Path],
+                                   config: Optional[dict] = None) -> List[tuple]:
+    """``(ts.npy path, source)`` candidates for an APT file, in lookup order.
+
+    See :func:`load_apt_frame_timestamps`; exposed so the clock builder can tell
+    which movies already have a real timestamps file.
+    """
+    path = Path(path)
+    movie = _apt_movie_name(path)
+    if config is None:
+        config = config_for_tracking_file(path)
+    chunk_dir = path.parent.parent if path.parent.name.lower() == 'solution' else path.parent
+    candidates = [(chunk_dir / f'{movie}_ts.npy', 'apt_ts_npy')]
+    if config and config.get('video'):
+        candidates.append((Path(config['video']) / 'social_videos4APT' / f'{movie}_ts.npy',
+                           'apt_ts_npy'))
+    candidates.append((APT_FRAME_TS_DIR / f'{movie}_ts.npy', 'feral_anchor'))
+    return candidates
+
+
+def load_apt_frame_timestamps(path: Union[str, Path],
+                              config: Optional[dict] = None):
+    """Frame timestamps (int64 Linux ns, indexed by frame) for an APT keypoints file.
+
+    Returns ``(timestamps, source)``. Looked up in this order:
+
+    1. ``<movie>_ts.npy`` in the file's chunk directory — ``'apt_ts_npy'``;
+    2. ``<video root>/social_videos4APT/<movie>_ts.npy`` — ``'apt_ts_npy'``;
+    3. ``.cache/apt_frame_ts/<movie>_ts.npy``, a clock rebuilt from FERAL bout
+       boundaries by ``python -m ingestion.apt_frame_clock --build`` —
+       ``'feral_anchor'``.
+
+    The raw-video ``social_videos/RatCity_*_40Hz_ts.npy`` is deliberately not
+    a fallback: it has a few frames fewer than the APT video, and indexing it by
+    APT frame is ~200 ms off.
+
+    *config* (for the video root) defaults to the cohort config whose tracking
+    roots contain *path*.
+
+    Raises:
+        MissingCompanionFile: none of the three exists.
+    """
+    path = Path(path)
+    movie = _apt_movie_name(path)
+    candidates = apt_frame_timestamp_candidates(path, config)
+    for candidate, source in candidates:
+        if candidate.is_file():
+            return np.asarray(np.load(candidate)).astype(np.int64, copy=False), source
+    raise MissingCompanionFile(
+        f"No frame timestamps for APT movie {movie}: looked for "
+        + ", ".join(str(c) for c, _ in candidates)
+        + ". Run `python -m ingestion.apt_frame_clock --build` to rebuild the clock "
+        "from FERAL bout boundaries.")
+
+
+def _tracklet_names_for(path: Path, tracklet_names=None, config=None):
+    if tracklet_names:
+        return tracklet_names
+    return apt_tracklet_names(config if config is not None else config_for_tracking_file(path))
+
+
+def read_tracking_centers(path: Union[str, Path],
+                          tracklet_names: Optional[Dict[int, str]] = None) -> pd.DataFrame:
     """Long ``(frame, object_name, center_x, center_y)`` view of either format.
 
     Reads only the columns it needs, so it stays cheap on the ~100 MB APT
@@ -378,6 +623,20 @@ def read_tracking_centers(path: Union[str, Path]) -> pd.DataFrame:
     path = Path(path)
     header = read_tracking_header(path)
     fmt = detect_tracking_format(header)
+
+    if fmt == TRACKING_FORMAT_APT_KEYPOINTS:
+        wanted = ['t', 'tracklet_id', 'x', 'y', 'original_id'] + _apt_keypoint_columns(header)
+        long_df = _read_tracking_csv(path, usecols=[c for c in wanted if c in header])
+        parsed = parse_apt_keypoints(
+            long_df, _tracklet_names_for(path, tracklet_names),
+            normalize_names=uses_name_normalization(path), source=str(path))
+        if not parsed:
+            return pd.DataFrame(columns=['frame', 'object_name', 'center_x', 'center_y'])
+        return pd.concat(
+            [obj[['frame', 'center_x', 'center_y']].assign(object_name=name)
+             for name, obj in parsed.items()],
+            ignore_index=True,
+        )[['frame', 'object_name', 'center_x', 'center_y']]
 
     if fmt == TRACKING_FORMAT_APT_TQT:
         centre_cols = [c for c in header
@@ -406,8 +665,15 @@ def load_timestamps(tracking_file_path: Union[str, Path]) -> np.ndarray:
     tracking file's stem with ``_mask_metrics`` replaced by ``_ts`` (e.g.
     ``RatCity_20251210_1359_40Hz_mask_metrics.csv`` →
     ``RatCity_20251210_1359_40Hz_ts.npy``). Wide APT/TQT files carry their own
-    ``timestamp`` column, which is read directly.
+    ``timestamp`` column, which is read directly. APT keypoints files have
+    none; see :func:`load_apt_frame_timestamps`.
     """
+    return load_timestamps_with_source(tracking_file_path)[0]
+
+
+def load_timestamps_with_source(tracking_file_path: Union[str, Path],
+                                config: Optional[dict] = None):
+    """:func:`load_timestamps` plus where they came from (see ``VideoTrackingData.timestamp_source``)."""
     path = Path(tracking_file_path)
     if not path.exists():
         raise FileNotFoundError(f"Tracking file not found: {path}")
@@ -418,18 +684,19 @@ def load_timestamps(tracking_file_path: Union[str, Path]) -> np.ndarray:
     if '_mask_metrics' in stem:
         ts_path = path.parent / f"{stem.replace('_mask_metrics', '_ts')}.npy"
         if ts_path.exists():
-            return np.load(ts_path)
+            return np.load(ts_path), 'sidecar'
 
     try:
-        has_timestamp_column = (
-            detect_tracking_format(read_tracking_header(path))
-            == TRACKING_FORMAT_APT_TQT)
+        fmt = detect_tracking_format(read_tracking_header(path))
     except Exception as e:          # unreadable header: fall through to raise
         logger.debug("Could not read header of %s: %s", path.name, e)
-        has_timestamp_column = False
+        fmt = TRACKING_FORMAT_UNKNOWN
 
-    if has_timestamp_column:
-        return _read_tracking_csv(path, usecols=['timestamp'])['timestamp'].to_numpy()
+    if fmt == TRACKING_FORMAT_APT_TQT:
+        return (_read_tracking_csv(path, usecols=['timestamp'])['timestamp'].to_numpy(),
+                'column')
+    if fmt == TRACKING_FORMAT_APT_KEYPOINTS:
+        return load_apt_frame_timestamps(path, config)
 
     raise FileNotFoundError(
         f"No frame timestamps found for {path}: no '*_ts.npy' sibling and no "
@@ -441,6 +708,7 @@ def load_tracking_data(
     source: Union[DataStorageManager, str, Path],
     file_index: int = 0,
     load_ts: bool = True,
+    tracklet_names: Optional[Dict[int, str]] = None,
 ) -> VideoTrackingData:
     """Load tracking data into a :class:`VideoTrackingData`.
 
@@ -457,11 +725,16 @@ def load_tracking_data(
         If True, attempt to load frame timestamps. For long mask-metrics files
         that means the paired ``*_ts.npy``; wide APT/TQT files carry a
         ``timestamp`` column, which is taken from the frame already in memory
-        rather than re-read from disk.
+        rather than re-read from disk. APT keypoints files use
+        :func:`load_apt_frame_timestamps`; ``timestamp_source`` records which.
+    tracklet_names : dict, optional
+        Tracklet id -> animal name for APT keypoints files. Defaults to the
+        cohort config's ``apt_tracklet_names`` (the manager's config, or for a
+        bare path the config whose tracking roots contain it).
 
     Notes
     -----
-    Both on-disk formats are accepted and produce the same object; see the
+    All on-disk formats are accepted and produce the same object; see the
     module docstring. One call loads **one file**. The APT exports are 30-minute
     chunks, so a date can resolve to several of them — select with *file_index*
     rather than expecting a whole session in one object, and check which
@@ -481,10 +754,12 @@ def load_tracking_data(
         path = Path(files[file_index])
         animal_id = source.animal_id
         session_id = source.session_id
+        config = source._config
     else:
         path = Path(source)
         animal_id = "unknown_animal"
         session_id = "unknown_session"
+        config = None
 
     if not path.exists():
         raise FileNotFoundError(f"Tracking file not found: {path}")
@@ -494,17 +769,38 @@ def load_tracking_data(
     if df.empty:
         logger.warning("Loaded tracking DataFrame is empty: %s", path)
     fmt = detect_tracking_format(df.columns)
-    parsed = parse_tracking(df)
 
     timestamps = None
-    if load_ts:
+    timestamp_source = None
+    if fmt == TRACKING_FORMAT_APT_KEYPOINTS:
+        if config is None:
+            config = config_for_tracking_file(path)
+        if load_ts:
+            try:
+                timestamps, timestamp_source = load_apt_frame_timestamps(path, config)
+            except FileNotFoundError as e:
+                logger.warning("Could not load timestamps for %s: %s", path.name, e)
+        # A timestamps array too short for the frames raises here: it means the
+        # ts file belongs to another video, and padding would misplace frames.
+        parsed = parse_apt_keypoints(
+            df, _tracklet_names_for(path, tracklet_names, config),
+            timestamps=timestamps, normalize_names=uses_name_normalization(path),
+            source=str(path))
+        if timestamp_source == 'feral_anchor' and len(df):
+            # A rebuilt clock covers a full 72000-frame chunk; keep the file's frames.
+            timestamps = timestamps[:int(df['t'].max()) + 1]
+    else:
+        parsed = parse_tracking(df)
+
+    if load_ts and fmt != TRACKING_FORMAT_APT_KEYPOINTS:
         if fmt == TRACKING_FORMAT_APT_TQT and 'timestamp' in df.columns:
             # Already in memory, and guaranteed row-aligned with the frame
             # numbering parse_apt_tracking assigned.
             timestamps = df['timestamp'].to_numpy()
+            timestamp_source = 'column'
         else:
             try:
-                timestamps = load_timestamps(path)
+                timestamps, timestamp_source = load_timestamps_with_source(path)
             except (FileNotFoundError, ValueError) as e:
                 logger.warning("Could not load timestamps for %s: %s", path.name, e)
 
@@ -519,6 +815,7 @@ def load_tracking_data(
         timestamps=timestamps,
         tracking_file=path,
         tracking_format=fmt,
+        timestamp_source=timestamp_source,
     )
 
 

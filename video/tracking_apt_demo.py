@@ -1,4 +1,4 @@
-"""Demo: load a wide APT/TQT tracking file and plot the trajectories.
+"""Demo: load an APT tracking file (either export) and plot the trajectories.
 
 Runs against a real file on ``//nearline`` (no synthetic data), prints the
 checks that say "this parsed correctly", and writes two figures.
@@ -17,9 +17,14 @@ Loading a wide file can go wrong in ways that produce a perfectly plausible
 DataFrame, so the demo asserts the things a plot would not reveal:
 
 ``format``
-    Detected from the header alone. If the byte-order mark were not stripped
-    the first column would be ``'﻿timestamp'`` and detection would fall
-    back to ``unknown``.
+    Detected from the header alone: ``apt_keypoints`` for the current
+    ``solution_keypoints.csv`` (space-separated; read as one column if the
+    delimiter were not sniffed), ``apt_tqt`` for an archived ``TQT_named.csv``
+    (whose byte-order mark, if not stripped, would hide ``timestamp``).
+``timestamp source``
+    ``apt_ts_npy`` (the APT video's real per-frame times) or ``feral_anchor``
+    (rebuilt from FERAL bout boundaries, ~0.5 ms median error); see
+    ``ingestion/apt_frame_clock.py``.
 ``object names``
     Must be ``rat635``, not the file's ``rat4635`` — otherwise
     ``get_object_data('rat631')`` returns ``None`` and an analysis silently
@@ -35,7 +40,7 @@ DataFrame, so the demo asserts the things a plot would not reveal:
 
 Plots
 -----
-Both are named after the source file, e.g. ``TQT_named_trajectories.png``.
+Both are named after the source file, e.g. ``solution_keypoints_trajectories.png``.
 
 ``<stem>_trajectories.png``
     One panel per animal — identity comes from the facet, so colour is free to
@@ -68,7 +73,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from video.tracking_import import (  # noqa: E402
-    TRACKING_FORMAT_APT_TQT,
+    is_apt_format,
     load_tracking_data,
 )
 
@@ -76,7 +81,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TRACKING_FILE = (
     '//nearline/karpova/TervoLab/analysis/Tracking/APT/cohort7/'
-    'cohort7_20251216_1159/solution/TQT_named.csv'
+    'cohort7_20251216_1159/solution_keypoints.csv'
 )
 
 # Tokens from the validated reference palette (references/palette.md).
@@ -116,6 +121,7 @@ def report(tracking) -> dict:
 
     print(f"\nfile        {tracking.tracking_file}")
     print(f"format      {tracking.tracking_format}")
+    print(f"timestamps  {tracking.timestamp_source}")
     print(f"objects     {len(names)}  {names}")
     print(f"frames      {len(timestamps):,}")
     print(f"clock       int64 ns = {timestamps.dtype == np.int64}, "
@@ -364,19 +370,14 @@ def plot_checks(tracking, facts, out_path, window_seconds=120.0):
 # ---------------------------------------------------------------------------
 
 def find_apt_files(config_path=None):
-    """Every ``TQT_named.csv`` under the configured tracking roots.
+    """The APT export of every chunk directory under the configured tracking roots.
 
     Goes through the same root list and the same filename/subdirectory
     constants that :func:`ingestion.data_paths.get_tracking_files_by_date`
     uses, so what this demo covers cannot drift from what the pipeline can
     actually resolve.
     """
-    from ingestion.data_paths import (
-        _DATELESS_TRACKING_FILENAMES,
-        _DATELESS_TRACKING_SUBDIRS,
-        load_config,
-        _tracking_roots,
-    )
+    from ingestion.data_paths import apt_chunk_tracking_file, load_config, _tracking_roots
 
     found, seen = [], set()
     for root in _tracking_roots(load_config(config_path)):
@@ -385,19 +386,17 @@ def find_apt_files(config_path=None):
         for child in sorted(root.iterdir(), key=lambda p: p.name):
             if not child.is_dir():
                 continue
-            for sub in _DATELESS_TRACKING_SUBDIRS:
-                for filename in _DATELESS_TRACKING_FILENAMES:
-                    candidate = child / sub / filename
-                    if candidate.is_file() and str(candidate) not in seen:
-                        seen.add(str(candidate))
-                        found.append(candidate)
+            candidate = apt_chunk_tracking_file(child)
+            if candidate is not None and str(candidate) not in seen:
+                seen.add(str(candidate))
+                found.append(candidate)
     return found
 
 
 def run_one(path, out_dir, pixels_per_cm=None):
     """Load one tracking file, print its checks, write both figures."""
     tracking = load_tracking_data(path)
-    if tracking.tracking_format != TRACKING_FORMAT_APT_TQT:
+    if not is_apt_format(tracking.tracking_format):
         print(f"\nnote: this is a '{tracking.tracking_format}' file, not an APT "
               "export. The demo runs either way.")
     if tracking.timestamps is None:
@@ -423,8 +422,8 @@ def main(argv=None):
     source.add_argument('--session', default=None,
                         help='session id; resolves through DataStorageManager')
     source.add_argument('--all', action='store_true',
-                        help='process every TQT_named.csv under the configured '
-                             'tracking roots')
+                        help='process the APT export of every chunk under the '
+                             'configured tracking roots')
     parser.add_argument('--animal', default='631',
                         help='animal id, only used to resolve --session')
     parser.add_argument('--file-index', type=int, default=0,
@@ -448,7 +447,7 @@ def main(argv=None):
     if args.all:
         paths = find_apt_files(args.config)
         if not paths:
-            raise SystemExit('no TQT_named.csv found under the configured '
+            raise SystemExit('no APT export found under the configured '
                              'tracking roots')
         print(f"{len(paths)} APT file(s):")
         for path in paths:

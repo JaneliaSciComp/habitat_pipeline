@@ -6,5 +6,19 @@
     "//nearline/karpova/TervoLab/analysis/Tracking/APT/cohort7"
   ],
   "events": "//nearline/karpova/TervoLab/analysis/RatCityBehavior/cohort7",
-  "pixels_per_cm": 4.0
+  "pixels_per_cm": 4.0,
+  "apt_tracklet_names": {
+    "1": "rat4620",
+    "2": "rat4631",
+    "3": "rat4621",
+    "4": "rat4613",
+    "5": "rat4633",
+    "6": "rat4617",
+    "7": "rat4615",
+    "8": "rat4629",
+    "9": "rat4630",
+    "10": "rat4634",
+    "11": "rat4635",
+    "12": "rat4616"
+  }
 }

@@ -20,7 +20,8 @@ Per session, roughly in order of expense:
     worth doing up front rather than discovering the failure half an hour into
     an analysis.
 ``probe_tracking``
-    Reads the merged ``*_mask_metrics.csv`` or the wide APT ``TQT_named.csv``.
+    Reads the merged ``*_mask_metrics.csv`` or an APT export
+    (``solution_keypoints.csv``, or the older wide ``TQT_named.csv``).
     These run to ~90-100 MB, so this deliberately does **not** call
     ``load_tracking_data`` — it goes through
     ``video.tracking_import.read_tracking_centers``, which picks the format off
@@ -383,7 +384,7 @@ def probe_tracking(dsm, sync=None, *, durations: Optional[Mapping[str, float]] =
           never ``attached`` — a check that could not run must not report a
           pass.
     """
-    from video.tracking_import import (_compute_speed, load_timestamps,
+    from video.tracking_import import (_compute_speed, load_timestamps_with_source,
                                        read_tracking_centers)
 
     out: Dict[str, Any] = {
@@ -397,6 +398,7 @@ def probe_tracking(dsm, sync=None, *, durations: Optional[Mapping[str, float]] =
         'coverage_exceeds_recording': [], 'n_objects': 0,
         'identity_resolved_animals': [], 'n_identity_resolved_animals': 0,
         'unresolved_object_names': [], 'objects': {}, 'error': None,
+        'timestamp_source': None,
     }
     try:
         files = dsm.get_tracking_files() or []
@@ -434,7 +436,11 @@ def probe_tracking(dsm, sync=None, *, durations: Optional[Mapping[str, float]] =
     out['file_present_for_date'] = True
     timestamps = None
     with contextlib.suppress(Exception):
-        timestamps = load_timestamps(path)
+        timestamps, out['timestamp_source'] = load_timestamps_with_source(
+            path, getattr(dsm, '_config', None))
+    if out['timestamp_source'] == 'feral_anchor' and timestamps is not None and len(frame):
+        # A rebuilt clock covers a full 72000-frame chunk; trim to the file's frames.
+        timestamps = timestamps[:int(frame['frame'].max()) + 1]
     if timestamps is not None and len(timestamps):
         out['n_frames'] = int(len(timestamps))
         seconds = np.asarray(timestamps, dtype=np.float64)

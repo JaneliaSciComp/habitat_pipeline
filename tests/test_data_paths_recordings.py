@@ -21,6 +21,7 @@ directory trees mirroring the real layouts; nothing here touches //nearline.
 """
 import json
 import logging
+from pathlib import Path
 
 import pytest
 
@@ -233,6 +234,28 @@ class TestAmbiguityFailsClosed:
             get_kilosort_path('rat613', '20251216', config_path=config)
         assert '20251216_144334' in str(excinfo.value)
         assert '20251216_194334' in str(excinfo.value)
+
+
+class TestApt4DigitSiblingDirectories:
+    """Since 2026-11 each day also holds ``rat4631``-style directories with only
+    ``.analog``/``.timestampoffset`` exports, which ``'631'`` matches too."""
+
+    def _add_sibling(self, cohort7_config, name='rat4631'):
+        day = Path(json.loads(Path(cohort7_config).read_text())['ephys']) / '20251216_094334.rec'
+        sib = day / name / '20251216_094334_merged.analog'
+        sib.mkdir(parents=True)
+        return day
+
+    def test_bare_id_resolves_to_the_directory_with_kilosort(self, cohort7):
+        self._add_sibling(cohort7)
+        paths = get_kilosort_path('631', '20251216', config_path=cohort7)
+        assert paths and all(Path(p).parts[-3] == 'rat631' for p in paths)
+
+    def test_two_directories_with_kilosort_still_raise(self, cohort7):
+        day = self._add_sibling(cohort7)
+        _make_recording(day / 'rat4631', '20251216_094334_merged')
+        with pytest.raises(ValueError, match='Multiple animal directories'):
+            get_kilosort_path('631', '20251216', config_path=cohort7)
 
 
 class TestNoKilosortOutputAtAll:

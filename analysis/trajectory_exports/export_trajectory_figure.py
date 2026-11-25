@@ -25,7 +25,7 @@ from analysis.trajectory_exports.export_embedding_video import load_events  # no
 
 #: An event is placed only if a tracked frame lies this close (as in the dashboard).
 EVENT_SNAP_S = 1.0
-FORMAT_NAMES = {"apt_tqt": "APT", "mask_metrics": "manual"}
+FORMAT_NAMES = {"apt_tqt": "APT", "apt_keypoints": "APT", "mask_metrics": "manual"}
 
 
 def main(argv=None) -> None:

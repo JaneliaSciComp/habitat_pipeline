@@ -42,8 +42,10 @@ logger = logging.getLogger(__name__)
 EXPLORE_CACHE_VERSION = 2
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".gui_cache" / "explore"
 
-#: Bump when the cached trajectory's shape changes (2: every tracking format kept).
-TRAJECTORY_VERSION = 2
+#: Bump when the cached trajectory's shape changes (2: every tracking format kept;
+#: 3: APT re-exported as solution_keypoints.csv for all 322 chunks, so a v2
+#: trajectory may lack APT chunks that are now found).
+TRAJECTORY_VERSION = 3
 
 #: The bin sizes the explore sliders start at; only these are cached.
 DEFAULT_RASTER_BIN = 1.0
@@ -514,7 +516,7 @@ _APT_CHUNK_SECONDS = 30 * 60
 
 
 def _apt_chunk_epoch_span(path: Path):
-    """Wall-clock span of an APT ``TQT_named.csv`` from its directory name, or None."""
+    """Wall-clock span of an APT export (either generation) from its directory name, or None."""
     for part in (path.parent.name, path.parent.parent.name):
         m = _APT_CHUNK_RE.search(part)
         if m:
@@ -538,12 +540,14 @@ def load_focal_trajectory(tracking_files: Sequence[Path], sync, animal_id: str,
     APT chunks whose directory time cannot overlap the window are skipped
     before loading (each is a ~100 MB CSV on the share).
     """
-    from video.tracking_import import load_tracking_data, resolve_tracking_on_ephys_clock
+    from ingestion.data_paths import is_apt_tracking_file
+    from video.tracking_import import (TRACKING_FORMAT_APT_TQT, is_apt_format,
+                                       load_tracking_data, resolve_tracking_on_ephys_clock)
 
     bare = animal_id[3:] if animal_id.startswith("rat") else animal_id
     by_format: Dict[str, list] = {}
     for path in map(Path, tracking_files):
-        if path.name.lower() == "tqt_named.csv":
+        if is_apt_tracking_file(path):
             span = _apt_chunk_epoch_span(path)
             if span is not None:
                 a, b = sync.convert_behavior_to_ephys(np.array(span))
@@ -563,7 +567,11 @@ def load_focal_trajectory(tracking_files: Sequence[Path], sync, animal_id: str,
             df = resolved.get(bare)
         if df is None or df.empty:
             continue
-        by_format.setdefault(tracking.tracking_format, []).append(df[["t", "x", "y"]])
+        # Both APT generations share one pixel space, so they group under one
+        # key; it stays "apt_tqt" because that string is part of cached CEBRA
+        # fit keys, which a rename would orphan.
+        key = TRACKING_FORMAT_APT_TQT if is_apt_format(tracking.tracking_format)             else tracking.tracking_format
+        by_format.setdefault(key, []).append(df[["t", "x", "y"]])
 
     if not by_format:
         return None

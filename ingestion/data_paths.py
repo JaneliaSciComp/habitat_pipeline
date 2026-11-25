@@ -22,6 +22,7 @@ network share.
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Callable, Dict, List, NamedTuple, Optional, TypeVar
 
@@ -48,9 +49,18 @@ logger = logging.getLogger(__name__)
 # v4 -> v5: event resolution became strict (one ``<date>_behavior_event_df*.csv``
 # in the dated directory), so a v4 entry's ``behavioral_event_files`` may hold
 # files the resolver now rejects.
-_CACHE_VERSION = 5
+# v5 -> v6: the APT tree was re-exported (2026-11) with ``solution_keypoints.csv``
+# in each chunk directory and no ``solution/TQT_named.csv``, so a v5 entry's
+# APT tracking paths no longer exist.
+_CACHE_VERSION = 6
 _DEFAULT_CACHE_DIR = Path(__file__).parent.parent / ".cache" / "data_paths"
 _CONFIG_DIR = Path(__file__).parent.parent / "config"
+
+#: Per-movie APT frame clocks rebuilt from FERAL bout boundaries, for movies
+#: whose real ``<movie>_ts.npy`` is not on the share. Written by
+#: ``python -m ingestion.apt_frame_clock --build``; read by
+#: :func:`video.tracking_import.load_apt_frame_timestamps` as the last resort.
+APT_FRAME_TS_DIR = Path(__file__).parent.parent / ".cache" / "apt_frame_ts"
 
 #: Prefix assumed when an animal directory holds no ``*.kilosort`` directory at
 #: all. Preserves the pre-recording-discovery behaviour of returning a path
@@ -61,17 +71,42 @@ _LEGACY_STEM_SUFFIX = '_merged'
 _VIDEO_EXTENSIONS = ['.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v']
 _TRACKING_EXTENSIONS = ['.csv', '.h5', '.hdf5', '.mat', '.pkl', '.npz', '.json', '.txt']
 
-#: Tracking files whose *name* carries no date because their *directory* does.
-#: The APT/TQT exports land at
-#: ``<root>/cohort7_<date>_<HHMM>/solution/TQT_named.csv``, so the date-glob
-#: below would never see them. Only the ``_named`` solution is listed: the
-#: sibling ``TQT.csv`` uses numeric tracklet ids instead of animal names, and an
-#: analysis cannot tell which rat is which from it.
-_DATELESS_TRACKING_FILENAMES = ('TQT_named.csv',)
+#: Tracking files whose *name* carries no date because their *directory* does,
+#: in order of preference. APT exports land in ``<root>/cohort7_<date>_<HHMM>/``,
+#: so the date-glob below would never see them:
+#:
+#: - ``solution_keypoints.csv`` (the current export, 2026-11): long, numeric
+#:   tracklet ids, no timestamps. Names come from the config's
+#:   ``apt_tracklet_names`` and frame times from a ``*_ts.npy``; see
+#:   :func:`video.tracking_import.parse_apt_keypoints`.
+#: - ``solution/TQT_named.csv`` (the earlier export, kept under ``archive/``):
+#:   wide, named, with a ``timestamp`` column. Its sibling ``TQT.csv`` is never
+#:   read, because nothing next to it says which tracklet is which rat.
+#:
+#: Only the first file found in a chunk directory is used, so a chunk holding
+#: both exports is offered once.
+_DATELESS_TRACKING_FILENAMES = ('solution_keypoints.csv', 'TQT_named.csv')
 
 #: Subdirectories of a date-named tracking directory to look inside for the
 #: files above, ``'.'`` meaning the directory itself.
 _DATELESS_TRACKING_SUBDIRS = ('.', 'solution')
+
+
+def is_apt_tracking_file(path) -> bool:
+    """True if *path* is named like an APT export (either generation)."""
+    name = Path(path).name.lower()
+    return any(name == f.lower() for f in _DATELESS_TRACKING_FILENAMES)
+
+
+def apt_chunk_tracking_file(chunk_dir) -> Optional[Path]:
+    """The preferred APT tracking file in one ``cohort7_<date>_<HHMM>`` directory, or None."""
+    chunk_dir = Path(chunk_dir)
+    for filename in _DATELESS_TRACKING_FILENAMES:
+        for sub in _DATELESS_TRACKING_SUBDIRS:
+            candidate = chunk_dir / sub / filename
+            if candidate.is_file():
+                return candidate
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +138,43 @@ def load_config(config_path: Optional[str] = None) -> dict:
         raise FileNotFoundError(f"Configuration file not found: {path}")
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid JSON in configuration file: {e}")
+
+
+def _norm_path(path) -> str:
+    r"""Comparable form of a path: ``//nearline/x`` and ``\\nearline\x`` agree."""
+    return os.path.normcase(os.path.normpath(str(path))).replace('\\', '/').rstrip('/')
+
+
+def config_for_tracking_file(path) -> Optional[dict]:
+    """The cohort config whose ``tracking`` roots contain *path*, or None.
+
+    Lets a loader handed a bare tracking path (the GUI, the manifest probe,
+    analysis scripts) find the per-cohort settings an APT keypoints file
+    needs: ``apt_tracklet_names`` and the ``video`` root. Every
+    ``config/*.json`` is checked; ``default_paths.json`` first.
+    """
+    target = _norm_path(path)
+    configs = sorted(_CONFIG_DIR.glob('*.json'),
+                     key=lambda p: (p.name != 'default_paths.json', p.name))
+    for cfg_path in configs:
+        try:
+            config = json.loads(cfg_path.read_text())
+        except (OSError, ValueError):
+            continue
+        if 'tracking' not in config:
+            continue
+        for root in _tracking_roots(config):
+            root_s = _norm_path(root)
+            if target == root_s or target.startswith(root_s + '/'):
+                return config
+    return None
+
+
+def apt_tracklet_names(config: Optional[dict]) -> Optional[Dict[int, str]]:
+    """``{tracklet_id: raw name}`` from a config's ``apt_tracklet_names``, or None."""
+    if not config or not config.get('apt_tracklet_names'):
+        return None
+    return {int(k): str(v) for k, v in config['apt_tracklet_names'].items()}
 
 
 def _root(config: dict, key: str) -> Path:
@@ -312,7 +384,16 @@ def _resolve_session_animal(animal_id: str, session_id: str, config: dict) -> Li
                 raise RecordingNotFound(f"No animal directory found matching '{animal_id}' in {session_dir}")
             continue
         if len(animal_matches) > 1:
-            raise ValueError(f"Multiple animal directories found matching '{animal_id}': {animal_matches}")
+            # Since 2026-11 each cohort-7 day also holds ``rat4631``-style
+            # directories with only ``.analog``/``.timestampoffset`` exports, so
+            # '631' matches both. Prefer the one directory with kilosort output.
+            with_spikes = [d for d in animal_matches
+                           if _find_matching_directories(d, '', '.kilosort')]
+            if len(with_spikes) != 1:
+                raise ValueError(f"Multiple animal directories found matching '{animal_id}': {animal_matches}")
+            logger.debug("'%s' matched %s; using %s, the only one with kilosort output",
+                         animal_id, [d.name for d in animal_matches], with_spikes[0].name)
+            animal_matches = with_spikes
         animal_dir = animal_matches[0]
 
         recordings = _discover_recordings(animal_dir, session_dir_id)
@@ -564,12 +645,13 @@ def get_tracking_files_by_date(session_id: str, config_path: Optional[str] = Non
     - files whose *name* contains the date (``*_mask_metrics.csv`` and friends),
       matched by glob in the search directory;
     - files whose *directory* carries the date but whose name does not
-      (``<root>/cohort7_<date>_<HHMM>/solution/TQT_named.csv``), matched by
-      name against :data:`_DATELESS_TRACKING_FILENAMES`.
+      (``<root>/cohort7_<date>_<HHMM>/solution_keypoints.csv``, or the older
+      ``solution/TQT_named.csv``), matched by name against
+      :data:`_DATELESS_TRACKING_FILENAMES`, at most one per directory.
 
     Returns paths ordered by configured root first, then by filename, then by
     full path (which is what separates same-named files such as several
-    ``TQT_named.csv``).
+    ``solution_keypoints.csv``).
     """
     config = _config or load_config(config_path)
     if 'tracking' not in config:
@@ -600,11 +682,9 @@ def get_tracking_files_by_date(session_id: str, config_path: Optional[str] = Non
             except OSError as e:
                 raise RuntimeError(f"Error accessing directory {search_directory}: {e}")
             if date_scoped:
-                for sub in _DATELESS_TRACKING_SUBDIRS:
-                    for filename in _DATELESS_TRACKING_FILENAMES:
-                        candidate = search_directory / sub / filename
-                        if wanted(candidate):
-                            per_root.append(candidate)
+                candidate = apt_chunk_tracking_file(search_directory)
+                if candidate is not None and wanted(candidate):
+                    per_root.append(candidate)
         for path in sorted(per_root, key=lambda p: (p.name, str(p))):
             found.setdefault(str(path), path)
     return list(found.values())
@@ -931,6 +1011,14 @@ class DataStorageManager:
         """
         val = self._config.get("pixels_per_cm")
         return None if val is None else float(val)
+
+    def get_apt_tracklet_names(self) -> Optional[Dict[int, str]]:
+        """APT tracklet id -> raw animal name (``apt_tracklet_names``), or None.
+
+        The APT keypoints export names animals only by tracklet number, so this
+        map is what turns tracklet 11 into ``rat4635`` (later ``rat635``).
+        """
+        return apt_tracklet_names(self._config)
 
     @property
     def sync_method(self) -> str:

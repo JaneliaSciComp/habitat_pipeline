@@ -27,7 +27,7 @@ from gui import explore_cache as xc  # noqa: E402
 from analysis.trajectory_exports.export_embedding_video import load_events  # noqa: E402
 
 EVENT_SNAP_S = 1.0       # an event is placed only if a tracked frame lies this close
-FORMAT_NAMES = {"apt_tqt": "APT", "mask_metrics": "manual"}
+FORMAT_NAMES = {"apt_tqt": "APT", "apt_keypoints": "APT", "mask_metrics": "manual"}
 MAX_PATH_POINTS = 25000  # path samples drawn; the full-rate track is only used for the cursor
 TRAIL_S = 10.0           # length of the emphasised recent trail, in recording seconds
 MAX_GAP_S = 2.0          # no cursor / no line across a tracking gap longer than this

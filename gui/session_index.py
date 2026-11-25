@@ -18,7 +18,8 @@ Sources, cheapest first:
 
 Definitions the table uses:
 
-- a video chunk is **tracked** when an APT ``TQT_named.csv`` exists for the
+- a video chunk is **tracked** when an APT export (``solution_keypoints.csv``,
+  or the older ``TQT_named.csv``) exists for the
   same ``<date>_<HHMM>``, or a mask-metrics file's ``_ts.npy`` span overlaps it;
 - a chunk is **annotated** when at least one scored event's ``ts_start`` falls
   inside its span;
@@ -54,6 +55,7 @@ from ingestion.data_paths import (
     get_animals_and_sessions,
     get_event_files_by_date,
     get_tracking_files_by_date,
+    is_apt_tracking_file,
 )
 
 logger = logging.getLogger(__name__)
@@ -274,7 +276,7 @@ def tracking_spans(files: Sequence[Path],
     manual = []
     for path in files:
         path = Path(path)
-        if path.name.lower() == "tqt_named.csv":
+        if is_apt_tracking_file(path):
             for part in (path.parent.name, path.parent.parent.name):
                 m = _DIR_CHUNK_RE.search(part)
                 if m:

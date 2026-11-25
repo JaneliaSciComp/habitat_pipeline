@@ -18,18 +18,21 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from video.territory_behavior import arena_bounds, chunk_summary, day_screen, tracks_from_centers  # noqa: E402
-from video.tracking_import import (_APT_COLUMN_RE, _read_tracking_csv, parse_apt_tracking,  # noqa: E402
-                                   read_tracking_header)
+from ingestion.data_paths import apt_chunk_tracking_file  # noqa: E402
+from video.tracking_import import load_tracking_data  # noqa: E402
 
 
 def read_centers_with_time(path):
-    """Long (timestamp, object_name, center_x, center_y); read_tracking_centers drops the timestamp."""
-    path = Path(path)
-    header = read_tracking_header(path)
-    cols = ['timestamp'] + [c for c in header if _APT_COLUMN_RE.match(c)
-                            and _APT_COLUMN_RE.match(c).group('field') == 'center']
-    parsed = parse_apt_tracking(_read_tracking_csv(path, usecols=cols))
-    return pd.concat([o.assign(object_name=n) for n, o in parsed.items()], ignore_index=True)
+    """Long (timestamp, object_name, center_x, center_y); read_tracking_centers drops the timestamp.
+
+    Goes through :func:`load_tracking_data`, so either APT export works; the
+    keypoints export gets its frame times from a ``ts.npy`` or the FERAL clock.
+    """
+    tr = load_tracking_data(Path(path))
+    if tr.timestamps is None:
+        raise ValueError(f"no frame timestamps for {path}")
+    return pd.concat([o[['timestamp', 'center_x', 'center_y']].assign(object_name=n)
+                      for n, o in tr.parsed_data.items()], ignore_index=True)
 
 ROOT = "//nearline/karpova/TervoLab/analysis/Tracking/APT/cohort7"
 
@@ -47,9 +50,9 @@ def main():
     by_date = {}
     for name in sorted(os.listdir(a.root)):
         m = re.fullmatch(r"cohort7_(\d{8})_(\d{4})", name)
-        p = os.path.join(a.root, name, "solution", "TQT_named.csv")
-        if m and os.path.exists(p):
-            by_date.setdefault(m.group(1), []).append((name, p))
+        p = apt_chunk_tracking_file(os.path.join(a.root, name)) if m else None
+        if p is not None:
+            by_date.setdefault(m.group(1), []).append((name, str(p)))
     dates = a.dates or sorted(by_date)
     print("days:", {d: len(by_date.get(d, [])) for d in dates}, flush=True)
 

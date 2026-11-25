@@ -354,7 +354,8 @@ def _make_trajectory_plotly(traj, ev_df, opp_colors, min_events, t_view_start, t
     t, x, y = traj["t"], traj["x"], traj["y"]
     in_view = (t >= t_view_start) & (t <= t_view_end)
     tv, xv, yv = t[in_view], x[in_view], y[in_view]
-    fmt = {"apt_tqt": "APT", "mask_metrics": "manual"}.get(traj["format"], traj["format"])
+    fmt = {"apt_tqt": "APT", "apt_keypoints": "APT",
+           "mask_metrics": "manual"}.get(traj["format"], traj["format"])
     if len(tv) == 0:
         fig.add_annotation(
             text=(f"{animal_id} is not tracked by {fmt} in "
@@ -1384,7 +1385,7 @@ class HabitatApp:
     def _sync_traj_sources(self):
         """Point the source toggle at ``self._traj``'s formats (default selected)."""
         formats = xc.trajectory_formats(self._traj)
-        names = {"apt_tqt": "APT", "mask_metrics": "manual"}
+        names = {"apt_tqt": "APT", "apt_keypoints": "APT", "mask_metrics": "manual"}
         options = {f"{names.get(k, k)} tracking ({len(v['t']):,} frames)": k
                    for k, v in formats.items()}
         default = (self._traj or {}).get("default") or next(iter(formats), None)

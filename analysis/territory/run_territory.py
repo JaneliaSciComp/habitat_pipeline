@@ -56,7 +56,6 @@ logger = logging.getLogger(__name__)
 
 DT = 0.5
 MAX_GAP_SEC = 1.0          # interpolate tracking onto bins only across gaps shorter than this
-APT_SUBDIR = ("solution", "TQT_named.csv")
 
 
 # ---------------------------------------------------------------------------
@@ -64,18 +63,30 @@ APT_SUBDIR = ("solution", "TQT_named.csv")
 # ---------------------------------------------------------------------------
 
 def apt_chunk_dirs(apt_root: str, date: str) -> List[Tuple[str, str]]:
-    """``[(chunk_id, TQT_named.csv path)]`` for every APT chunk of ``date``."""
+    """``[(chunk_id, APT tracking file)]`` for every APT chunk of ``date``.
+
+    The file is ``solution_keypoints.csv`` (current export) or, failing that,
+    ``solution/TQT_named.csv``; see :func:`ingestion.data_paths.apt_chunk_tracking_file`.
+    """
+    from ingestion.data_paths import apt_chunk_tracking_file
     out = []
     for name in sorted(os.listdir(apt_root)):
         if name.startswith(f"cohort7_{date}_") and name.count("_") == 2:
-            p = os.path.join(apt_root, name, *APT_SUBDIR)
-            if os.path.exists(p):
-                out.append((name, p))
+            p = apt_chunk_tracking_file(os.path.join(apt_root, name))
+            if p is not None:
+                out.append((name, str(p)))
     return out
 
 
 def chunk_ephys_window(path: str, sync) -> Tuple[float, float]:
-    ts = pd.read_csv(path, usecols=["timestamp"], encoding="utf-8-sig")["timestamp"].to_numpy()
+    """Ephys-clock span of a chunk's frame timestamps.
+
+    A FERAL-anchored clock (``ingestion/apt_frame_clock.py``) covers a full
+    72000-frame chunk, so for those chunks the end can be up to ~0.75 s past
+    the last tracked frame.
+    """
+    from video.tracking_import import load_timestamps
+    ts = load_timestamps(path)
     e = sync.convert_behavior_to_ephys(np.array([ts.min(), ts.max()]) / 1e9)
     return float(e[0]), float(e[1])
 
